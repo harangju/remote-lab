@@ -169,6 +169,184 @@ ${body}
 </html>`;
 }
 
+function chatPage(url: URL): string {
+  const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${wsProtocol}//${url.host}/ws`;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --bg: #fff; --fg: #1a1a1a; --fg-muted: #555; --border: #d0d7de;
+    --code-bg: #f5f5f5; --user-bg: #e3f2fd; --bot-bg: #f5f5f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #c9d1d9; --fg-muted: #8b949e; --border: #30363d;
+      --code-bg: #161b22; --user-bg: #1a3a5c; --bot-bg: #161b22;
+    }
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 1rem; line-height: 1.6; color: var(--fg); background: var(--bg);
+    display: flex; flex-direction: column;
+  }
+  #messages {
+    flex: 1; overflow-y: auto; padding: 1rem;
+    max-width: 46rem; width: 100%; margin: 0 auto;
+  }
+  .msg { margin-bottom: 1rem; padding: 0.6rem 1rem; border-radius: 8px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { background: var(--user-bg); margin-left: 3rem; }
+  .msg.bot { background: var(--bot-bg); margin-right: 3rem; }
+  .msg.error { background: #5c1a1a; color: #f8d7da; }
+  .msg pre { background: var(--code-bg); padding: 0.5rem; border-radius: 4px; overflow-x: auto; font-size: 0.875rem; }
+  .msg code { background: var(--code-bg); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+  .msg pre code { background: none; padding: 0; }
+  .tool { font-size: 0.85rem; color: var(--fg-muted); padding: 0.3rem 1rem; margin-bottom: 0.25rem; }
+  .meta { font-size: 0.75rem; color: var(--fg-muted); text-align: right; margin-top: 0.25rem; }
+  #input-area {
+    border-top: 1px solid var(--border); padding: 0.75rem 1rem;
+    max-width: 46rem; width: 100%; margin: 0 auto;
+    display: flex; gap: 0.5rem;
+  }
+  #input {
+    flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); color: var(--fg);
+    font-family: inherit; font-size: 1rem; resize: none;
+    min-height: 2.5rem; max-height: 8rem;
+  }
+  #input:focus { outline: none; border-color: #58a6ff; }
+  #send {
+    padding: 0.5rem 1rem; border: none; border-radius: 6px;
+    background: #238636; color: #fff; font-size: 1rem; cursor: pointer;
+    align-self: flex-end;
+  }
+  #send:hover { background: #2ea043; }
+  #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  #status { font-size: 0.75rem; color: var(--fg-muted); padding: 0.25rem 1rem; text-align: center; }
+</style>
+</head>
+<body>
+<div id="status">Connecting...</div>
+<div id="messages"></div>
+<div id="input-area">
+  <textarea id="input" rows="1" placeholder="Send a message..." disabled></textarea>
+  <button id="send" disabled>Send</button>
+</div>
+<script>
+const messages = document.getElementById("messages");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const status = document.getElementById("status");
+
+let ws;
+let currentBot = null;
+let busy = false;
+
+function connect() {
+  status.textContent = "Connecting...";
+  ws = new WebSocket("${wsUrl}");
+
+  ws.onopen = () => {
+    status.textContent = "Connected";
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+  };
+
+  ws.onmessage = (e) => {
+    const evt = JSON.parse(e.data);
+    switch (evt.type) {
+      case "text-delta":
+        if (!currentBot) {
+          currentBot = document.createElement("div");
+          currentBot.className = "msg bot";
+          messages.appendChild(currentBot);
+        }
+        currentBot.textContent += evt.delta;
+        messages.scrollTop = messages.scrollHeight;
+        break;
+      case "tool-use":
+        const tool = document.createElement("div");
+        tool.className = "tool";
+        tool.textContent = "\\u{1F527} " + evt.name;
+        messages.appendChild(tool);
+        messages.scrollTop = messages.scrollHeight;
+        break;
+      case "done":
+        if (currentBot) {
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.textContent = "$" + evt.cost.toFixed(4) + " \\u00b7 " + evt.turns + " turn" + (evt.turns !== 1 ? "s" : "");
+          currentBot.appendChild(meta);
+        }
+        currentBot = null;
+        busy = false;
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+        break;
+      case "error":
+        const err = document.createElement("div");
+        err.className = "msg error";
+        err.textContent = evt.message;
+        messages.appendChild(err);
+        currentBot = null;
+        busy = false;
+        input.disabled = false;
+        sendBtn.disabled = false;
+        break;
+    }
+  };
+
+  ws.onclose = () => {
+    status.textContent = "Disconnected. Reconnecting...";
+    input.disabled = true;
+    sendBtn.disabled = true;
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function send() {
+  const text = input.value.trim();
+  if (!text || busy) return;
+
+  const userMsg = document.createElement("div");
+  userMsg.className = "msg user";
+  userMsg.textContent = text;
+  messages.appendChild(userMsg);
+  messages.scrollTop = messages.scrollHeight;
+
+  ws.send(text);
+  input.value = "";
+  input.style.height = "auto";
+  busy = true;
+  input.disabled = true;
+  sendBtn.disabled = true;
+}
+
+sendBtn.onclick = send;
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 128) + "px";
+});
+
+connect();
+</script>
+</body>
+</html>`;
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -271,14 +449,9 @@ async function handler(req: Request, server: ReturnType<typeof Bun.serve>): Prom
   const url = new URL(req.url);
   const path = decodeURIComponent(url.pathname);
 
-  // --- WebSocket upgrade ---
-  if (path === "/ws") {
-    const sessionId = url.searchParams.get("session") ?? undefined;
-    const upgraded = server.upgrade<WSData>(req, { data: { sessionId } });
-    if (!upgraded) {
-      return new Response("WebSocket upgrade failed", { status: 400 });
-    }
-    return undefined as unknown as Response;
+  // --- WebSocket + Chat disabled until auth is implemented ---
+  if (path === "/ws" || path === "/chat") {
+    return new Response("Not found", { status: 404 });
   }
 
   const rules = await loadAccess();
