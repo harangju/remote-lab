@@ -1,6 +1,8 @@
 import { readdir, readFile, stat, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { Marked } from "marked";
+import { chat } from "./claude";
+import type { ServerWebSocket } from "bun";
 
 const DOCS_DIR = join(import.meta.dir, "docs");
 const PORT = 3000;
@@ -254,12 +256,30 @@ function formatDate(d: Date): string {
 }
 
 // ---------------------------------------------------------------------------
+// WebSocket types
+// ---------------------------------------------------------------------------
+
+interface WSData {
+  sessionId?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Request handler
 // ---------------------------------------------------------------------------
 
-async function handler(req: Request): Promise<Response> {
+async function handler(req: Request, server: ReturnType<typeof Bun.serve>): Promise<Response> {
   const url = new URL(req.url);
   const path = decodeURIComponent(url.pathname);
+
+  // --- WebSocket upgrade ---
+  if (path === "/ws") {
+    const sessionId = url.searchParams.get("session") ?? undefined;
+    const upgraded = server.upgrade<WSData>(req, { data: { sessionId } });
+    if (!upgraded) {
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+    return undefined as unknown as Response;
+  }
 
   const rules = await loadAccess();
   const token = getToken(req, url);
@@ -320,9 +340,35 @@ async function handler(req: Request): Promise<Response> {
 // Start
 // ---------------------------------------------------------------------------
 
-Bun.serve({
+Bun.serve<WSData>({
   port: PORT,
   fetch: handler,
+  websocket: {
+    open(ws) {
+      console.log(`ws: connected${ws.data.sessionId ? ` (resuming ${ws.data.sessionId})` : ""}`);
+    },
+    async message(ws, raw) {
+      const prompt = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+      try {
+        for await (const event of chat(prompt, ws.data.sessionId)) {
+          ws.sendText(JSON.stringify(event));
+          // Capture session ID for subsequent turns
+          if (event.type === "done") {
+            ws.data.sessionId = event.session_id;
+          }
+        }
+      } catch (err) {
+        ws.sendText(JSON.stringify({
+          type: "error",
+          message: err instanceof Error ? err.message : "Unknown error",
+          recoverable: false,
+        }));
+      }
+    },
+    close(ws) {
+      console.log(`ws: disconnected${ws.data.sessionId ? ` (session ${ws.data.sessionId})` : ""}`);
+    },
+  },
 });
 
 console.log(`md-server listening on http://localhost:${PORT}`);
