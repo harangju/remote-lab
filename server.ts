@@ -141,18 +141,15 @@ function layout(title: string, body: string): string {
   mjx-container { overflow-x: auto; overflow-y: hidden; }
 </style>
 
-<!-- MathJax v3: inline $ and display $$ -->
+<!-- MathJax v3: $..$ inline, $$...$$ display -->
 <script>
   window.MathJax = {
     tex: {
-      inlineMath:  [['\\(', '\\)']],
+      inlineMath:  [['$', '$']],
       displayMath: [['$$', '$$']],
     },
     options: {
       skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
-    },
-    startup: {
-      pageReady: () => MathJax.startup.defaultPageReady(),
     },
   };
 </script>
