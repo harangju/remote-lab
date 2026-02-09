@@ -145,7 +145,7 @@ function layout(title: string, body: string): string {
 <script>
   window.MathJax = {
     tex: {
-      inlineMath:  [['$', '$']],
+      inlineMath:  [['\\(', '\\)']],
       displayMath: [['$$', '$$']],
     },
     options: {
