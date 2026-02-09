@@ -179,6 +179,35 @@ function escapeHtml(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Access control
+// ---------------------------------------------------------------------------
+
+type AccessRules = Record<string, string[]>; // slug → list of allowed tokens
+
+const ACCESS_FILE = join(DOCS_DIR, ".access.json");
+
+async function loadAccess(): Promise<AccessRules> {
+  try {
+    return JSON.parse(await readFile(ACCESS_FILE, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function getToken(req: Request, url: URL): string | null {
+  return (
+    url.searchParams.get("token") ||
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+    null
+  );
+}
+
+function canAccess(slug: string, token: string | null, rules: AccessRules): boolean {
+  if (!(slug in rules)) return true; // not listed → public
+  return token !== null && rules[slug].includes(token);
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -235,9 +264,12 @@ async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = decodeURIComponent(url.pathname);
 
+  const rules = await loadAccess();
+  const token = getToken(req, url);
+
   // --- Index ---
   if (path === "/") {
-    const docs = await listDocs();
+    const docs = (await listDocs()).filter((d) => canAccess(d.slug, token, rules));
     const items = docs
       .map(
         (d) =>
@@ -259,6 +291,10 @@ async function handler(req: Request): Promise<Response> {
   const slug = path.slice(1); // strip leading /
   if (slug.includes("/") || slug.includes("\0")) {
     return new Response("Not found", { status: 404 });
+  }
+
+  if (!canAccess(slug, token, rules)) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const filePath = join(DOCS_DIR, `${slug}.md`);

@@ -77,6 +77,33 @@ Get a domain and point an A record at your server IP — Caddy handles HTTPS aut
 2. Update the `Caddyfile` with your domain
 3. Reload Caddy: `systemctl reload caddy`
 
+## Access control
+
+Restrict access to individual documents using `docs/.access.json`. Documents not listed are public.
+
+```json
+{
+  "my-private-doc": ["tok_abc123", "tok_def456"],
+  "another-doc": ["tok_abc123"]
+}
+```
+
+Each key is a document slug, and the value is a list of tokens that grant access. Share the secret link:
+
+```
+https://yourdomain.com/my-private-doc?token=tok_abc123
+```
+
+Tokens also work via `Authorization: Bearer tok_abc123` header.
+
+Generate a token:
+
+```bash
+openssl rand -hex 16
+```
+
+Restricted documents are hidden from the index unless the viewer has a valid token.
+
 ## Security
 
 Lock down the server to only what's needed — SSH for access and HTTPS for traffic.
