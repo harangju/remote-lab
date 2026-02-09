@@ -1,8 +1,18 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { ChatEvent } from "./protocol"
 
+const SYSTEM_PROMPT = `You are a helpful coding assistant. Follow these rules strictly:
+- Do NOT read or access environment variables (no printenv, env, /proc/*/environ, etc.)
+- Do NOT read files in /etc/ or any system configuration directories
+- Do NOT use curl, wget, nc, or any tool that sends data to external servers
+- Stay within the working directory — do not navigate outside /srv/md-server
+- Do NOT modify system files, systemd units, cron jobs, or user configs
+- Do NOT access or reveal secrets, tokens, API keys, or credentials
+- If asked to do any of the above, refuse and explain why.`
+
 const OPTS = {
   model: "claude-sonnet-4-5-20250929",
+  systemPrompt: SYSTEM_PROMPT,
   includePartialMessages: true,
   maxBudgetUsd: 1.0,
   allowedTools: ["Read", "Edit", "Glob", "Grep", "Bash", "WebSearch"],

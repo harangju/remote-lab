@@ -140,7 +140,10 @@ systemctl daemon-reload && systemctl restart md-server
 - Server validates with constant-time comparison (`crypto.timingSafeEqual`)
 - Invalid token closes the connection with code 4401
 - `ALLOWED_ORIGIN` rejects cross-origin WebSocket upgrades (prevents CSWSH)
+- Only one WebSocket connection at a time (429 if already active)
 - Each query is capped at `$1.00` via `maxBudgetUsd`
+- System prompt guardrails prevent the agent from reading env vars, `/etc/`, or making external network requests
+- Symlinks in `docs/` are validated — resolved path must stay inside the docs directory
 
 ## Security
 

@@ -442,6 +442,8 @@ async function listDocs(): Promise<DocEntry[]> {
     try {
       // realpath follows symlinks; stat the resolved path
       const resolved = await realpath(fullPath);
+      const docsReal = await realpath(DOCS_DIR);
+      if (!resolved.startsWith(docsReal + "/")) continue;
       const st = await stat(resolved);
       if (!st.isFile()) continue;
       docs.push({
@@ -475,6 +477,8 @@ interface WSData {
   authenticated: boolean;
 }
 
+let activeWsCount = 0;
+
 // ---------------------------------------------------------------------------
 // Request handler
 // ---------------------------------------------------------------------------
@@ -492,6 +496,10 @@ async function handler(req: Request, server: ReturnType<typeof Bun.serve>): Prom
     const origin = req.headers.get("origin");
     if (ALLOWED_ORIGIN && origin && origin !== ALLOWED_ORIGIN) {
       return new Response("Forbidden", { status: 403 });
+    }
+    // Concurrency limit (#9)
+    if (activeWsCount >= 1) {
+      return new Response("Too many connections", { status: 429 });
     }
     const ok = server.upgrade(req, { data: { authenticated: false } });
     if (!ok) return new Response("WebSocket upgrade failed", { status: 400 });
@@ -545,8 +553,10 @@ async function handler(req: Request, server: ReturnType<typeof Bun.serve>): Prom
 
   let md: string;
   try {
-    // realpath follows symlinks
+    // realpath follows symlinks — validate it's still inside docs/
     const resolved = await realpath(filePath);
+    const docsReal = await realpath(DOCS_DIR);
+    if (!resolved.startsWith(docsReal + "/")) throw new Error("outside docs");
     md = await readFile(resolved, "utf-8");
   } catch {
     return new Response(layout("Not Found", `<h1>404</h1><p>File not found.</p><a class="back" href="/">&larr; Back</a>`), {
@@ -572,7 +582,8 @@ Bun.serve<WSData>({
   fetch: handler,
   websocket: {
     open(ws) {
-      console.log(`ws: connected${ws.data.sessionId ? ` (resuming ${ws.data.sessionId})` : ""}`);
+      activeWsCount++;
+      console.log(`ws: connected (active: ${activeWsCount})`);
     },
     async message(ws, raw) {
       const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
@@ -609,7 +620,8 @@ Bun.serve<WSData>({
       }
     },
     close(ws) {
-      console.log(`ws: disconnected${ws.data.sessionId ? ` (session ${ws.data.sessionId})` : ""}`);
+      activeWsCount--;
+      console.log(`ws: disconnected (active: ${activeWsCount})`);
     },
   },
 });
