@@ -539,6 +539,32 @@ async function handler(req: Request, server: ReturnType<typeof Bun.serve>): Prom
     });
   }
 
+  // --- Static assets (images) from docs/ ---
+  const ASSET_EXT: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+  };
+  const assetName = path.slice(1);
+  const ext = assetName.includes(".") ? assetName.slice(assetName.lastIndexOf(".")).toLowerCase() : "";
+  if (ext in ASSET_EXT && !assetName.includes("/") && !assetName.includes("\0")) {
+    const assetPath = join(DOCS_DIR, assetName);
+    try {
+      const resolved = await realpath(assetPath);
+      const docsReal = await realpath(DOCS_DIR);
+      if (!resolved.startsWith(docsReal + "/")) throw new Error("outside docs");
+      const data = await readFile(resolved);
+      return new Response(data, {
+        headers: { "Content-Type": ASSET_EXT[ext], "Cache-Control": "public, max-age=3600" },
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
+  }
+
   // --- Document page ---
   const slug = path.slice(1); // strip leading /
   if (slug.includes("/") || slug.includes("\0")) {
