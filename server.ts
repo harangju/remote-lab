@@ -1,11 +1,22 @@
 import { readdir, readFile, stat, realpath } from "node:fs/promises";
 import { join } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import { Marked } from "marked";
 import { chat } from "./claude";
 import type { ServerWebSocket } from "bun";
 
 const DOCS_DIR = join(import.meta.dir, "docs");
 const PORT = 3000;
+const WS_TOKEN = process.env.WS_TOKEN;
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
+
+function checkToken(input: string): boolean {
+  if (!WS_TOKEN) return false;
+  const a = Buffer.from(input);
+  const b = Buffer.from(WS_TOKEN);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 const marked = new Marked({
   breaks: true,
@@ -169,9 +180,7 @@ ${body}
 </html>`;
 }
 
-function chatPage(url: URL): string {
-  const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProtocol}//${url.host}/ws`;
+function chatPage(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -247,21 +256,38 @@ const status = document.getElementById("status");
 let ws;
 let currentBot = null;
 let busy = false;
+const TOKEN_KEY = "ws_token";
+
+function getToken() {
+  let t = localStorage.getItem(TOKEN_KEY);
+  if (!t) {
+    t = prompt("Enter access token:");
+    if (t) localStorage.setItem(TOKEN_KEY, t);
+  }
+  return t;
+}
 
 function connect() {
+  const token = getToken();
+  if (!token) { status.textContent = "No token provided"; return; }
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
   status.textContent = "Connecting...";
-  ws = new WebSocket("${wsUrl}");
+  ws = new WebSocket(proto + "//" + location.host + "/ws");
 
   ws.onopen = () => {
-    status.textContent = "Connected";
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    ws.send(JSON.stringify({ type: "auth", token }));
   };
 
   ws.onmessage = (e) => {
     const evt = JSON.parse(e.data);
     switch (evt.type) {
+      case "auth-ok":
+        status.textContent = "Connected";
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+        break;
       case "text-delta":
         if (!currentBot) {
           currentBot = document.createElement("div");
@@ -271,13 +297,14 @@ function connect() {
         currentBot.textContent += evt.delta;
         messages.scrollTop = messages.scrollHeight;
         break;
-      case "tool-use":
+      case "tool-use": {
         const tool = document.createElement("div");
         tool.className = "tool";
         tool.textContent = "\\u{1F527} " + evt.name;
         messages.appendChild(tool);
         messages.scrollTop = messages.scrollHeight;
         break;
+      }
       case "done":
         if (currentBot) {
           const meta = document.createElement("div");
@@ -291,7 +318,7 @@ function connect() {
         sendBtn.disabled = false;
         input.focus();
         break;
-      case "error":
+      case "error": {
         const err = document.createElement("div");
         err.className = "msg error";
         err.textContent = evt.message;
@@ -301,13 +328,19 @@ function connect() {
         input.disabled = false;
         sendBtn.disabled = false;
         break;
+      }
     }
   };
 
-  ws.onclose = () => {
-    status.textContent = "Disconnected. Reconnecting...";
+  ws.onclose = (ev) => {
     input.disabled = true;
     sendBtn.disabled = true;
+    if (ev.code === 4401) {
+      localStorage.removeItem(TOKEN_KEY);
+      status.textContent = "Invalid token. Reload to retry.";
+      return;
+    }
+    status.textContent = "Disconnected. Reconnecting...";
     setTimeout(connect, 2000);
   };
 
@@ -439,6 +472,7 @@ function formatDate(d: Date): string {
 
 interface WSData {
   sessionId?: string;
+  authenticated: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -449,9 +483,29 @@ async function handler(req: Request, server: ReturnType<typeof Bun.serve>): Prom
   const url = new URL(req.url);
   const path = decodeURIComponent(url.pathname);
 
-  // --- WebSocket + Chat disabled until auth is implemented ---
-  if (path === "/ws" || path === "/chat") {
-    return new Response("Not found", { status: 404 });
+  // --- WebSocket upgrade ---
+  if (path === "/ws") {
+    if (!WS_TOKEN) {
+      return new Response("WS auth not configured", { status: 503 });
+    }
+    // Origin check (#7)
+    const origin = req.headers.get("origin");
+    if (ALLOWED_ORIGIN && origin && origin !== ALLOWED_ORIGIN) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    const ok = server.upgrade(req, { data: { authenticated: false } });
+    if (!ok) return new Response("WebSocket upgrade failed", { status: 400 });
+    return undefined as unknown as Response;
+  }
+
+  // --- Chat UI ---
+  if (path === "/chat") {
+    if (!WS_TOKEN) {
+      return new Response("Chat not configured", { status: 503 });
+    }
+    return new Response(chatPage(), {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   }
 
   const rules = await loadAccess();
@@ -521,11 +575,27 @@ Bun.serve<WSData>({
       console.log(`ws: connected${ws.data.sessionId ? ` (resuming ${ws.data.sessionId})` : ""}`);
     },
     async message(ws, raw) {
-      const prompt = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+      const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+
+      // First message must be auth
+      if (!ws.data.authenticated) {
+        try {
+          const msg = JSON.parse(text);
+          if (msg.type === "auth" && typeof msg.token === "string" && checkToken(msg.token)) {
+            ws.data.authenticated = true;
+            ws.sendText(JSON.stringify({ type: "auth-ok" }));
+            console.log("ws: authenticated");
+            return;
+          }
+        } catch {}
+        console.log("ws: auth failed, closing");
+        ws.close(4401, "Invalid token");
+        return;
+      }
+
       try {
-        for await (const event of chat(prompt, ws.data.sessionId)) {
+        for await (const event of chat(text, ws.data.sessionId)) {
           ws.sendText(JSON.stringify(event));
-          // Capture session ID for subsequent turns
           if (event.type === "done") {
             ws.data.sessionId = event.session_id;
           }

@@ -18,6 +18,8 @@ browser → Caddy (HTTPS, port 443) → Bun server (port 3000) → reads .md fil
 |-------|-------------|
 | `/` | Lists all `.md` files in `docs/`, sorted by last modified |
 | `/:slug` | Renders `docs/{slug}.md` as HTML |
+| `/chat` | Chat UI (requires `WS_TOKEN` env var) |
+| `/ws` | WebSocket endpoint for Claude chat (requires auth) |
 
 ## What's in the HTML template
 
@@ -104,6 +106,42 @@ openssl rand -hex 16
 
 Restricted documents are hidden from the index unless the viewer has a valid token.
 
+## Chat
+
+The `/chat` route serves a browser-based chat UI that connects to Claude via WebSocket.
+
+### Setup
+
+1. Generate a token:
+
+```bash
+openssl rand -hex 32
+```
+
+2. Add to the systemd service file (`/etc/systemd/system/md-server.service`) under `[Service]`:
+
+```
+Environment=WS_TOKEN=<your-generated-token>
+Environment=ALLOWED_ORIGIN=https://lab.harangju.com
+```
+
+3. Restart:
+
+```bash
+systemctl daemon-reload && systemctl restart md-server
+```
+
+4. Visit `https://lab.harangju.com/chat` and enter the token when prompted. It's saved in `localStorage` for subsequent visits.
+
+### How auth works
+
+- `/chat` and `/ws` return 503 if `WS_TOKEN` is not set
+- On WebSocket connect, the client sends `{"type":"auth","token":"..."}` as the first message
+- Server validates with constant-time comparison (`crypto.timingSafeEqual`)
+- Invalid token closes the connection with code 4401
+- `ALLOWED_ORIGIN` rejects cross-origin WebSocket upgrades (prevents CSWSH)
+- Each query is capped at `$1.00` via `maxBudgetUsd`
+
 ## Security
 
 Lock down the server to only what's needed — SSH for access and HTTPS for traffic.
@@ -119,5 +157,5 @@ apt install fail2ban         # auto-bans IPs after repeated failed SSH attempts
 ## Dependencies
 
 - **Runtime:** [Bun](https://bun.sh)
-- **npm:** `marked` (markdown → HTML)
+- **npm:** `marked` (markdown → HTML), `@anthropic-ai/claude-agent-sdk` (Claude chat)
 - **System:** `caddy` (installed via apt from official repo)

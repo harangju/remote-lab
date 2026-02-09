@@ -4,6 +4,7 @@ import type { ChatEvent } from "./protocol"
 const OPTS = {
   model: "claude-sonnet-4-5-20250929",
   includePartialMessages: true,
+  maxBudgetUsd: 1.0,
   allowedTools: ["Read", "Edit", "Glob", "Grep", "Bash", "WebSearch"],
   permissionMode: "acceptEdits" as const,
 }
