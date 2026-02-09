@@ -93,7 +93,7 @@ Restrict access to individual documents using `docs/.access.json`. Documents not
 Each key is a document slug, and the value is a list of tokens that grant access. Share the secret link:
 
 ```
-https://yourdomain.com/my-private-doc?token=tok_abc123
+https://yourdomain.com/my-private-doc?t=tok_abc123
 ```
 
 Tokens also work via `Authorization: Bearer tok_abc123` header.

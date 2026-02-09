@@ -406,7 +406,7 @@ async function loadAccess(): Promise<AccessRules> {
 
 function getToken(req: Request, url: URL): string | null {
   return (
-    url.searchParams.get("token") ||
+    url.searchParams.get("t") ||
     req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
     null
   );
