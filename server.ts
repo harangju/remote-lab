@@ -548,10 +548,11 @@ async function handler(req: Request, server: ReturnType<typeof Bun.serve>): Prom
     ".gif": "image/gif",
     ".svg": "image/svg+xml",
     ".webp": "image/webp",
+    ".pdf": "application/pdf",
   };
   const assetName = path.slice(1);
   const ext = assetName.includes(".") ? assetName.slice(assetName.lastIndexOf(".")).toLowerCase() : "";
-  if (ext in ASSET_EXT && !assetName.includes("/") && !assetName.includes("\0")) {
+  if (ext in ASSET_EXT && !assetName.includes("\0")) {
     const assetPath = join(DOCS_DIR, assetName);
     try {
       const resolved = await realpath(assetPath);
