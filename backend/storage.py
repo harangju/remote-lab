@@ -189,11 +189,14 @@ def get_conversation(convo_id: str) -> ConvoDetail | None:
 def delete_conversation(convo_id: str) -> bool:
     meta_p = _meta_path(convo_id)
     msg_p = _messages_path(convo_id)
+    agent_p = _agent_history_path(convo_id)
     if not meta_p.exists():
         return False
     meta_p.unlink()
     if msg_p.exists():
         msg_p.unlink()
+    if agent_p.exists():
+        agent_p.unlink()
     return True
 
 
@@ -223,6 +226,24 @@ def append_message(convo_id: str, event: dict) -> None:
     if meta:
         meta.updated_at = _now()
         _write_meta(meta)
+
+
+def _agent_history_path(convo_id: str) -> Path:
+    return CONVOS_DIR / f"{convo_id}.agent.json"
+
+
+def save_agent_history(convo_id: str, data: bytes) -> None:
+    """Save serialized PydanticAI message history."""
+    _ensure_dirs()
+    _agent_history_path(convo_id).write_bytes(data)
+
+
+def load_agent_history(convo_id: str) -> bytes | None:
+    """Load serialized PydanticAI message history, if it exists."""
+    p = _agent_history_path(convo_id)
+    if not p.exists():
+        return None
+    return p.read_bytes()
 
 
 def read_messages(convo_id: str) -> list[dict]:

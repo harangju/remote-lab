@@ -18,18 +18,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    ModelMessagesTypeAdapter,
     TextPart,
     ToolCallPart,
-    ToolReturnPart,
-    ThinkingPart,
-    PartStartEvent,
-    PartDeltaEvent,
-    TextPartDelta,
-    ThinkingPartDelta,
 )
 
 from backend.agents import agent, USAGE_LIMITS, get_context_limit
-from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Error
+from backend.compact import compact, needs_compaction
+from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Compacted, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoDetail,
@@ -440,8 +436,26 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         await ws.send_text(AuthOk().model_dump_json())
         print(f"ws[{convo_id[:8]}]: authenticated, project={project.name}, path={project.path}")
 
-        # ----- Load existing message history from JSONL -----
+        # ----- Load existing message history -----
         message_history: list = []
+        last_context_tokens = 0
+
+        # Restore PydanticAI agent history if available
+        agent_history_bytes = storage.load_agent_history(convo_id)
+        if agent_history_bytes:
+            try:
+                message_history = ModelMessagesTypeAdapter.validate_json(agent_history_bytes)
+                # Restore last known context tokens from persisted messages
+                persisted_msgs = storage.read_messages(convo_id)
+                for msg in reversed(persisted_msgs):
+                    if msg.get("role") == "assistant" and "context_tokens" in msg:
+                        last_context_tokens = msg["context_tokens"]
+                        break
+                print(f"ws[{convo_id[:8]}]: restored {len(message_history)} agent messages")
+            except Exception as e:
+                print(f"ws[{convo_id[:8]}]: failed to restore agent history: {e}")
+                message_history = []
+
         persisted = storage.read_messages(convo_id)
         # Send persisted messages to the client so reconnecting picks up
         # where it left off (client can render them).
@@ -451,6 +465,38 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         # ----- Chat loop -----
         while True:
             prompt = await ws.receive_text()
+
+            # Handle /compact command
+            if prompt.strip() == "/compact":
+                if message_history:
+                    old_tokens = last_context_tokens
+                    message_history, summary = await compact(message_history)
+                    if summary:
+                        est_tokens = sum(len(str(m)) for m in message_history) // 4
+                        last_context_tokens = est_tokens
+                        storage.append_message(convo_id, {
+                            "role": "assistant",
+                            "content": f"Context compacted: {old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
+                            "compact_old_tokens": old_tokens,
+                            "compact_new_tokens": est_tokens,
+                            "timestamp": _iso_now(),
+                        })
+                        storage.save_agent_history(
+                            convo_id,
+                            ModelMessagesTypeAdapter.dump_json(message_history),
+                        )
+                        await ws.send_text(
+                            Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
+                        )
+                    else:
+                        await ws.send_text(
+                            Error(message="Not enough history to compact", recoverable=True).model_dump_json()
+                        )
+                else:
+                    await ws.send_text(
+                        Error(message="No message history to compact", recoverable=True).model_dump_json()
+                    )
+                continue
 
             # Persist the user message
             storage.append_message(convo_id, {
@@ -462,6 +508,28 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             # Mark conversation as running
             storage.update_conversation_status(convo_id, ConvoStatus.running)
 
+            # Auto-compact if over budget
+            if message_history and needs_compaction(last_context_tokens):
+                old_tokens = last_context_tokens
+                message_history, summary = await compact(message_history)
+                if summary:
+                    est_tokens = sum(len(str(m)) for m in message_history) // 4
+                    storage.append_message(convo_id, {
+                        "role": "assistant",
+                        "content": f"Context auto-compacted: {old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
+                        "compact_old_tokens": old_tokens,
+                        "compact_new_tokens": est_tokens,
+                        "timestamp": _iso_now(),
+                    })
+                    last_context_tokens = est_tokens
+                    storage.save_agent_history(
+                        convo_id,
+                        ModelMessagesTypeAdapter.dump_json(message_history),
+                    )
+                    await ws.send_text(
+                        Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
+                    )
+
             try:
                 agent_tools.set_active_ws(ws)
                 async with agent.run_stream(
@@ -471,23 +539,10 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 ) as result:
                     full_text = ""
 
-                    # Stream structured events (thinking, text, tool calls)
-                    agent_stream = result._stream_response
-                    if agent_stream is not None:
-                        async for event in agent_stream:
-                            if isinstance(event, PartStartEvent):
-                                if isinstance(event.part, ThinkingPart) and event.part.content:
-                                    await ws.send_text(ThinkingDelta(delta=event.part.content).model_dump_json())
-                                elif isinstance(event.part, TextPart) and event.part.content:
-                                    full_text += event.part.content
-                                    await ws.send_text(TextDelta(delta=event.part.content).model_dump_json())
-                            elif isinstance(event, PartDeltaEvent):
-                                if isinstance(event.delta, ThinkingPartDelta):
-                                    await ws.send_text(ThinkingDelta(delta=event.delta.content_delta).model_dump_json())
-                                elif isinstance(event.delta, TextPartDelta):
-                                    full_text += event.delta.content_delta
-                                    await ws.send_text(TextDelta(delta=event.delta.content_delta).model_dump_json())
-                        await result._marked_completed(result.response)
+                    # Stream text deltas to the client
+                    async for delta in result.stream_text(delta=True):
+                        full_text += delta
+                        await ws.send_text(TextDelta(delta=delta).model_dump_json())
 
                     # Get final result for cost/turn info
                     turns = len([
@@ -512,8 +567,15 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                         "timestamp": _iso_now(),
                                     })
 
-                    # Update message history for next turn
+                    # Update message history and token tracking for next turn
                     message_history = result.all_messages()
+                    last_context_tokens = context_tokens
+
+                    # Persist agent history for session recovery
+                    storage.save_agent_history(
+                        convo_id,
+                        ModelMessagesTypeAdapter.dump_json(message_history),
+                    )
 
                     # Persist the assistant response
                     storage.append_message(convo_id, {

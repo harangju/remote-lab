@@ -307,6 +307,14 @@ export function Chat() {
           setBusy(false);
           break;
         }
+        case "compacted":
+          setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev);
+          setMessages((msgs) => [...msgs, {
+            role: "assistant" as const,
+            content: `Context compacted: ${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens`,
+          }]);
+          setBusy(false);
+          break;
         case "error":
           setError(data.message);
           setStreaming((prev) => {
@@ -336,7 +344,10 @@ export function Chat() {
     e.preventDefault();
     const text = input.trim();
     if (!text || busy || !wsRef.current) return;
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    const isCommand = text.startsWith("/");
+    if (!isCommand) {
+      setMessages((prev) => [...prev, { role: "user", content: text }]);
+    }
     setInput("");
     setBusy(true);
     setError(null);

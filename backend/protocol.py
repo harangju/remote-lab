@@ -31,6 +31,12 @@ class Done(BaseModel):
     context_limit: int = 0
 
 
+class Compacted(BaseModel):
+    type: Literal["compacted"] = "compacted"
+    old_tokens: int
+    new_tokens: int
+
+
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str
