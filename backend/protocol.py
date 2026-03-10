@@ -1,10 +1,15 @@
 from __future__ import annotations
-from typing import Literal, Union
+from typing import Literal
 from pydantic import BaseModel
 
 
 class AuthOk(BaseModel):
     type: Literal["auth-ok"] = "auth-ok"
+
+
+class ThinkingDelta(BaseModel):
+    type: Literal["thinking-delta"] = "thinking-delta"
+    delta: str
 
 
 class TextDelta(BaseModel):
@@ -18,12 +23,6 @@ class ToolUse(BaseModel):
     input: dict | str | None = None
 
 
-class ToolResult(BaseModel):
-    type: Literal["tool-result"] = "tool-result"
-    name: str
-    output: str
-
-
 class Done(BaseModel):
     type: Literal["done"] = "done"
     cost: float
@@ -34,6 +33,3 @@ class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str
     recoverable: bool = False
-
-
-ChatEvent = Union[AuthOk, TextDelta, ToolUse, ToolResult, Done, Error]

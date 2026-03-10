@@ -15,17 +15,21 @@ import markdown
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.staticfiles import StaticFiles
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
+    ThinkingPart,
+    PartStartEvent,
+    PartDeltaEvent,
+    TextPartDelta,
+    ThinkingPartDelta,
 )
 
 from backend.agents import agent, USAGE_LIMITS
-from backend.protocol import AuthOk, TextDelta, ToolUse, Done, Error
+from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoDetail,
@@ -136,10 +140,7 @@ app.include_router(api)
 # Static files (chat UI)
 # ---------------------------------------------------------------------------
 
-STATIC_DIR = Path(__file__).parent.parent / "static"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend" / "dist"
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -254,7 +255,6 @@ def _layout(title: str, body: str) -> str:
 
 
 def _format_date(mtime: float) -> str:
-    from datetime import datetime
     d = datetime.fromtimestamp(mtime)
     return d.strftime("%b %d, %Y")
 
@@ -311,18 +311,16 @@ async def index(request: Request):
 async def chat_page(rest: str = ""):
     if not WS_TOKEN:
         return Response("Chat not configured", status_code=503)
-    # Serve built React SPA if available, otherwise fall back to old static chat
-    if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
-        # Serve static assets from dist/ (JS, CSS)
-        if rest and "." in rest:
-            asset = FRONTEND_DIR / rest
-            if asset.exists() and asset.is_file():
-                suffix = asset.suffix.lower()
-                media_types = {".js": "application/javascript", ".css": "text/css", ".map": "application/json"}
-                return Response(asset.read_bytes(), media_type=media_types.get(suffix, "application/octet-stream"))
-        return HTMLResponse((FRONTEND_DIR / "index.html").read_text())
-    html = (STATIC_DIR / "index.html").read_text()
-    return HTMLResponse(html)
+    if not FRONTEND_DIR.exists() or not (FRONTEND_DIR / "index.html").exists():
+        return Response("Frontend not built. Run: cd frontend && bun run build", status_code=503)
+    # Serve static assets from dist/ (JS, CSS)
+    if rest and "." in rest:
+        asset = FRONTEND_DIR / rest
+        if asset.exists() and asset.is_file():
+            suffix = asset.suffix.lower()
+            media_types = {".js": "application/javascript", ".css": "text/css", ".map": "application/json"}
+            return Response(asset.read_bytes(), media_type=media_types.get(suffix, "application/octet-stream"))
+    return HTMLResponse((FRONTEND_DIR / "index.html").read_text())
 
 
 # Static assets from docs/
@@ -373,97 +371,6 @@ async def doc_or_asset(path: str, request: Request):
 
 # ---------------------------------------------------------------------------
 # WebSocket chat
-# ---------------------------------------------------------------------------
-
-
-@app.websocket("/ws")
-async def ws_chat(ws: WebSocket):
-    global active_ws
-
-    # Origin check
-    origin = ws.headers.get("origin", "")
-    if ALLOWED_ORIGIN and origin and origin != ALLOWED_ORIGIN:
-        await ws.close(code=4403, reason="Forbidden")
-        return
-
-    # Concurrency limit
-    if active_ws >= 1:
-        await ws.close(code=4429, reason="Too many connections")
-        return
-
-    await ws.accept()
-    active_ws += 1
-    print(f"ws: connected (active: {active_ws})")
-
-    try:
-        # Auth handshake
-        raw = await ws.receive_text()
-        try:
-            msg = json.loads(raw)
-            if msg.get("type") != "auth" or not check_token(msg.get("token", "")):
-                raise ValueError("bad auth")
-        except Exception:
-            print("ws: auth failed, closing")
-            await ws.send_text(Error(message="Invalid token").model_dump_json())
-            await ws.close(code=4401, reason="Invalid token")
-            return
-
-        await ws.send_text(AuthOk().model_dump_json())
-        print("ws: authenticated")
-
-        # Message history for multi-turn conversation
-        message_history: list = []
-
-        # Chat loop
-        while True:
-            prompt = await ws.receive_text()
-
-            try:
-                async with agent.run_stream(
-                    prompt,
-                    message_history=message_history if message_history else None,
-                    usage_limits=USAGE_LIMITS,
-                ) as result:
-                    # Stream text deltas
-                    async for text in result.stream_text(delta=True):
-                        await ws.send_text(TextDelta(delta=text).model_dump_json())
-
-                    # Get final result for cost/turn info and message history
-                    turns = len([
-                        m for m in result.all_messages()
-                        if isinstance(m, ModelResponse)
-                    ])
-
-                    # Send tool use events from the message history
-                    for msg in result.new_messages():
-                        if isinstance(msg, ModelResponse):
-                            for part in msg.parts:
-                                if isinstance(part, ToolCallPart):
-                                    await ws.send_text(
-                                        ToolUse(name=part.tool_name, input=str(part.args)[:200]).model_dump_json()
-                                    )
-
-                    # Update message history for next turn
-                    message_history = result.all_messages()
-
-                    await ws.send_text(
-                        Done(cost=result.usage().total_tokens / 1000 * 0.003, turns=turns).model_dump_json()
-                    )
-
-            except Exception as e:
-                await ws.send_text(
-                    Error(message=str(e), recoverable=True).model_dump_json()
-                )
-
-    except WebSocketDisconnect:
-        pass
-    finally:
-        active_ws -= 1
-        print(f"ws: disconnected (active: {active_ws})")
-
-
-# ---------------------------------------------------------------------------
-# Conversation-aware WebSocket chat
 # ---------------------------------------------------------------------------
 
 
@@ -556,18 +463,31 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             storage.update_conversation_status(convo_id, ConvoStatus.running)
 
             try:
+                agent_tools.set_active_ws(ws)
                 async with agent.run_stream(
                     prompt,
                     message_history=message_history if message_history else None,
                     usage_limits=USAGE_LIMITS,
                 ) as result:
-                    # Accumulate the full assistant response text
                     full_text = ""
 
-                    # Stream text deltas
-                    async for text in result.stream_text(delta=True):
-                        full_text += text
-                        await ws.send_text(TextDelta(delta=text).model_dump_json())
+                    # Stream structured events (thinking, text, tool calls)
+                    agent_stream = result._stream_response
+                    if agent_stream is not None:
+                        async for event in agent_stream:
+                            if isinstance(event, PartStartEvent):
+                                if isinstance(event.part, ThinkingPart) and event.part.content:
+                                    await ws.send_text(ThinkingDelta(delta=event.part.content).model_dump_json())
+                                elif isinstance(event.part, TextPart) and event.part.content:
+                                    full_text += event.part.content
+                                    await ws.send_text(TextDelta(delta=event.part.content).model_dump_json())
+                            elif isinstance(event, PartDeltaEvent):
+                                if isinstance(event.delta, ThinkingPartDelta):
+                                    await ws.send_text(ThinkingDelta(delta=event.delta.content_delta).model_dump_json())
+                                elif isinstance(event.delta, TextPartDelta):
+                                    full_text += event.delta.content_delta
+                                    await ws.send_text(TextDelta(delta=event.delta.content_delta).model_dump_json())
+                        await result._marked_completed(result.response)
 
                     # Get final result for cost/turn info
                     turns = len([
@@ -577,20 +497,15 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
                     cost = result.usage().total_tokens / 1000 * 0.003
 
-                    # Send tool use events from the message history
+                    # Persist tool calls from message history
                     for msg_item in result.new_messages():
                         if isinstance(msg_item, ModelResponse):
                             for part in msg_item.parts:
                                 if isinstance(part, ToolCallPart):
-                                    tool_input = str(part.args)[:200]
-                                    await ws.send_text(
-                                        ToolUse(name=part.tool_name, input=tool_input).model_dump_json()
-                                    )
-                                    # Persist tool call
                                     storage.append_message(convo_id, {
                                         "role": "tool",
                                         "name": part.tool_name,
-                                        "input": tool_input,
+                                        "input": str(part.args)[:200],
                                         "timestamp": _iso_now(),
                                     })
 
@@ -622,7 +537,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        # Restore original WORKDIR
+        agent_tools.clear_active_ws()
         agent_tools.WORKDIR = original_workdir
         active_ws -= 1
         print(f"ws[{convo_id[:8]}]: disconnected (active: {active_ws})")

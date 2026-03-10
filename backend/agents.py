@@ -23,8 +23,8 @@ You are a helpful coding assistant. Follow these rules strictly:
 
 # Multi-provider fallback: only include providers with API keys set
 _PROVIDERS = [
-    ("OPENAI_API_KEY", "openai:gpt-5-nano"),
     ("ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-6"),
+    ("OPENAI_API_KEY", "openai:gpt-5-nano"),
     ("GOOGLE_API_KEY", "google-gla:gemini-2.5-flash"),
 ]
 _available = [model_id for env_var, model_id in _PROVIDERS if os.environ.get(env_var)]

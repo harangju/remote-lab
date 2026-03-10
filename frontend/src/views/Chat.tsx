@@ -1,12 +1,24 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
-import { getConvo, connectWs, type ConvoDetail, type WsEvent } from "../api";
-import { container, backLink, input as inputStyle, btnPrimary } from "../styles";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp } from "lucide-react";
+import { getConvo, connectWs, type WsEvent } from "../api";
+import { backLink, input as inputStyle, btnPrimary } from "../styles";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface ToolCall {
+  name: string;
+  input?: string;
+}
 
 interface DisplayMessage {
   role: "user" | "assistant";
   content: string;
-  tools?: string[];
+  tools?: ToolCall[];
 }
 
 interface MetaInfo {
@@ -14,11 +26,144 @@ interface MetaInfo {
   turns: number;
 }
 
+// ---------------------------------------------------------------------------
+// ToolChip — collapsible tool call display
+// ---------------------------------------------------------------------------
+
+const toolIcons: Record<string, React.FC<{ size?: number }>> = {
+  bash: Terminal, read_file: FileText, write_file: Pencil,
+  edit_file: Pencil, glob: Search, grep: Search,
+};
+
+function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const Icon = toolIcons[tool.name] || Settings;
+
+  return (
+    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0 }}>
+      <button
+        onClick={() => tool.input && setOpen(!open)}
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "6px",
+          padding: "4px 8px",
+          cursor: tool.input ? "pointer" : "default",
+          color: "var(--text-muted)",
+          fontSize: "0.78rem",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "5px",
+          whiteSpace: "nowrap",
+        }}
+      >
+        <Icon size={13} />
+        <span style={{ fontFamily: "monospace" }}>{tool.name}</span>
+        {live && <span style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: "#d9a754",
+          display: "inline-block",
+          animation: "pulse 1.5s infinite",
+        }} />}
+        {tool.input && (open
+          ? <ChevronUp size={13} style={{ opacity: 0.5 }} />
+          : <ChevronDown size={13} style={{ opacity: 0.5 }} />
+        )}
+      </button>
+      {open && tool.input && (
+        <pre style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "6px",
+          padding: "6px 10px",
+          marginTop: "4px",
+          fontSize: "0.75rem",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          maxHeight: "120px",
+          overflowY: "auto",
+          color: "var(--text)",
+        }}>{tool.input}</pre>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Markdown wrapper with code block styling
+// ---------------------------------------------------------------------------
+
+const mdComponents: Record<string, React.FC<any>> = {
+  pre: ({ children }: any) => (
+    <pre style={{
+      background: "var(--code-bg)",
+      borderRadius: "6px",
+      padding: "10px 12px",
+      overflowX: "auto",
+      fontSize: "0.82rem",
+      margin: "6px 0",
+    }}>{children}</pre>
+  ),
+  code: ({ children, className }: any) => {
+    const isBlock = className?.startsWith("language-");
+    if (isBlock) {
+      return <code style={{ fontFamily: "monospace" }}>{children}</code>;
+    }
+    return (
+      <code style={{
+        background: "var(--code-bg)",
+        borderRadius: "3px",
+        padding: "1px 4px",
+        fontSize: "0.85em",
+        fontFamily: "monospace",
+      }}>{children}</code>
+    );
+  },
+  a: ({ href, children }: any) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>{children}</a>
+  ),
+  table: ({ children }: any) => (
+    <table style={{
+      borderCollapse: "collapse",
+      width: "100%",
+      margin: "6px 0",
+      fontSize: "0.85rem",
+    }}>{children}</table>
+  ),
+  th: ({ children }: any) => (
+    <th style={{
+      border: "1px solid var(--border)",
+      padding: "4px 8px",
+      textAlign: "left",
+      background: "var(--bg)",
+    }}>{children}</th>
+  ),
+  td: ({ children }: any) => (
+    <td style={{
+      border: "1px solid var(--border)",
+      padding: "4px 8px",
+    }}>{children}</td>
+  ),
+};
+
+function MdContent({ text }: { text: string }) {
+  return (
+    <div style={{ lineHeight: 1.55 }} className="md-content">
+      <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{text}</Markdown>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Chat component
+// ---------------------------------------------------------------------------
+
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streaming, setStreaming] = useState("");
-  const [tools, setTools] = useState<string[]>([]);
+  const [thinking, setThinking] = useState(false);
+  const [tools, setTools] = useState<ToolCall[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState<MetaInfo | null>(null);
@@ -26,22 +171,37 @@ export function Chat() {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const toolsRef = useRef<ToolCall[]>([]);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  useEffect(scrollToBottom, [messages, streaming, scrollToBottom]);
+  useEffect(scrollToBottom, [messages, streaming, thinking, tools, scrollToBottom]);
 
-  // Load existing messages
+  // Load existing messages — interleave tool calls with assistant messages
   useEffect(() => {
     if (!convId) return;
     getConvo(convId)
       .then((detail) => {
-        const msgs: DisplayMessage[] = detail.messages.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-        }));
+        const msgs: DisplayMessage[] = [];
+        let pendingTools: ToolCall[] = [];
+
+        for (const m of detail.messages) {
+          if (m.role === "tool") {
+            pendingTools.push({ name: (m as any).name, input: (m as any).input });
+          } else if (m.role === "user") {
+            pendingTools = [];
+            msgs.push({ role: "user", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) });
+          } else if (m.role === "assistant") {
+            msgs.push({
+              role: "assistant",
+              content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+              tools: pendingTools.length > 0 ? [...pendingTools] : undefined,
+            });
+            pendingTools = [];
+          }
+        }
         setMessages(msgs);
       })
       .catch((e) => setError(e.message));
@@ -65,24 +225,38 @@ export function Chat() {
         case "auth-ok":
           setConnected(true);
           break;
+        case "thinking-delta":
+          setThinking(true);
+          break;
         case "text-delta":
+          setThinking(false);
           setStreaming((prev) => prev + data.delta);
           break;
-        case "tool-use":
-          setTools((prev) => [...prev, data.name]);
+        case "tool-use": {
+          const tc: ToolCall = { name: data.name, input: data.input };
+          toolsRef.current = [...toolsRef.current, tc];
+          setTools([...toolsRef.current]);
           break;
-        case "done":
-          // Finalize the streamed message
+        }
+        case "done": {
+          const doneTools = toolsRef.current.length > 0 ? [...toolsRef.current] : undefined;
           setStreaming((prev) => {
             if (prev) {
-              setMessages((msgs) => [...msgs, { role: "assistant", content: prev, tools: [...tools] }]);
+              setMessages((msgs) => [...msgs, {
+                role: "assistant",
+                content: prev,
+                tools: doneTools,
+              }]);
             }
             return "";
           });
+          toolsRef.current = [];
           setTools([]);
+          setThinking(false);
           setMeta({ cost: data.cost, turns: data.turns });
           setBusy(false);
           break;
+        }
         case "error":
           setError(data.message);
           setStreaming((prev) => {
@@ -91,31 +265,27 @@ export function Chat() {
             }
             return "";
           });
+          toolsRef.current = [];
           setTools([]);
+          setThinking(false);
           setBusy(false);
           break;
       }
     });
 
-    ws.addEventListener("close", () => {
-      setConnected(false);
-    });
-
+    ws.addEventListener("close", () => setConnected(false));
     ws.addEventListener("error", () => {
       setError("WebSocket connection error");
       setConnected(false);
     });
 
-    return () => {
-      ws.close();
-    };
+    return () => { ws.close(); };
   }, [convId]);
 
   const send = (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
     if (!text || busy || !wsRef.current) return;
-
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setInput("");
     setBusy(true);
@@ -129,22 +299,14 @@ export function Chat() {
     maxWidth: "85%",
     padding: "10px 14px",
     borderRadius: "12px",
-    marginBottom: "8px",
+    marginBottom: "2px",
     fontSize: "0.9rem",
-    lineHeight: "1.5",
-    whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     alignSelf: role === "user" ? "flex-end" : "flex-start",
-    background: role === "user" ? "var(--accent)" : "var(--bg-surface)",
-    color: role === "user" ? "#fff" : "var(--text)",
-    border: role === "user" ? "none" : "1px solid var(--border)",
+    background: role === "user" ? "var(--bg-user)" : "var(--bg-surface)",
+    color: "var(--text)",
+    border: `1px solid ${role === "user" ? "var(--border-user)" : "var(--border)"}`,
   });
-
-  const toolChip: React.CSSProperties = {
-    fontSize: "0.7rem",
-    color: "var(--text-muted)",
-    padding: "2px 0",
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", maxWidth: "48rem", margin: "0 auto" }}>
@@ -155,7 +317,7 @@ export function Chat() {
           <span style={{ fontWeight: 600 }}>Chat</span>
           <span style={{
             width: 8, height: 8, borderRadius: "50%",
-            background: connected ? "#3fb950" : "#8b949e",
+            background: connected ? "#4d9375" : "#9b9a97",
             display: "inline-block",
           }} />
         </div>
@@ -165,26 +327,49 @@ export function Chat() {
       <div style={{ flex: 1, overflowY: "auto", padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px" }}>
         {messages.map((m, i) => (
           <React.Fragment key={i}>
-            <div style={msgBubble(m.role)}>{m.content}</div>
+            {/* Tool chips above assistant bubble */}
             {m.tools && m.tools.length > 0 && (
-              <div style={{ ...toolChip, alignSelf: "flex-start" }}>
-                {m.tools.map((t, j) => (
-                  <span key={j} style={{ marginRight: "8px" }}>tool: {t}</span>
-                ))}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+                {m.tools.map((t, j) => <ToolChip key={j} tool={t} />)}
               </div>
             )}
+            <div style={msgBubble(m.role)}>
+              <MdContent text={m.content} />
+            </div>
           </React.Fragment>
         ))}
 
-        {/* Currently streaming */}
-        {streaming && <div style={msgBubble("assistant")}>{streaming}</div>}
+        {/* Status indicator */}
+        {busy && !streaming && (
+          <div style={{
+            alignSelf: "flex-start",
+            padding: "10px 14px",
+            fontSize: "0.85rem",
+            color: "var(--text-muted)",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}>
+            <span style={{ display: "inline-flex", gap: "3px" }}>
+              <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0s" }}>.</span>
+              <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.2s" }}>.</span>
+              <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.4s" }}>.</span>
+            </span>
+            <span>{thinking ? "Thinking" : tools.length > 0 ? "Using tools" : "Waiting for response"}</span>
+          </div>
+        )}
 
-        {/* Tool use while streaming */}
+        {/* Live tool calls while streaming */}
         {tools.length > 0 && (
-          <div style={{ ...toolChip, alignSelf: "flex-start" }}>
-            {tools.map((t, j) => (
-              <span key={j} style={{ marginRight: "8px" }}>tool: {t}</span>
-            ))}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+            {tools.map((t, j) => <ToolChip key={j} tool={t} live />)}
+          </div>
+        )}
+
+        {/* Currently streaming */}
+        {streaming && (
+          <div style={msgBubble("assistant")}>
+            <MdContent text={streaming} />
           </div>
         )}
 
@@ -197,7 +382,7 @@ export function Chat() {
 
         {/* Error */}
         {error && (
-          <div style={{ fontSize: "0.8rem", color: "#f85149", textAlign: "center", margin: "8px 0" }}>
+          <div style={{ fontSize: "0.8rem", color: "#c4554d", textAlign: "center", margin: "8px 0" }}>
             {error}
           </div>
         )}

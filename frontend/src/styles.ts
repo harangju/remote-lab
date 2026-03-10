@@ -7,11 +7,11 @@ export const colors = {
   text: "var(--text)",
   textMuted: "var(--text-muted)",
   accent: "var(--accent)",
-  danger: "#da3633",
-  badgeIdle: "#8b949e",
-  badgeRunning: "#58a6ff",
-  badgeDone: "#3fb950",
-  badgeError: "#f85149",
+  danger: "#c4554d",
+  badgeIdle: "#9b9a97",
+  badgeRunning: "#d9a754",
+  badgeDone: "#4d9375",
+  badgeError: "#c4554d",
 };
 
 /** Inject CSS variables for light/dark mode into document head. */
@@ -21,27 +21,33 @@ export function injectTheme() {
   style.id = "rl-theme";
   style.textContent = `
     :root {
-      --bg: #ffffff;
-      --bg-surface: #f6f8fa;
-      --border: #d1d9e0;
-      --text: #1f2328;
-      --text-muted: #656d76;
-      --accent: #0969da;
+      --bg: #fbfaf8;
+      --bg-surface: #f3f2ee;
+      --border: #e6e4df;
+      --text: #37352f;
+      --text-muted: #9b9a97;
+      --accent: #b4885d;
+      --bg-user: #ede9e3;
+      --border-user: #ddd9d3;
+      --code-bg: rgba(0,0,0,0.05);
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #0d1117;
-        --bg-surface: #161b22;
-        --border: #30363d;
-        --text: #e6edf3;
-        --text-muted: #8b949e;
-        --accent: #58a6ff;
+        --bg: #191919;
+        --bg-surface: #202020;
+        --border: #2e2e2e;
+        --text: #e8e7e4;
+        --text-muted: #8b8a86;
+        --accent: #c9a57c;
+        --bg-user: #2a2926;
+        --border-user: #3a3835;
+        --code-bg: rgba(255,255,255,0.07);
       }
     }
     *, *::before, *::after { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.5;
@@ -57,6 +63,33 @@ export function injectTheme() {
       font-family: inherit;
       font-size: 0.875rem;
     }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    /* Markdown content resets */
+    .md-content p { margin: 0 0 0.4em; }
+    .md-content p:last-child { margin-bottom: 0; }
+    .md-content ul, .md-content ol { margin: 0.3em 0; padding-left: 1.4em; }
+    .md-content li { margin: 0.15em 0; }
+    .md-content h1, .md-content h2, .md-content h3 {
+      margin: 0.6em 0 0.3em;
+      line-height: 1.3;
+    }
+    .md-content h1 { font-size: 1.2em; }
+    .md-content h2 { font-size: 1.1em; }
+    .md-content h3 { font-size: 1em; }
+    .md-content blockquote {
+      margin: 0.4em 0;
+      padding-left: 0.8em;
+      border-left: 3px solid var(--border);
+      color: var(--text-muted);
+    }
+    .md-content hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0.6em 0;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -70,18 +103,18 @@ export const container: React.CSSProperties = {
 };
 
 export const btnPrimary: React.CSSProperties = {
-  background: colors.accent,
-  color: "#fff",
+  background: "var(--text)",
+  color: "var(--bg)",
   border: "none",
   borderRadius: "6px",
   padding: "6px 14px",
-  fontWeight: 600,
+  fontWeight: 500,
 };
 
 export const btnDanger: React.CSSProperties = {
   background: "transparent",
-  color: colors.danger,
-  border: `1px solid ${colors.danger}`,
+  color: "var(--text-muted)",
+  border: "1px solid var(--border)",
   borderRadius: "6px",
   padding: "4px 10px",
   fontSize: "0.75rem",

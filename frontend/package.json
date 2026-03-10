@@ -6,9 +6,12 @@
     "build": "bun run src/build.ts"
   },
   "dependencies": {
+    "lucide-react": "^0.577.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.5.0"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.5.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",

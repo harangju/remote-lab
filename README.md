@@ -8,11 +8,13 @@ PydanticAI + FastAPI server for a personal remote development lab. Multi-provide
 browser → Caddy (HTTPS, port 443) → FastAPI/Uvicorn (port 3000) → PydanticAI agent
 ```
 
-- **`server.py`** — FastAPI app. Serves markdown docs from `docs/`, handles WebSocket chat, serves the chat UI from `static/`.
-- **`agents.py`** — PydanticAI agent with multi-provider fallback (Claude → Gemini → GPT). System prompt sandboxing and usage limits.
-- **`tools.py`** — Server-side tools: bash, read/write/edit files, glob, grep.
-- **`protocol.py`** — Pydantic models for WebSocket chat events.
-- **`static/index.html`** — Vanilla JS chat UI. No build step.
+- **`backend/server.py`** — FastAPI app. Serves markdown docs from `docs/`, REST API, WebSocket chat, and the React frontend.
+- **`backend/agents.py`** — PydanticAI agent with multi-provider fallback. System prompt sandboxing and usage limits.
+- **`backend/tools.py`** — Server-side tools: bash, read/write/edit files, glob, grep.
+- **`backend/protocol.py`** — Pydantic models for WebSocket chat events.
+- **`backend/models.py`** — Pydantic models for REST API (projects, conversations).
+- **`backend/storage.py`** — Flat-file storage for projects and conversations.
+- **`frontend/`** — React + TypeScript chat UI, built with Bun.
 - **`docs/`** — Drop `.md` files here. They show up on the index page sorted by last modified.
 - **`Caddyfile`** — Reference copy. The live one is at `/etc/caddy/Caddyfile`.
 
@@ -22,8 +24,9 @@ browser → Caddy (HTTPS, port 443) → FastAPI/Uvicorn (port 3000) → Pydantic
 |-------|-------------|
 | `/` | Lists all `.md` files in `docs/`, sorted by last modified |
 | `/:slug` | Renders `docs/{slug}.md` as HTML |
-| `/chat` | Chat UI (requires `WS_TOKEN` env var) |
-| `/ws` | WebSocket endpoint for agent chat (requires auth) |
+| `/chat` | React chat UI (requires `WS_TOKEN` env var) |
+| `/api/projects` | REST API for project management |
+| `/api/ws/{convo_id}` | WebSocket endpoint for agent chat (requires auth) |
 
 ## What's in the HTML template
 
@@ -37,6 +40,7 @@ browser → Caddy (HTTPS, port 443) → FastAPI/Uvicorn (port 3000) → Pydantic
 
 ```bash
 uv sync
+cd frontend && bun install && bun run build
 ```
 
 ### 2. Configure environment
@@ -55,12 +59,12 @@ OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=AI...
 ```
 
-At least one LLM API key is required. The agent uses FallbackModel — it tries Claude first, then Gemini, then GPT.
+At least one LLM API key is required. The agent uses dynamic fallback based on available API keys.
 
 ### 3. Run locally
 
 ```bash
-uv run uvicorn server:app --host 0.0.0.0 --port 3000
+uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000
 ```
 
 ## Adding documents
@@ -97,7 +101,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/srv/remote-lab
 EnvironmentFile=/srv/remote-lab/.env
-ExecStart=/root/.local/bin/uv run uvicorn server:app --host 0.0.0.0 --port 3000
+ExecStart=/root/.local/bin/uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000
 Restart=always
 
 [Install]
@@ -161,17 +165,21 @@ Restricted documents are hidden from the index unless the viewer has a valid tok
 
 ## Chat
 
-The `/chat` route serves a browser-based chat UI that connects to the agent via WebSocket.
+The `/chat` route serves a React-based chat UI that connects to the agent via WebSocket.
 
 Visit `https://lab.harangju.com/chat` and enter the token when prompted. It's saved in `localStorage` for subsequent visits.
 
+### Projects and conversations
+
+Create projects to scope agent work to specific directories. Each project can have multiple conversations with persistent history stored as JSONL.
+
 ### Multi-provider fallback
 
-The agent tries providers in order: Claude → Gemini → GPT. If Claude is down, it automatically falls back to the next available provider. Configure which providers are available by setting their API keys in `.env`.
+The agent dynamically selects providers based on available API keys in `.env`. Configure which providers are available by setting their API keys.
 
 ### Agent tools
 
-The agent has access to server-side tools:
+The agent has access to server-side tools, scoped to the project's directory:
 
 | Tool | What it does |
 |------|-------------|
@@ -184,7 +192,7 @@ The agent has access to server-side tools:
 
 ### How auth works
 
-- `/chat` and `/ws` return 503 if `WS_TOKEN` is not set
+- REST API uses `Authorization: Bearer` header
 - On WebSocket connect, the client sends `{"type":"auth","token":"..."}` as the first message
 - Server validates with constant-time comparison (`hmac.compare_digest`)
 - Invalid token closes the connection with code 4401
@@ -208,13 +216,15 @@ apt install fail2ban         # auto-bans IPs after repeated failed SSH attempts
 
 ## Dependencies
 
-- **Runtime:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
+- **Runtime:** Python 3.11+, [uv](https://docs.astral.sh/uv/), [Bun](https://bun.sh/) (for frontend)
 - **Python:** `pydantic-ai` (agent framework), `fastapi` (web server), `uvicorn` (ASGI server), `markdown` (rendering), `python-dotenv` (env config)
+- **Frontend:** React, React Router, react-markdown
 - **System:** `caddy` (reverse proxy), `ripgrep` (for grep tool)
 
 ### Install system dependencies
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -fsSL https://bun.sh/install | bash
 apt install ripgrep caddy
 ```
