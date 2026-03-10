@@ -5,3 +5,8 @@ docs/
 __pycache__/
 *.pyc
 .venv/
+data/
+!data/.gitkeep
+frontend/node_modules/
+frontend/dist/
+frontend/bun.lock

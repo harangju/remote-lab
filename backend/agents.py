@@ -8,7 +8,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.usage import UsageLimits
 
-import tools
+from backend import tools
 
 SYSTEM_PROMPT = """\
 You are a helpful coding assistant. Follow these rules strictly:

@@ -7,8 +7,10 @@ import json
 import os
 from pathlib import Path
 
-import markdown
 from dotenv import load_dotenv
+load_dotenv()
+
+import markdown
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -20,10 +22,8 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from agents import agent, USAGE_LIMITS
-from protocol import AuthOk, TextDelta, ToolUse, Done, Error
-
-load_dotenv()
+from backend.agents import agent, USAGE_LIMITS
+from backend.protocol import AuthOk, TextDelta, ToolUse, Done, Error
 
 app = FastAPI()
 
@@ -31,7 +31,7 @@ app = FastAPI()
 # Config
 # ---------------------------------------------------------------------------
 
-DOCS_DIR = Path(__file__).parent / "docs"
+DOCS_DIR = Path(__file__).parent.parent / "docs"
 WS_TOKEN = os.getenv("WS_TOKEN", "")
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "")
 
@@ -41,7 +41,8 @@ active_ws = 0
 # Static files (chat UI)
 # ---------------------------------------------------------------------------
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).parent.parent / "static"
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend" / "dist"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -210,10 +211,21 @@ async def index(request: Request):
     return HTMLResponse(_layout("Documents", body))
 
 
+@app.get("/chat/{rest:path}", response_class=HTMLResponse)
 @app.get("/chat", response_class=HTMLResponse)
-async def chat_page():
+async def chat_page(rest: str = ""):
     if not WS_TOKEN:
         return Response("Chat not configured", status_code=503)
+    # Serve built React SPA if available, otherwise fall back to old static chat
+    if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
+        # Serve static assets from dist/ (JS, CSS)
+        if rest and "." in rest:
+            asset = FRONTEND_DIR / rest
+            if asset.exists() and asset.is_file():
+                suffix = asset.suffix.lower()
+                media_types = {".js": "application/javascript", ".css": "text/css", ".map": "application/json"}
+                return Response(asset.read_bytes(), media_type=media_types.get(suffix, "application/octet-stream"))
+        return HTMLResponse((FRONTEND_DIR / "index.html").read_text())
     html = (STATIC_DIR / "index.html").read_text()
     return HTMLResponse(html)
 
