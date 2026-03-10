@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,8 +29,10 @@ from backend.protocol import AuthOk, TextDelta, ToolUse, Done, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoDetail,
+    ConvoStatus,
 )
 from backend import storage
+from backend import tools as agent_tools
 
 app = FastAPI()
 
@@ -457,3 +460,169 @@ async def ws_chat(ws: WebSocket):
     finally:
         active_ws -= 1
         print(f"ws: disconnected (active: {active_ws})")
+
+
+# ---------------------------------------------------------------------------
+# Conversation-aware WebSocket chat
+# ---------------------------------------------------------------------------
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@app.websocket("/api/ws/{convo_id}")
+async def ws_convo_chat(ws: WebSocket, convo_id: str):
+    global active_ws
+
+    # Origin check
+    origin = ws.headers.get("origin", "")
+    if ALLOWED_ORIGIN and origin and origin != ALLOWED_ORIGIN:
+        await ws.close(code=4403, reason="Forbidden")
+        return
+
+    # Concurrency limit
+    if active_ws >= 1:
+        await ws.close(code=4429, reason="Too many connections")
+        return
+
+    await ws.accept()
+    active_ws += 1
+    print(f"ws[{convo_id[:8]}]: connected (active: {active_ws})")
+
+    # Save the original WORKDIR so we can restore it on disconnect
+    original_workdir = agent_tools.WORKDIR
+
+    try:
+        # ----- Auth handshake (first-message pattern) -----
+        raw = await ws.receive_text()
+        try:
+            msg = json.loads(raw)
+            if msg.get("type") != "auth" or not check_token(msg.get("token", "")):
+                raise ValueError("bad auth")
+        except Exception:
+            print(f"ws[{convo_id[:8]}]: auth failed, closing")
+            await ws.send_text(Error(message="Invalid token").model_dump_json())
+            await ws.close(code=4401, reason="Invalid token")
+            return
+
+        # ----- Validate conversation exists and load project -----
+        convo = storage.get_conversation(convo_id)
+        if convo is None:
+            await ws.send_text(Error(message="Conversation not found").model_dump_json())
+            await ws.close(code=4404, reason="Conversation not found")
+            return
+
+        project = storage.get_project(convo.project_id)
+        if project is None:
+            await ws.send_text(Error(message="Project not found").model_dump_json())
+            await ws.close(code=4404, reason="Project not found")
+            return
+
+        # Scope agent tools to the project's path
+        project_path = Path(project.path)
+        if project_path.exists() and project_path.is_dir():
+            agent_tools.WORKDIR = project_path
+        else:
+            await ws.send_text(
+                Error(message=f"Project path does not exist: {project.path}").model_dump_json()
+            )
+            await ws.close(code=4400, reason="Invalid project path")
+            return
+
+        await ws.send_text(AuthOk().model_dump_json())
+        print(f"ws[{convo_id[:8]}]: authenticated, project={project.name}, path={project.path}")
+
+        # ----- Load existing message history from JSONL -----
+        message_history: list = []
+        persisted = storage.read_messages(convo_id)
+        # Send persisted messages to the client so reconnecting picks up
+        # where it left off (client can render them).
+        if persisted:
+            await ws.send_text(json.dumps({"type": "history", "messages": persisted}))
+
+        # ----- Chat loop -----
+        while True:
+            prompt = await ws.receive_text()
+
+            # Persist the user message
+            storage.append_message(convo_id, {
+                "role": "user",
+                "content": prompt,
+                "timestamp": _iso_now(),
+            })
+
+            # Mark conversation as running
+            storage.update_conversation_status(convo_id, ConvoStatus.running)
+
+            try:
+                async with agent.run_stream(
+                    prompt,
+                    message_history=message_history if message_history else None,
+                    usage_limits=USAGE_LIMITS,
+                ) as result:
+                    # Accumulate the full assistant response text
+                    full_text = ""
+
+                    # Stream text deltas
+                    async for text in result.stream_text(delta=True):
+                        full_text += text
+                        await ws.send_text(TextDelta(delta=text).model_dump_json())
+
+                    # Get final result for cost/turn info
+                    turns = len([
+                        m for m in result.all_messages()
+                        if isinstance(m, ModelResponse)
+                    ])
+
+                    cost = result.usage().total_tokens / 1000 * 0.003
+
+                    # Send tool use events from the message history
+                    for msg_item in result.new_messages():
+                        if isinstance(msg_item, ModelResponse):
+                            for part in msg_item.parts:
+                                if isinstance(part, ToolCallPart):
+                                    tool_input = str(part.args)[:200]
+                                    await ws.send_text(
+                                        ToolUse(name=part.tool_name, input=tool_input).model_dump_json()
+                                    )
+                                    # Persist tool call
+                                    storage.append_message(convo_id, {
+                                        "role": "tool",
+                                        "name": part.tool_name,
+                                        "input": tool_input,
+                                        "timestamp": _iso_now(),
+                                    })
+
+                    # Update message history for next turn
+                    message_history = result.all_messages()
+
+                    # Persist the assistant response
+                    storage.append_message(convo_id, {
+                        "role": "assistant",
+                        "content": full_text,
+                        "timestamp": _iso_now(),
+                        "cost": cost,
+                        "turns": turns,
+                    })
+
+                    await ws.send_text(
+                        Done(cost=cost, turns=turns).model_dump_json()
+                    )
+
+                # Mark conversation as done after successful response
+                storage.update_conversation_status(convo_id, ConvoStatus.done)
+
+            except Exception as e:
+                storage.update_conversation_status(convo_id, ConvoStatus.error)
+                await ws.send_text(
+                    Error(message=str(e), recoverable=True).model_dump_json()
+                )
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Restore original WORKDIR
+        agent_tools.WORKDIR = original_workdir
+        active_ws -= 1
+        print(f"ws[{convo_id[:8]}]: disconnected (active: {active_ws})")
