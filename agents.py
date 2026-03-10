@@ -23,7 +23,7 @@ You are a helpful coding assistant. Follow these rules strictly:
 
 # Multi-provider fallback: only include providers with API keys set
 _PROVIDERS = [
-    ("OPENAI_API_KEY", "openai:gpt-5.3-instant"),
+    ("OPENAI_API_KEY", "openai:gpt-5-nano"),
     ("ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-6"),
     ("GOOGLE_API_KEY", "google-gla:gemini-2.5-flash"),
 ]
