@@ -1,15 +1,19 @@
-# md-server
+# remote-lab
 
-Bun + TypeScript server that renders markdown files as responsive HTML.
+PydanticAI + FastAPI server for a personal remote development lab. Multi-provider LLM chat with server-side tools, plus markdown document serving.
 
 ## How it works
 
 ```
-browser → Caddy (HTTPS, port 443) → Bun server (port 3000) → reads .md file → returns HTML
+browser → Caddy (HTTPS, port 443) → FastAPI/Uvicorn (port 3000) → PydanticAI agent
 ```
 
-- **`server.ts`** — Bun HTTP server. On each request, reads a `.md` file from `docs/`, renders it to HTML with `marked`, and wraps it in a responsive template. No build step, no caching — renders fresh every time.
-- **`docs/`** — Drop `.md` files here. They show up on the index page sorted by last modified. Symlinks work, so you can link to files in other repos.
+- **`server.py`** — FastAPI app. Serves markdown docs from `docs/`, handles WebSocket chat, serves the chat UI from `static/`.
+- **`agents.py`** — PydanticAI agent with multi-provider fallback (Claude → Gemini → GPT). System prompt sandboxing and usage limits.
+- **`tools.py`** — Server-side tools: bash, read/write/edit files, glob, grep.
+- **`protocol.py`** — Pydantic models for WebSocket chat events.
+- **`static/index.html`** — Vanilla JS chat UI. No build step.
+- **`docs/`** — Drop `.md` files here. They show up on the index page sorted by last modified.
 - **`Caddyfile`** — Reference copy. The live one is at `/etc/caddy/Caddyfile`.
 
 ## Routes
@@ -19,7 +23,7 @@ browser → Caddy (HTTPS, port 443) → Bun server (port 3000) → reads .md fil
 | `/` | Lists all `.md` files in `docs/`, sorted by last modified |
 | `/:slug` | Renders `docs/{slug}.md` as HTML |
 | `/chat` | Chat UI (requires `WS_TOKEN` env var) |
-| `/ws` | WebSocket endpoint for Claude chat (requires auth) |
+| `/ws` | WebSocket endpoint for agent chat (requires auth) |
 
 ## What's in the HTML template
 
@@ -27,34 +31,91 @@ browser → Caddy (HTTPS, port 443) → Bun server (port 3000) → reads .md fil
 - **Hypothesis** — adds inline annotation/commenting sidebar (via hypothes.is embed script).
 - **Responsive CSS** — mobile-friendly, dark mode via `prefers-color-scheme`.
 
+## Setup
+
+### 1. Install Python dependencies
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Or with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Fill in your API keys and token:
+
+```
+WS_TOKEN=<generate with: openssl rand -hex 32>
+ALLOWED_ORIGIN=https://lab.harangju.com
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=AI...
+```
+
+At least one LLM API key is required. The agent uses FallbackModel — it tries Claude first, then Gemini, then GPT.
+
+### 3. Run locally
+
+```bash
+uvicorn server:app --host 0.0.0.0 --port 3000
+```
+
 ## Adding documents
 
 Drop a markdown file in `docs/`:
 
 ```bash
-cp ~/notes.md /srv/md-server/docs/
+cp ~/notes.md /srv/remote-lab/docs/
 ```
 
 Or symlink from another repo:
 
 ```bash
-ln -s /path/to/other-repo/paper.md /srv/md-server/docs/paper.md
+ln -s /path/to/other-repo/paper.md /srv/remote-lab/docs/paper.md
 ```
 
 ## Services
 
 Two systemd services run this:
 
-### md-server (the Bun app)
+### remote-lab (the FastAPI app)
 
 ```
-/etc/systemd/system/md-server.service
+/etc/systemd/system/remote-lab.service
+```
+
+```ini
+[Unit]
+Description=remote-lab
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/srv/remote-lab
+EnvironmentFile=/srv/remote-lab/.env
+ExecStart=/srv/remote-lab/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 3000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ```bash
-systemctl status md-server    # check status
-systemctl restart md-server   # restart after code changes
-journalctl -u md-server -f    # tail logs
+systemctl status remote-lab     # check status
+systemctl restart remote-lab    # restart after code changes
+journalctl -u remote-lab -f     # tail logs
 ```
 
 ### Caddy (reverse proxy + HTTPS)
@@ -67,7 +128,7 @@ Caddy reverse-proxies your domain → `localhost:3000` and auto-provisions Let's
 
 ```bash
 systemctl status caddy
-systemctl reload caddy        # reload after Caddyfile changes
+systemctl reload caddy           # reload after Caddyfile changes
 journalctl -u caddy -f
 ```
 
@@ -108,41 +169,37 @@ Restricted documents are hidden from the index unless the viewer has a valid tok
 
 ## Chat
 
-The `/chat` route serves a browser-based chat UI that connects to Claude via WebSocket.
+The `/chat` route serves a browser-based chat UI that connects to the agent via WebSocket.
 
-### Setup
+Visit `https://lab.harangju.com/chat` and enter the token when prompted. It's saved in `localStorage` for subsequent visits.
 
-1. Generate a token:
+### Multi-provider fallback
 
-```bash
-openssl rand -hex 32
-```
+The agent tries providers in order: Claude → Gemini → GPT. If Claude is down, it automatically falls back to the next available provider. Configure which providers are available by setting their API keys in `.env`.
 
-2. Add to the systemd service file (`/etc/systemd/system/md-server.service`) under `[Service]`:
+### Agent tools
 
-```
-Environment=WS_TOKEN=<your-generated-token>
-Environment=ALLOWED_ORIGIN=https://lab.harangju.com
-```
+The agent has access to server-side tools:
 
-3. Restart:
-
-```bash
-systemctl daemon-reload && systemctl restart md-server
-```
-
-4. Visit `https://lab.harangju.com/chat` and enter the token when prompted. It's saved in `localStorage` for subsequent visits.
+| Tool | What it does |
+|------|-------------|
+| `bash` | Run shell commands |
+| `read_file` | Read file contents |
+| `write_file` | Create or overwrite files |
+| `edit_file` | Find-and-replace in files |
+| `glob` | Find files by pattern |
+| `grep` | Search file contents with ripgrep |
 
 ### How auth works
 
 - `/chat` and `/ws` return 503 if `WS_TOKEN` is not set
 - On WebSocket connect, the client sends `{"type":"auth","token":"..."}` as the first message
-- Server validates with constant-time comparison (`crypto.timingSafeEqual`)
+- Server validates with constant-time comparison (`hmac.compare_digest`)
 - Invalid token closes the connection with code 4401
 - `ALLOWED_ORIGIN` rejects cross-origin WebSocket upgrades (prevents CSWSH)
 - Only one WebSocket connection at a time (429 if already active)
-- Each query is capped at `$1.00` via `maxBudgetUsd`
-- System prompt guardrails prevent the agent from reading env vars, `/etc/`, or making external network requests
+- Usage limits cap the number of LLM requests per conversation turn
+- System prompt guardrails prevent the agent from reading env vars, system configs, or making external network requests
 - Symlinks in `docs/` are validated — resolved path must stay inside the docs directory
 
 ## Security
@@ -159,6 +216,6 @@ apt install fail2ban         # auto-bans IPs after repeated failed SSH attempts
 
 ## Dependencies
 
-- **Runtime:** [Bun](https://bun.sh)
-- **npm:** `marked` (markdown → HTML), `@anthropic-ai/claude-agent-sdk` (Claude chat)
-- **System:** `caddy` (installed via apt from official repo)
+- **Runtime:** Python 3.11+
+- **Python:** `pydantic-ai` (agent framework), `fastapi` (web server), `uvicorn` (ASGI server), `markdown` (rendering), `python-dotenv` (env config)
+- **System:** `caddy` (reverse proxy), `ripgrep` (for grep tool)
