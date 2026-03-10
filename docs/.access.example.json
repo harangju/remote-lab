@@ -1,0 +1,4 @@
+{
+    "my-private-doc": ["tok_abc123", "tok_def456"],
+    "another-doc": ["tok_abc123"]
+}
