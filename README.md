@@ -33,15 +33,7 @@ browser → Caddy (HTTPS, port 443) → FastAPI/Uvicorn (port 3000) → Pydantic
 
 ## Setup
 
-### 1. Install Python dependencies
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-Or with [uv](https://docs.astral.sh/uv/):
+### 1. Install dependencies
 
 ```bash
 uv sync
@@ -68,7 +60,7 @@ At least one LLM API key is required. The agent uses FallbackModel — it tries 
 ### 3. Run locally
 
 ```bash
-uvicorn server:app --host 0.0.0.0 --port 3000
+uv run uvicorn server:app --host 0.0.0.0 --port 3000
 ```
 
 ## Adding documents
@@ -105,7 +97,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/srv/remote-lab
 EnvironmentFile=/srv/remote-lab/.env
-ExecStart=/srv/remote-lab/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 3000
+ExecStart=/root/.local/bin/uv run uvicorn server:app --host 0.0.0.0 --port 3000
 Restart=always
 
 [Install]
@@ -216,6 +208,13 @@ apt install fail2ban         # auto-bans IPs after repeated failed SSH attempts
 
 ## Dependencies
 
-- **Runtime:** Python 3.11+
+- **Runtime:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
 - **Python:** `pydantic-ai` (agent framework), `fastapi` (web server), `uvicorn` (ASGI server), `markdown` (rendering), `python-dotenv` (env config)
 - **System:** `caddy` (reverse proxy), `ripgrep` (for grep tool)
+
+### Install system dependencies
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+apt install ripgrep caddy
+```
