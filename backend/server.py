@@ -11,8 +11,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import markdown
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic_ai.messages import (
     ModelRequest,
@@ -24,6 +25,11 @@ from pydantic_ai.messages import (
 
 from backend.agents import agent, USAGE_LIMITS
 from backend.protocol import AuthOk, TextDelta, ToolUse, Done, Error
+from backend.models import (
+    Project, ProjectCreate, ProjectUpdate,
+    ConvoMeta, ConvoCreate, ConvoDetail,
+)
+from backend import storage
 
 app = FastAPI()
 
@@ -36,6 +42,92 @@ WS_TOKEN = os.getenv("WS_TOKEN", "")
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "")
 
 active_ws = 0
+
+# ---------------------------------------------------------------------------
+# REST API — /api routes
+# ---------------------------------------------------------------------------
+
+_bearer = HTTPBearer()
+
+
+async def _require_token(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> str:
+    if not check_token(credentials.credentials):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return credentials.credentials
+
+
+api = APIRouter(prefix="/api", dependencies=[Depends(_require_token)])
+
+
+# -- Projects ---------------------------------------------------------------
+
+@api.get("/projects", response_model=list[Project])
+async def api_list_projects():
+    return storage.list_projects()
+
+
+@api.post("/projects", response_model=Project, status_code=201)
+async def api_create_project(body: ProjectCreate):
+    return storage.create_project(body)
+
+
+@api.get("/projects/{project_id}", response_model=Project)
+async def api_get_project(project_id: str):
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj
+
+
+@api.put("/projects/{project_id}", response_model=Project)
+async def api_update_project(project_id: str, body: ProjectUpdate):
+    proj = storage.update_project(project_id, body)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj
+
+
+@api.delete("/projects/{project_id}", status_code=204)
+async def api_delete_project(project_id: str):
+    if not storage.delete_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
+# -- Conversations -----------------------------------------------------------
+
+@api.get("/projects/{project_id}/convos", response_model=list[ConvoMeta])
+async def api_list_convos(project_id: str):
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return storage.list_conversations(project_id)
+
+
+@api.post("/projects/{project_id}/convos", response_model=ConvoMeta, status_code=201)
+async def api_create_convo(project_id: str, body: ConvoCreate):
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return storage.create_conversation(project_id, body.title)
+
+
+@api.get("/convos/{convo_id}", response_model=ConvoDetail)
+async def api_get_convo(convo_id: str):
+    convo = storage.get_conversation(convo_id)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+
+@api.delete("/convos/{convo_id}", status_code=204)
+async def api_delete_convo(convo_id: str):
+    if not storage.delete_conversation(convo_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+
+app.include_router(api)
 
 # ---------------------------------------------------------------------------
 # Static files (chat UI)
