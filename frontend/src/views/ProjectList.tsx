@@ -9,7 +9,8 @@ export function ProjectList() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [path, setPath] = useState("");
+  const [path, setPath] = useState("/srv/projects/");
+  const [pathTouched, setPathTouched] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -28,7 +29,8 @@ export function ProjectList() {
       const p = await createProject({ name: name.trim(), path: path.trim() });
       setProjects((prev) => [...prev, p]);
       setName("");
-      setPath("");
+      setPath("/srv/projects/");
+      setPathTouched(false);
       setShowForm(false);
     } catch (err: any) {
       setError(err.message);
@@ -58,8 +60,14 @@ export function ProjectList() {
 
       {showForm && (
         <form onSubmit={handleCreate} style={{ ...card, flexDirection: "column", gap: "8px", alignItems: "stretch" }}>
-          <input style={inputStyle} placeholder="Project name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <input style={inputStyle} placeholder="/path/to/project" value={path} onChange={(e) => setPath(e.target.value)} />
+          <input style={inputStyle} placeholder="Project name" value={name} onChange={(e) => {
+            setName(e.target.value);
+            if (!pathTouched) {
+              const slug = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+              setPath(`/srv/projects/${slug}`);
+            }
+          }} autoFocus />
+          <input style={inputStyle} placeholder="/srv/projects/my-project" value={path} onChange={(e) => { setPath(e.target.value); setPathTouched(true); }} />
           <button type="submit" style={{ ...btnPrimary, alignSelf: "flex-end" }}>Create</button>
         </form>
       )}
