@@ -24,6 +24,39 @@ interface DisplayMessage {
 interface MetaInfo {
   cost: number;
   turns: number;
+  context_tokens: number;
+  context_limit: number;
+}
+
+// ---------------------------------------------------------------------------
+// ContextDonut — small SVG ring showing context window usage
+// ---------------------------------------------------------------------------
+
+function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
+  if (!limit) return null;
+  const pct = Math.min(tokens / limit, 1);
+  const r = 7;
+  const circ = 2 * Math.PI * r;
+  const filled = circ * pct;
+  const color = pct > 0.8 ? "#d9a754" : "var(--text-muted)";
+  return (
+    <div
+      style={{ display: "inline-flex", alignItems: "center", cursor: "default" }}
+      title={`${(tokens / 1000).toFixed(1)}k / ${(limit / 1000).toFixed(0)}k tokens (${Math.round(pct * 100)}%)`}
+    >
+      <svg width="18" height="18" viewBox="0 0 18 18" style={{ transform: "rotate(-90deg)" }}>
+        <circle cx="9" cy="9" r={r} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+        <circle
+          cx="9" cy="9" r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeDasharray={`${filled} ${circ - filled}`}
+          strokeLinecap="round"
+        />
+      </svg>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +236,18 @@ export function Chat() {
           }
         }
         setMessages(msgs);
+        // Sum cost from all assistant messages in the persisted history
+        const totalCost = detail.messages
+          .filter((m) => m.role === "assistant" && typeof (m as any).cost === "number")
+          .reduce((sum, m) => sum + ((m as any).cost as number), 0);
+        if (detail.context_limit > 0 || totalCost > 0) {
+          setMeta({
+            cost: totalCost,
+            turns: 0,
+            context_tokens: detail.context_tokens,
+            context_limit: detail.context_limit,
+          });
+        }
       })
       .catch((e) => setError(e.message));
   }, [convId]);
@@ -253,7 +298,12 @@ export function Chat() {
           toolsRef.current = [];
           setTools([]);
           setThinking(false);
-          setMeta({ cost: data.cost, turns: data.turns });
+          setMeta((prev) => ({
+            cost: (prev?.cost ?? 0) + data.cost,
+            turns: data.turns,
+            context_tokens: data.context_tokens,
+            context_limit: data.context_limit,
+          }));
           setBusy(false);
           break;
         }
@@ -289,7 +339,6 @@ export function Chat() {
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setInput("");
     setBusy(true);
-    setMeta(null);
     setError(null);
     wsRef.current.send(text);
   };
@@ -320,6 +369,16 @@ export function Chat() {
             background: connected ? "#4d9375" : "#9b9a97",
             display: "inline-block",
           }} />
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+            {meta && meta.context_limit > 0 && (
+              <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
+            )}
+            {meta && meta.cost > 0 && (
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
+                ${meta.cost.toFixed(4)}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -370,13 +429,6 @@ export function Chat() {
         {streaming && (
           <div style={msgBubble("assistant")}>
             <MdContent text={streaming} />
-          </div>
-        )}
-
-        {/* Meta info */}
-        {meta && (
-          <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", textAlign: "center", margin: "8px 0" }}>
-            {meta.turns} turn{meta.turns !== 1 ? "s" : ""} &middot; ${meta.cost.toFixed(4)}
           </div>
         )}
 

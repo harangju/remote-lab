@@ -28,7 +28,7 @@ from pydantic_ai.messages import (
     ThinkingPartDelta,
 )
 
-from backend.agents import agent, USAGE_LIMITS
+from backend.agents import agent, USAGE_LIMITS, get_context_limit
 from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
@@ -495,7 +495,10 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         if isinstance(m, ModelResponse)
                     ])
 
-                    cost = result.usage().total_tokens / 1000 * 0.003
+                    usage = result.usage()
+                    cost = usage.total_tokens / 1000 * 0.003
+                    context_tokens = usage.request_tokens or 0
+                    context_limit = get_context_limit()
 
                     # Persist tool calls from message history
                     for msg_item in result.new_messages():
@@ -519,10 +522,17 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         "timestamp": _iso_now(),
                         "cost": cost,
                         "turns": turns,
+                        "context_tokens": context_tokens,
+                        "context_limit": context_limit,
                     })
 
                     await ws.send_text(
-                        Done(cost=cost, turns=turns).model_dump_json()
+                        Done(
+                            cost=cost,
+                            turns=turns,
+                            context_tokens=context_tokens,
+                            context_limit=context_limit,
+                        ).model_dump_json()
                     )
 
                 # Mark conversation as done after successful response

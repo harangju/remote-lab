@@ -20,6 +20,8 @@ export interface ConvoMeta {
 
 export interface ConvoDetail extends ConvoMeta {
   messages: Message[];
+  context_tokens: number;
+  context_limit: number;
 }
 
 export interface Message {
@@ -137,7 +139,7 @@ export type WsEvent =
   | { type: "thinking-delta"; delta: string }
   | { type: "text-delta"; delta: string }
   | { type: "tool-use"; name: string; input?: string }
-  | { type: "done"; cost: number; turns: number }
+  | { type: "done"; cost: number; turns: number; context_tokens: number; context_limit: number }
   | { type: "error"; message: string };
 
 export function connectWs(convoId: string): WebSocket {

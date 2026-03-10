@@ -63,3 +63,5 @@ class ConvoMeta(BaseModel):
 class ConvoDetail(ConvoMeta):
     """Conversation metadata plus the full message log."""
     messages: list[dict] = Field(default_factory=list)
+    context_tokens: int = 0
+    context_limit: int = 0

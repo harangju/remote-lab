@@ -175,7 +175,15 @@ def get_conversation(convo_id: str) -> ConvoDetail | None:
     if meta is None:
         return None
     messages = read_messages(convo_id)
-    return ConvoDetail(**meta.model_dump(), messages=messages)
+    # Extract last known context usage from the most recent assistant message
+    context_tokens = 0
+    context_limit = 0
+    for msg in reversed(messages):
+        if msg.get("role") == "assistant" and "context_tokens" in msg:
+            context_tokens = msg["context_tokens"]
+            context_limit = msg["context_limit"]
+            break
+    return ConvoDetail(**meta.model_dump(), messages=messages, context_tokens=context_tokens, context_limit=context_limit)
 
 
 def delete_conversation(convo_id: str) -> bool:

@@ -10,6 +10,26 @@ from pydantic_ai.usage import UsageLimits
 
 from backend import tools
 
+# Context window sizes per model (in tokens)
+MODEL_CONTEXT_LIMITS: dict[str, int] = {
+    "anthropic:claude-sonnet-4-6": 200_000,
+    "openai:gpt-5-nano": 128_000,
+    "google-gla:gemini-2.5-flash": 1_000_000,
+}
+# Budget threshold — compact when usage exceeds this fraction
+CONTEXT_BUDGET_FRACTION = 0.8
+
+
+def get_context_limit() -> int:
+    """Return the context window size for the active model."""
+    if isinstance(model, str):
+        return MODEL_CONTEXT_LIMITS.get(model, 128_000)
+    # FallbackModel — use the first (preferred) model's limit
+    for m in _available:
+        if m in MODEL_CONTEXT_LIMITS:
+            return MODEL_CONTEXT_LIMITS[m]
+    return 128_000
+
 SYSTEM_PROMPT = """\
 You are a helpful coding assistant. Follow these rules strictly:
 - Do NOT read or access environment variables (no printenv, env, /proc/*/environ, etc.)
