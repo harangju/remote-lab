@@ -741,6 +741,14 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         while True:
             prompt = await ws.receive_text()
 
+            # Handle JSON control messages (e.g. stop when no agent is running)
+            try:
+                ctrl = json.loads(prompt)
+                if isinstance(ctrl, dict) and ctrl.get("type") == "stop":
+                    continue  # nothing to stop
+            except (json.JSONDecodeError, TypeError):
+                pass  # Not JSON — treat as a regular text prompt
+
             # Sync state from a completed run
             completed_run = active_runs.get(convo_id)
             if completed_run and completed_run.task and completed_run.task.done():
@@ -900,91 +908,172 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     build_project_instructions, project_path, False
                 )
 
-            # Launch a RunState per target agent
-            runs: list[RunState] = []
-            for ac in target_agents:
-                aid = ac.id if ac else None
-                hist, ctx_tokens = _load_history(aid)
+            # Agent-to-agent @mention loop: run agents, then check output
+            # for @mentions of other agents and chain automatically.
+            MAX_HANDOFFS = 10  # safety valve
+            handoff_count = 0
+            current_targets = target_agents
+            current_prompt = cleaned_prompt
+            is_handoff = False  # first round is from user, subsequent are agent-to-agent
 
-                # Auto-compact if over budget
-                if hist and needs_compaction(ctx_tokens):
-                    old_tokens = ctx_tokens
-                    hist, summary = await compact(hist)
-                    if summary:
-                        est_tokens = sum(len(str(m)) for m in hist) // 4
-                        agent_histories[aid] = (hist, est_tokens)
-                        storage.append_message(convo_id, {
-                            "role": "tool",
-                            "name": "compact",
-                            "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
-                            "timestamp": _iso_now(),
-                        })
-                        storage.save_agent_history(
-                            convo_id,
-                            ModelMessagesTypeAdapter.dump_json(hist),
+            while current_targets and handoff_count <= MAX_HANDOFFS:
+                # Invalidate message cache since agents will append messages
+                _invalidate_message_cache()
+
+                runs: list[RunState] = []
+                for ac in current_targets:
+                    aid = ac.id if ac else None
+                    hist, ctx_tokens = _load_history(aid)
+
+                    # Auto-compact if over budget
+                    if hist and needs_compaction(ctx_tokens):
+                        old_tokens = ctx_tokens
+                        hist, summary = await compact(hist)
+                        if summary:
+                            est_tokens = sum(len(str(m)) for m in hist) // 4
+                            agent_histories[aid] = (hist, est_tokens)
+                            storage.append_message(convo_id, {
+                                "role": "tool",
+                                "name": "compact",
+                                "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
+                                "timestamp": _iso_now(),
+                            })
+                            storage.save_agent_history(
+                                convo_id,
+                                ModelMessagesTypeAdapter.dump_json(hist),
+                                agent_id=aid,
+                            )
+                            await ws.send_text(
+                                Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
+                            )
+
+                    is_first_turn = len(hist) == 0
+                    instructions = _cached_instructions if is_first_turn else _cached_instructions_subsequent
+
+                    # Build the prompt — prepend shared conversation context so
+                    # this agent can see what other agents and the user discussed
+                    agent_prompt = current_prompt
+                    if ac:
+                        _invalidate_message_cache()
+                        shared_ctx = _build_shared_context(convo_id, aid, cached_messages=_get_cached_messages())
+                        if shared_ctx:
+                            if is_handoff:
+                                agent_prompt = (
+                                    f"[Conversation context]\n{shared_ctx}\n\n"
+                                    f"[Handoff from another agent]\n{current_prompt}"
+                                )
+                            else:
+                                agent_prompt = (
+                                    f"[Conversation context]\n{shared_ctx}\n\n"
+                                    f"[New message from user]\n{current_prompt}"
+                                )
+
+                    # Send agent-start event for multi-agent
+                    if ac:
+                        await ws.send_text(AgentStart(
+                            agent_id=ac.id, agent_name=ac.name, agent_color=ac.color,
+                        ).model_dump_json())
+
+                    agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
+                    if ac:
+                        _agent_cache[ac.id] = agent_instance
+                    else:
+                        _agent_cache[None] = agent_instance
+
+                    run = RunState(
+                        convo_id=convo_id,
+                        message_history=list(hist),
+                    )
+                    run.subscribers.add(ws)
+                    active_runs[convo_id] = run  # last one wins for reconnect
+
+                    run.task = asyncio.create_task(
+                        _run_agent_task(
+                            run, agent_prompt, hist, convo_id,
+                            instructions=instructions,
+                            agent_instance=agent_instance,
                             agent_id=aid,
                         )
-                        await ws.send_text(
-                            Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
-                        )
-
-                is_first_turn = len(hist) == 0
-                instructions = _cached_instructions if is_first_turn else _cached_instructions_subsequent
-
-                # Build the prompt — prepend shared conversation context so
-                # this agent can see what other agents and the user discussed
-                agent_prompt = cleaned_prompt
-                if ac:
-                    shared_ctx = _build_shared_context(convo_id, aid, cached_messages=_get_cached_messages())
-                    if shared_ctx:
-                        agent_prompt = (
-                            f"[Conversation context]\n{shared_ctx}\n\n"
-                            f"[New message from user]\n{cleaned_prompt}"
-                        )
-
-                # Send agent-start event for multi-agent
-                if ac:
-                    await ws.send_text(AgentStart(
-                        agent_id=ac.id, agent_name=ac.name, agent_color=ac.color,
-                    ).model_dump_json())
-
-                agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
-                if ac:
-                    _agent_cache[ac.id] = agent_instance
-                else:
-                    _agent_cache[None] = agent_instance
-
-                run = RunState(
-                    convo_id=convo_id,
-                    message_history=list(hist),
-                )
-                run.subscribers.add(ws)
-                active_runs[convo_id] = run  # last one wins for reconnect
-
-                run.task = asyncio.create_task(
-                    _run_agent_task(
-                        run, agent_prompt, hist, convo_id,
-                        instructions=instructions,
-                        agent_instance=agent_instance,
-                        agent_id=aid,
                     )
-                )
-                runs.append(run)
+                    runs.append(run)
 
-            # Wait for all runs to complete
-            try:
-                await asyncio.gather(*[r.task for r in runs if r.task], return_exceptions=True)
-            except asyncio.CancelledError:
-                pass
+                # Wait for all runs to complete, but also listen for stop commands
+                agent_tasks = {r.task for r in runs if r.task}
+                stopped = False
+                while agent_tasks:
+                    ws_recv = asyncio.ensure_future(ws.receive_text())
+                    done_set, _ = await asyncio.wait(
+                        agent_tasks | {ws_recv},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for t in done_set:
+                        if t is ws_recv:
+                            try:
+                                raw = t.result()
+                                ctrl = json.loads(raw)
+                                if isinstance(ctrl, dict) and ctrl.get("type") == "stop":
+                                    for r in runs:
+                                        if r.task and not r.task.done():
+                                            r.task.cancel()
+                                    agent_tasks = set()
+                                    stopped = True
+                                    storage.update_conversation_status(convo_id, ConvoStatus.idle)
+                                    done_ev = Done(cost=0, turns=0, context_tokens=0, context_limit=0)
+                                    await ws.send_text(done_ev.model_dump_json())
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                            except WebSocketDisconnect:
+                                raise
+                        else:
+                            agent_tasks.discard(t)
+                    if not stopped and ws_recv not in done_set:
+                        ws_recv.cancel()
 
-            # Sync state from completed runs
-            for r in runs:
-                if r.status == "done":
-                    # Determine which agent this run was for
-                    aid = None
-                    if r.done_event and r.done_event.get("agent_id"):
-                        aid = r.done_event["agent_id"]
-                    agent_histories[aid] = (r.message_history, r.last_context_tokens)
+                if stopped:
+                    # Sync whatever history we have from cancelled runs
+                    for r in runs:
+                        if r.message_history:
+                            aid = None
+                            if r.done_event and r.done_event.get("agent_id"):
+                                aid = r.done_event["agent_id"]
+                            agent_histories[aid] = (r.message_history, r.last_context_tokens)
+                    break  # back to chat loop
+
+                # Sync state from completed runs and collect output for @mention parsing
+                next_targets: list[AgentConfig] = []
+                next_prompt_parts: list[str] = []
+                for r in runs:
+                    if r.status == "done":
+                        aid = None
+                        if r.done_event and r.done_event.get("agent_id"):
+                            aid = r.done_event["agent_id"]
+                        agent_histories[aid] = (r.message_history, r.last_context_tokens)
+
+                        # Check agent output for @mentions of other agents
+                        if r.full_text and project_agents:
+                            mentioned, remaining_text = parse_mentions(r.full_text, project_agents)
+                            # Only follow mentions that are explicit (not default fallback)
+                            # parse_mentions returns defaults when no @mention found — filter those out
+                            explicit_mentions = [
+                                a for a in mentioned
+                                if f"@{a.id}" in r.full_text.lower() or f"@{a.name.lower()}" in r.full_text.lower()
+                            ]
+                            if explicit_mentions:
+                                for a in explicit_mentions:
+                                    if a.id not in {t.id for t in next_targets}:
+                                        next_targets.append(a)
+                                next_prompt_parts.append(remaining_text)
+
+                # If agents mentioned other agents, chain the next round
+                if next_targets and handoff_count < MAX_HANDOFFS:
+                    handoff_count += 1
+                    current_targets = next_targets
+                    current_prompt = "\n".join(next_prompt_parts) if next_prompt_parts else "Continue."
+                    is_handoff = True
+                    _invalidate_message_cache()
+                    print(f"ws[{convo_id[:8]}]: agent handoff #{handoff_count} → {[a.id for a in next_targets]}")
+                else:
+                    break
 
     except WebSocketDisconnect:
         # Unsubscribe from any active run (task continues in background)

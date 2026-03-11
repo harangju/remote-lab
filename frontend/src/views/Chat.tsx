@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, type WsEvent, type AgentConfig, type Skill } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
@@ -761,11 +761,19 @@ export function Chat() {
     }
   };
 
-  const send = (e: React.FormEvent) => {
-    e.preventDefault();
-    setMentionQuery(null);
-    setSlashQuery(null);
-    const text = input.trim();
+  const stop = () => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "stop" }));
+    }
+    // Optimistically reset busy state so UI is responsive even if WS is flaky
+    setBusy(false);
+    setThinking(false);
+    setWaitingForModel(false);
+  };
+
+  // Shared logic for sending a text message to the agent
+  const sendText = (text: string) => {
     if (!text || busy) return;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -776,19 +784,34 @@ export function Chat() {
     if (isCommand) {
       const cmdName = text.split(/\s/)[0].slice(1);
       const skill = skills.find((s) => s.name === cmdName);
-      // Show prompt-type skills as user messages (they'll be sent to the agent)
       if (skill?.type === "prompt") {
         setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
       }
     } else {
       setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
     }
-    setInput("");
     setBusy(true);
     setWaitingForModel(true);
     setError(null);
     ws.send(text);
   };
+
+  const send = (e: React.FormEvent) => {
+    e.preventDefault();
+    setMentionQuery(null);
+    setSlashQuery(null);
+    const text = input.trim();
+    sendText(text);
+    setInput("");
+  };
+
+  const resend = (text: string) => {
+    sendText(text);
+  };
+
+  // Inline edit state for user messages
+  const [editingMsgIdx, setEditingMsgIdx] = useState<number | null>(null);
+  const [editingMsgValue, setEditingMsgValue] = useState("");
 
   // Keyboard shortcut: Cmd+P for file finder
   useEffect(() => {
@@ -969,10 +992,78 @@ export function Chat() {
                   </div>
                 ) : b.content ? (
                   <div key={j} style={msgBubble(m.role, m.agent_color)}>
-                    <MdContent text={b.content} />
+                    {m.role === "user" && editingMsgIdx === i ? (
+                      <form onSubmit={(e) => {
+                        e.preventDefault();
+                        const text = editingMsgValue.trim();
+                        if (text) {
+                          setEditingMsgIdx(null);
+                          resend(text);
+                        }
+                      }} style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
+                        <input
+                          autoFocus
+                          value={editingMsgValue}
+                          onChange={(e) => setEditingMsgValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Escape") setEditingMsgIdx(null); }}
+                          style={{
+                            ...inputStyle,
+                            background: "transparent",
+                            border: "1px solid var(--border)",
+                            borderRadius: "6px",
+                            color: "inherit",
+                            fontSize: "inherit",
+                          }}
+                        />
+                        <div style={{ display: "flex", gap: "4px", justifyContent: "flex-end" }}>
+                          <button type="button" onClick={() => setEditingMsgIdx(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "0.75rem", cursor: "pointer" }}>Cancel</button>
+                          <button type="submit" style={{ ...btnPrimary, fontSize: "0.75rem", padding: "2px 8px", borderRadius: "6px" }}>Send</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <MdContent text={b.content} />
+                    )}
                   </div>
                 ) : null
               ))}
+              {/* Edit / Rerun actions for user messages */}
+              {m.role === "user" && editingMsgIdx !== i && !busy && (
+                <div style={{ alignSelf: "flex-end", display: "flex", gap: "2px", marginTop: "-2px", marginBottom: "2px" }}>
+                  <button
+                    onClick={() => {
+                      const text = m.blocks.find((b) => b.type === "text")?.content || "";
+                      setEditingMsgIdx(i);
+                      setEditingMsgValue(text);
+                    }}
+                    data-tooltip="Edit & resend"
+                    style={{
+                      background: "none", border: "none", padding: "2px",
+                      color: "var(--text-muted)", cursor: "pointer",
+                      opacity: 0.4, display: "inline-flex", alignItems: "center",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                    onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.4")}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      const text = m.blocks.find((b) => b.type === "text")?.content || "";
+                      if (text) resend(text);
+                    }}
+                    data-tooltip="Rerun"
+                    style={{
+                      background: "none", border: "none", padding: "2px",
+                      color: "var(--text-muted)", cursor: "pointer",
+                      opacity: 0.4, display: "inline-flex", alignItems: "center",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                    onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.4")}
+                  >
+                    <RotateCw size={12} />
+                  </button>
+                </div>
+              )}
             </React.Fragment>
           ))}
 
@@ -1189,9 +1280,15 @@ export function Chat() {
               onKeyDown={handleInputKeyDown}
               autoFocus
             />
-            <button type="submit" style={{ ...btnPrimary, opacity: (busy || !connected) ? 0.5 : 1, borderRadius: "8px" }} disabled={busy || !connected || !input.trim()}>
-              Send
-            </button>
+            {busy ? (
+              <button type="button" onClick={stop} style={{ ...btnPrimary, borderRadius: "8px", background: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                <Square size={14} fill="currentColor" /> Stop
+              </button>
+            ) : (
+              <button type="submit" style={{ ...btnPrimary, opacity: !connected ? 0.5 : 1, borderRadius: "8px" }} disabled={!connected || !input.trim()}>
+                Send
+              </button>
+            )}
           </form>
         </div>
         </div>
