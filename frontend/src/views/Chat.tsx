@@ -1,10 +1,14 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2 } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen } from "lucide-react";
 import { getConvo, updateConvo, connectWs, type WsEvent } from "../api";
 import { backLink, input as inputStyle, btnPrimary } from "../styles";
+import { CodeBlock } from "../components/CodeBlock";
+import { FilePanel } from "../components/FilePanel";
+import { FileFinder } from "../components/FileFinder";
+import { usePanel } from "../hooks/usePanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,12 +74,49 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
 const toolIcons: Record<string, React.FC<{ size?: number }>> = {
   bash: Terminal, read_file: FileText, write_file: Pencil,
   edit_file: Pencil, glob: Search, grep: Search, compact: Minimize2,
+  web_search: Globe,
 };
 
-function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
+/** Extract a short summary from tool input for display in the chip. */
+function toolSummary(name: string, input?: string): string | null {
+  if (!input) return null;
+  if (["read_file", "write_file", "edit_file"].includes(name)) {
+    const pathMatch = input.match(/['"]?path['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    return pathMatch ? pathMatch[1] : input.slice(0, 60);
+  }
+  if (name === "bash") {
+    return input.length > 60 ? input.slice(0, 57) + "..." : input;
+  }
+  if (name === "glob" || name === "grep") {
+    const patMatch = input.match(/['"]?pattern['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    return patMatch ? patMatch[1] : input.slice(0, 60);
+  }
+  return input.length > 60 ? input.slice(0, 57) + "..." : input;
+}
+
+/** Extract file path from tool input. */
+function extractFilePath(name: string, input?: string): string | null {
+  if (!input || !["read_file", "write_file", "edit_file"].includes(name)) return null;
+  const pathMatch = input.match(/['"]?path['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+  return pathMatch ? pathMatch[1] : input.trim();
+}
+
+function ToolChip({ tool, live, onOpenFile }: {
+  tool: ToolCall;
+  live?: boolean;
+  onOpenFile?: (path: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const Icon = toolIcons[tool.name] || Settings;
   const hasDetail = !!(tool.input || tool.output);
+  const summary = toolSummary(tool.name, tool.input);
+  const filePath = extractFilePath(tool.name, tool.input);
+  const isFileOp = !!filePath;
+
+  const handleOpenFile = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (filePath && onOpenFile) onOpenFile(filePath);
+  };
 
   return (
     <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0 }}>
@@ -97,6 +138,15 @@ function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
       >
         <Icon size={13} />
         <span style={{ fontFamily: "monospace" }}>{tool.name}</span>
+        {summary && (
+          <span style={{
+            fontFamily: "monospace",
+            opacity: 0.7,
+            maxWidth: "200px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}>{summary}</span>
+        )}
         {live && <span style={{
           width: 6, height: 6, borderRadius: "50%",
           background: "#d9a754",
@@ -104,6 +154,15 @@ function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
           animation: "pulse 1.5s infinite",
         }} />}
         {tool.output && !live && <span style={{ opacity: 0.5 }}>&#10003;</span>}
+        {isFileOp && !live && onOpenFile && (
+          <span
+            onClick={handleOpenFile}
+            style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
+            data-tooltip="Open in panel"
+          >
+            <ExternalLink size={12} />
+          </span>
+        )}
         {hasDetail && (open
           ? <ChevronUp size={13} style={{ opacity: 0.5 }} />
           : <ChevronDown size={13} style={{ opacity: 0.5 }} />
@@ -119,7 +178,7 @@ function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
           fontSize: "0.75rem",
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
-          maxHeight: "120px",
+          maxHeight: "200px",
           overflowY: "auto",
           color: "var(--text)",
         }}>{tool.input}{tool.input && tool.output ? "\n---\n" : ""}{tool.output}</pre>
@@ -132,63 +191,99 @@ function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
 // Markdown wrapper with code block styling
 // ---------------------------------------------------------------------------
 
-const mdComponents: Record<string, React.FC<any>> = {
-  pre: ({ children }: any) => (
-    <pre style={{
-      background: "var(--code-bg)",
-      borderRadius: "6px",
-      padding: "10px 12px",
-      overflowX: "auto",
-      fontSize: "0.82rem",
-      margin: "6px 0",
-    }}>{children}</pre>
-  ),
-  code: ({ children, className }: any) => {
-    const isBlock = className?.startsWith("language-");
-    if (isBlock) {
-      return <code style={{ fontFamily: "monospace" }}>{children}</code>;
-    }
-    return (
-      <code style={{
-        background: "var(--code-bg)",
-        borderRadius: "3px",
-        padding: "1px 4px",
-        fontSize: "0.85em",
-        fontFamily: "monospace",
-      }}>{children}</code>
-    );
-  },
-  a: ({ href, children }: any) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>{children}</a>
-  ),
-  table: ({ children }: any) => (
-    <table style={{
-      borderCollapse: "collapse",
-      width: "100%",
-      margin: "6px 0",
-      fontSize: "0.85rem",
-    }}>{children}</table>
-  ),
-  th: ({ children }: any) => (
-    <th style={{
-      border: "1px solid var(--border)",
-      padding: "4px 8px",
-      textAlign: "left",
-      background: "var(--bg)",
-    }}>{children}</th>
-  ),
-  td: ({ children }: any) => (
-    <td style={{
-      border: "1px solid var(--border)",
-      padding: "4px 8px",
-    }}>{children}</td>
-  ),
-};
+function makeMdComponents(onOpenSnippet?: (code: string, language: string) => void): Record<string, React.FC<any>> {
+  return {
+    pre: ({ children }: any) => {
+      const codeChild = React.Children.toArray(children).find(
+        (child: any) => child?.props?.className?.startsWith("language-")
+      ) as any;
+      if (codeChild) {
+        const lang = codeChild.props.className.replace("language-", "");
+        const code = String(codeChild.props.children).replace(/\n$/, "");
+        return (
+          <CodeBlock
+            code={code}
+            language={lang}
+            onOpen={onOpenSnippet ? (c, l) => onOpenSnippet(c, l) : undefined}
+          />
+        );
+      }
+      const text = extractTextContent(children);
+      if (text) {
+        return (
+          <CodeBlock
+            code={text}
+            language="text"
+            onOpen={onOpenSnippet ? (c, l) => onOpenSnippet(c, l) : undefined}
+          />
+        );
+      }
+      return (
+        <pre style={{
+          background: "var(--code-bg)",
+          borderRadius: "6px",
+          padding: "10px 12px",
+          overflowX: "auto",
+          fontSize: "0.82rem",
+          margin: "6px 0",
+        }}>{children}</pre>
+      );
+    },
+    code: ({ children, className }: any) => {
+      if (className?.startsWith("language-")) {
+        return <code className={className}>{children}</code>;
+      }
+      return (
+        <code style={{
+          background: "var(--code-bg)",
+          borderRadius: "3px",
+          padding: "1px 4px",
+          fontSize: "0.85em",
+          fontFamily: "monospace",
+        }}>{children}</code>
+      );
+    },
+    a: ({ href, children }: any) => (
+      <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>{children}</a>
+    ),
+    table: ({ children }: any) => (
+      <table style={{
+        borderCollapse: "collapse",
+        width: "100%",
+        margin: "6px 0",
+        fontSize: "0.85rem",
+      }}>{children}</table>
+    ),
+    th: ({ children }: any) => (
+      <th style={{
+        border: "1px solid var(--border)",
+        padding: "4px 8px",
+        textAlign: "left",
+        background: "var(--bg)",
+      }}>{children}</th>
+    ),
+    td: ({ children }: any) => (
+      <td style={{
+        border: "1px solid var(--border)",
+        padding: "4px 8px",
+      }}>{children}</td>
+    ),
+  };
+}
 
-function MdContent({ text }: { text: string }) {
+/** Recursively extract text content from React children. */
+function extractTextContent(children: any): string {
+  if (typeof children === "string") return children;
+  if (Array.isArray(children)) return children.map(extractTextContent).join("");
+  if (children?.props?.children) return extractTextContent(children.props.children);
+  return "";
+}
+
+function MdContent({ text, onOpenSnippet }: { text: string; onOpenSnippet?: (code: string, language: string) => void }) {
+  const components = useMemo(() => makeMdComponents(onOpenSnippet), [onOpenSnippet]);
   return (
     <div style={{ lineHeight: 1.55 }} className="md-content">
-      <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]} components={components}>{text}</Markdown>
     </div>
   );
 }
@@ -215,13 +310,73 @@ export function Chat() {
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef<StreamBlock[]>([]);
-  const reconnectTimer = useRef<number>();
+  const reconnectTimer = useRef<number | undefined>(undefined);
+
+  // Panel hook
+  const panel = usePanel(projectId);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
   useEffect(scrollToBottom, [messages, streamBlocks, thinking, scrollToBottom]);
+
+  // Collect touched files from conversation for FileFinder
+  const touchedFiles = useMemo(() => {
+    const paths = new Set<string>();
+    const allBlocks = [...messages.flatMap((m) => m.blocks), ...streamBlocks];
+    for (const b of allBlocks) {
+      if (b.type === "tool") {
+        const p = extractFilePath(b.name, b.input);
+        if (p) paths.add(p);
+      }
+    }
+    return Array.from(paths);
+  }, [messages, streamBlocks]);
+
+  /** Open a file in the panel, with dirty guard. */
+  const handleOpenFile = useCallback((path: string) => {
+    if (panel.dirty) {
+      if (!window.confirm("You have unsaved changes. Discard and open another file?")) return;
+    }
+    panel.openFile(path);
+  }, [panel]);
+
+  /** Open a code snippet in the panel (from inline code blocks). */
+  const handleOpenSnippet = useCallback((code: string, language: string) => {
+    if (panel.dirty) {
+      if (!window.confirm("You have unsaved changes. Discard and view snippet?")) return;
+    }
+    // For snippets, we set the file directly — no backend fetch needed
+    // We do this by calling openFile with a synthetic approach
+    // Actually, let's just use the panel state directly
+    panel.forceClose();
+    // Small delay to allow state to clear, then open
+    setTimeout(() => {
+      panel.openFile(`snippet.${language}`);
+    }, 0);
+    // Actually, snippets don't exist on disk. Let's handle this differently.
+    // For now, skip snippet opening in the panel — the CodeBlock already has
+    // copy and expand features. The panel is for real files.
+  }, [panel]);
+
+  /** Close panel with dirty guard. */
+  const handleClosePanel = useCallback(() => {
+    if (panel.dirty) {
+      if (!window.confirm("You have unsaved changes. Discard?")) return;
+    }
+    panel.forceClose();
+  }, [panel]);
+
+  /** Toggle edit mode with dirty guard when turning off. */
+  const handleToggleEdit = useCallback(() => {
+    if (panel.editMode && panel.dirty) {
+      if (!window.confirm("You have unsaved changes. Discard?")) return;
+      panel.cancelEdit();
+    } else {
+      panel.setEditMode(!panel.editMode);
+    }
+  }, [panel]);
 
   // Load existing messages — interleave tool calls with assistant messages
   useEffect(() => {
@@ -233,10 +388,9 @@ export function Chat() {
         let pendingBlocks: StreamBlock[] = [];
 
         for (const m of detail.messages) {
-          if (m.role === "tool") {
+          if ((m as any).role === "tool") {
             pendingBlocks.push({ type: "tool", name: (m as any).name, input: (m as any).input });
           } else if (m.role === "user") {
-            // Flush any standalone tool blocks (e.g. compact) before a user message
             if (pendingBlocks.length > 0) {
               msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
               pendingBlocks = [];
@@ -252,12 +406,10 @@ export function Chat() {
             pendingBlocks = [];
           }
         }
-        // Flush any trailing standalone tool blocks
         if (pendingBlocks.length > 0) {
           msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
         }
         setMessages(msgs);
-        // Sum cost from all assistant messages in the persisted history
         const totalCost = detail.messages
           .filter((m) => m.role === "assistant" && typeof (m as any).cost === "number")
           .reduce((sum, m) => sum + ((m as any).cost as number), 0);
@@ -320,12 +472,16 @@ export function Chat() {
         }
         case "tool-result": {
           setWaitingForModel(true);
-          // Find the last tool block with matching name and update its output
           const blocks = [...blocksRef.current];
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (b.type === "tool" && b.name === data.name && !b.output) {
               blocks[i] = { ...b, output: data.output };
+              // Conflict detection: if agent modified a file that's open in panel
+              if (["write_file", "edit_file"].includes(data.name) && b.input) {
+                const path = extractFilePath(data.name, b.input);
+                if (path) panel.notifyExternalChange(path);
+              }
               break;
             }
           }
@@ -375,7 +531,6 @@ export function Chat() {
 
     ws.addEventListener("close", (event) => {
       setConnected(false);
-      // Auto-reconnect on unexpected close (not user-initiated or replaced)
       if (event.code !== 1000 && event.code !== 4409) {
         reconnectTimer.current = window.setTimeout(
           () => setWsAttempt((a) => a + 1),
@@ -429,6 +584,18 @@ export function Chat() {
     ws.send(text);
   };
 
+  // Keyboard shortcut: Cmd+P for file finder
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        e.preventDefault();
+        panel.toggleFileFinder();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [panel.toggleFileFinder]);
+
   // Styles
   const msgBubble = (role: "user" | "assistant"): React.CSSProperties => ({
     maxWidth: "85%",
@@ -443,41 +610,109 @@ export function Chat() {
     border: `1px solid ${role === "user" ? "var(--border-user)" : "var(--border)"}`,
   });
 
+  // Resizable panel width
+  const [panelWidth, setPanelWidth] = useState(500);
+  const dragging = useRef(false);
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    const startX = e.clientX;
+    const startWidth = panelWidth;
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = startX - e.clientX;
+      setPanelWidth(Math.max(280, Math.min(window.innerWidth * 0.7, startWidth + delta)));
+    };
+    const onMouseUp = () => {
+      dragging.current = false;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [panelWidth]);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", maxWidth: "48rem", margin: "0 auto" }}>
-      {/* Header */}
-      <div style={{ padding: "12px 1.5rem", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-        <Link to={`/${projectId}`} style={backLink}>&larr; Conversations</Link>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          {editing ? (
-            <input
-              autoFocus
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={saveTitle}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveTitle();
-                if (e.key === "Escape") setEditing(false);
-              }}
+    <div style={{ display: "flex", height: "100vh" }}>
+      {/* Chat column */}
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        minWidth: 0,
+      }}>
+        {/* Header */}
+        <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        <div style={{ padding: "12px 1.5rem", maxWidth: "48rem", margin: "0 auto" }}>
+          <Link to={`/${projectId}`} style={backLink}>&larr; Conversations</Link>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {editing ? (
+              <input
+                autoFocus
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={saveTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveTitle();
+                  if (e.key === "Escape") setEditing(false);
+                }}
+                style={{
+                  fontWeight: 600,
+                  fontSize: "1rem",
+                  background: "var(--bg-surface)",
+                  color: "var(--text)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "4px",
+                  padding: "1px 6px",
+                  outline: "none",
+                  minWidth: 0,
+                  maxWidth: "20rem",
+                }}
+              />
+            ) : (
+              <>
+                <span style={{ fontWeight: 600 }}>{title}</span>
+                <button
+                  onClick={startEdit}
+                  data-tooltip="Rename"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: "2px",
+                    color: "var(--text-muted)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                  }}
+                >
+                  <Pencil size={14} />
+                </button>
+              </>
+            )}
+            <span
+              data-tooltip={connected ? "Connected" : "Disconnected"}
               style={{
-                fontWeight: 600,
-                fontSize: "1rem",
-                background: "var(--bg-surface)",
-                color: "var(--text)",
-                border: "1px solid var(--border)",
-                borderRadius: "4px",
-                padding: "1px 6px",
-                outline: "none",
-                minWidth: 0,
-                maxWidth: "20rem",
+                width: 8, height: 8, borderRadius: "50%",
+                background: connected ? "#4d9375" : "#9b9a97",
+                display: "inline-block",
               }}
             />
-          ) : (
-            <>
-              <span style={{ fontWeight: 600 }}>{title}</span>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+              {meta && meta.context_limit > 0 && (
+                <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
+              )}
+              {meta && meta.cost > 0 && (
+                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
+                  ${meta.cost.toFixed(4)}
+                </span>
+              )}
               <button
-                onClick={startEdit}
-                data-tooltip="Rename"
+                onClick={panel.toggleFileFinder}
+                data-tooltip="Find file (⌘P)"
                 style={{
                   background: "none",
                   border: "none",
@@ -485,113 +720,163 @@ export function Chat() {
                   color: "var(--text-muted)",
                   display: "inline-flex",
                   alignItems: "center",
+                  cursor: "pointer",
                 }}
               >
-                <Pencil size={14} />
+                <FolderOpen size={15} />
               </button>
-            </>
-          )}
-          <span
-            data-tooltip={connected ? "Connected" : "Disconnected"}
-            style={{
-              width: 8, height: 8, borderRadius: "50%",
-              background: connected ? "#4d9375" : "#9b9a97",
-              display: "inline-block",
-            }}
-          />
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-            {meta && meta.context_limit > 0 && (
-              <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
-            )}
-            {meta && meta.cost > 0 && (
-              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                ${meta.cost.toFixed(4)}
-              </span>
-            )}
+            </div>
           </div>
+        </div>
+        </div>
+
+        {/* Messages */}
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px", maxWidth: "48rem", width: "100%", margin: "0 auto", flex: 1 }}>
+          {messages.map((m, i) => (
+            <React.Fragment key={i}>
+              {m.blocks.map((b, j) => (
+                b.type === "tool" ? (
+                  <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+                    <ToolChip tool={b} onOpenFile={handleOpenFile} />
+                  </div>
+                ) : b.content ? (
+                  <div key={j} style={msgBubble(m.role)}>
+                    <MdContent text={b.content} />
+                  </div>
+                ) : null
+              ))}
+            </React.Fragment>
+          ))}
+
+          {/* Live streaming blocks */}
+          {streamBlocks.map((b, j) => (
+            b.type === "tool" ? (
+              <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+                <ToolChip tool={b} live={!b.output} onOpenFile={handleOpenFile} />
+              </div>
+            ) : b.content ? (
+              <div key={j} style={msgBubble("assistant")}>
+                <MdContent text={b.content} />
+              </div>
+            ) : null
+          ))}
+
+          {/* Thinking / waiting indicator */}
+          {waitingForModel && (
+            <div style={{
+              alignSelf: "flex-start",
+              padding: "10px 14px",
+              fontSize: "0.85rem",
+              color: "var(--text-muted)",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}>
+              <span style={{ display: "inline-flex", gap: "3px" }}>
+                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0s" }}>.</span>
+                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.2s" }}>.</span>
+                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.4s" }}>.</span>
+              </span>
+              <span>{thinking ? "Thinking" : "Working..."}</span>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{ fontSize: "0.8rem", color: "#c4554d", textAlign: "center", margin: "8px 0" }}>
+              {error}
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+        </div>
+
+        {/* Input */}
+        <div style={{ flexShrink: 0, padding: "0 1.5rem 12px" }}>
+        <form onSubmit={send} style={{
+          display: "flex",
+          gap: "8px",
+          maxWidth: "48rem",
+          width: "100%",
+          margin: "0 auto",
+          padding: "10px 14px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "12px",
+        }}>
+          <input
+            style={{
+              ...inputStyle,
+              background: "transparent",
+              border: "none",
+            }}
+            placeholder={busy ? "Waiting for response..." : "Type a message..."}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            autoFocus
+          />
+          <button type="submit" style={{ ...btnPrimary, opacity: (busy || !connected) ? 0.5 : 1, borderRadius: "8px" }} disabled={busy || !connected || !input.trim()}>
+            Send
+          </button>
+        </form>
         </div>
       </div>
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px" }}>
-        {messages.map((m, i) => (
-          <React.Fragment key={i}>
-            {m.blocks.map((b, j) => (
-              b.type === "tool" ? (
-                <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
-                  <ToolChip tool={b} />
-                </div>
-              ) : b.content ? (
-                <div key={j} style={msgBubble(m.role)}>
-                  <MdContent text={b.content} />
-                </div>
-              ) : null
-            ))}
-          </React.Fragment>
-        ))}
-
-        {/* Live streaming blocks — interleaved tool calls and text */}
-        {streamBlocks.map((b, j) => (
-          b.type === "tool" ? (
-            <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
-              <ToolChip tool={b} live={!b.output} />
-            </div>
-          ) : b.content ? (
-            <div key={j} style={msgBubble("assistant")}>
-              <MdContent text={b.content} />
-            </div>
-          ) : null
-        ))}
-
-        {/* Thinking / waiting indicator — shows before first response and between tool rounds */}
-        {waitingForModel && (
-          <div style={{
-            alignSelf: "flex-start",
-            padding: "10px 14px",
-            fontSize: "0.85rem",
-            color: "var(--text-muted)",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-          }}>
-            <span style={{ display: "inline-flex", gap: "3px" }}>
-              <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0s" }}>.</span>
-              <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.2s" }}>.</span>
-              <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.4s" }}>.</span>
-            </span>
-            <span>{thinking ? "Thinking" : "Working..."}</span>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div style={{ fontSize: "0.8rem", color: "#c4554d", textAlign: "center", margin: "8px 0" }}>
-            {error}
-          </div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input */}
-      <form onSubmit={send} style={{
-        padding: "12px 1.5rem",
-        borderTop: "1px solid var(--border)",
-        display: "flex",
-        gap: "8px",
-        flexShrink: 0,
-      }}>
-        <input
-          style={inputStyle}
-          placeholder={busy ? "Waiting for response..." : "Type a message..."}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          autoFocus
+      {/* Resize handle + File panel */}
+      {panel.file && (
+        <>
+        <div
+          onMouseDown={onDragStart}
+          style={{
+            width: "5px",
+            cursor: "col-resize",
+            background: "transparent",
+            flexShrink: 0,
+            position: "relative",
+            zIndex: 10,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+          onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = "transparent"; }}
         />
-        <button type="submit" style={{ ...btnPrimary, opacity: (busy || !connected) ? 0.5 : 1 }} disabled={busy || !connected || !input.trim()}>
-          Send
-        </button>
-      </form>
+        <div
+          className="artifact-panel-wrap"
+          style={{
+            width: `${panelWidth}px`,
+            flexShrink: 0,
+            height: "100vh",
+            overflow: "hidden",
+          }}
+        >
+          <FilePanel
+            file={panel.file}
+            editMode={panel.editMode}
+            dirty={panel.dirty}
+            saving={panel.saving}
+            externalChange={panel.externalChange}
+            onToggleEdit={handleToggleEdit}
+            onContentChange={panel.updateContent}
+            onSave={panel.saveFile}
+            onCancel={panel.cancelEdit}
+            onClose={handleClosePanel}
+            onReload={panel.reloadFile}
+            onDismissExternal={panel.dismissExternalChange}
+          />
+        </div>
+        </>
+      )}
+
+      {/* File finder overlay */}
+      {panel.showFileFinder && (
+        <FileFinder
+          files={panel.fileList || []}
+          loading={panel.fileListLoading}
+          touchedFiles={touchedFiles}
+          onSelect={handleOpenFile}
+          onClose={panel.toggleFileFinder}
+        />
+      )}
     </div>
   );
 }

@@ -80,9 +80,28 @@ export function injectTheme() {
       font-family: inherit;
       font-size: 0.875rem;
     }
+    /* Hide scrollbars but keep scrolling */
+    * {
+      scrollbar-width: none;
+    }
+    *::-webkit-scrollbar {
+      display: none;
+    }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
+    }
+    /* Artifact panel: full-screen overlay on mobile */
+    @media (max-width: 768px) {
+      .artifact-panel-wrap {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        z-index: 100;
+      }
     }
     /* Markdown content resets */
     .md-content p { margin: 0 0 0.4em; }

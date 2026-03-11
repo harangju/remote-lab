@@ -138,6 +138,25 @@ export function deleteConvo(convoId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Files
+// ---------------------------------------------------------------------------
+
+export function readFile(projectId: string, path: string): Promise<{ path: string; content: string }> {
+  return request(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`);
+}
+
+export function writeFile(projectId: string, path: string, content: string): Promise<{ path: string; size: number }> {
+  return request(`/projects/${projectId}/file`, {
+    method: "POST",
+    body: JSON.stringify({ path, content }),
+  });
+}
+
+export function listFiles(projectId: string): Promise<{ root: string; files: string[] }> {
+  return request(`/projects/${projectId}/files`);
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket
 // ---------------------------------------------------------------------------
 

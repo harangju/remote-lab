@@ -300,6 +300,87 @@ async def api_delete_convo(convo_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
 
+@api.get("/projects/{project_id}/file")
+async def api_read_file(project_id: str, path: str):
+    """Read a file from the project's workdir for the artifact panel."""
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_path = Path(proj.path)
+    if not project_path.exists() or not project_path.is_dir():
+        raise HTTPException(status_code=400, detail="Project path does not exist")
+    target = (project_path / path).resolve()
+    if not str(target).startswith(str(project_path.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        content = target.read_text(errors="replace")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    # Cap at 200KB
+    if len(content) > 200_000:
+        content = content[:200_000] + "\n\n--- truncated at 200KB ---"
+    return {"path": path, "content": content}
+
+
+from pydantic import BaseModel as _BaseModel
+
+
+class FileWrite(_BaseModel):
+    path: str
+    content: str
+
+
+@api.post("/projects/{project_id}/file")
+async def api_write_file(project_id: str, body: FileWrite):
+    """Write a file in the project's workdir."""
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_path = Path(proj.path)
+    if not project_path.exists() or not project_path.is_dir():
+        raise HTTPException(status_code=400, detail="Project path does not exist")
+    target = (project_path / body.path).resolve()
+    if not str(target).startswith(str(project_path.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body.content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"path": body.path, "size": len(body.content.encode())}
+
+
+_EXCLUDED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv",
+                  ".next", "dist", "build", ".cache", ".mypy_cache", ".ruff_cache"}
+
+
+@api.get("/projects/{project_id}/files")
+async def api_list_files(project_id: str):
+    """List all files in the project's workdir (recursive, filtered)."""
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_path = Path(proj.path).resolve()
+    if not project_path.exists() or not project_path.is_dir():
+        raise HTTPException(status_code=400, detail="Project path does not exist")
+    files: list[str] = []
+    for root, dirs, filenames in os.walk(project_path):
+        # Filter excluded dirs in-place to prevent os.walk from descending
+        dirs[:] = [d for d in dirs if d not in _EXCLUDED_DIRS and not d.startswith(".")]
+        for f in sorted(filenames):
+            if f.startswith("."):
+                continue
+            rel = os.path.relpath(os.path.join(root, f), project_path)
+            files.append(rel)
+            if len(files) >= 5000:
+                break
+        if len(files) >= 5000:
+            break
+    return {"root": proj.path, "files": sorted(files)}
+
+
 app.include_router(api)
 
 # ---------------------------------------------------------------------------
