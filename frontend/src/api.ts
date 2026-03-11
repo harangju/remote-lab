@@ -140,6 +140,7 @@ export type WsEvent =
   | { type: "thinking-delta"; delta: string }
   | { type: "text-delta"; delta: string }
   | { type: "tool-use"; name: string; input?: string }
+  | { type: "tool-result"; name: string; output: string }
   | { type: "done"; cost: number; turns: number; context_tokens: number; context_limit: number }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "error"; message: string };

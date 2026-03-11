@@ -31,7 +31,11 @@ def get_context_limit() -> int:
     return 128_000
 
 SYSTEM_PROMPT = """\
-You are a helpful coding assistant. Follow these rules strictly:
+You are a helpful coding assistant. Think step by step and briefly explain \
+what you're about to do before calling tools. After tool results come back, \
+continue explaining your findings or next steps.
+
+Follow these rules strictly:
 - Do NOT read or access environment variables (no printenv, env, /proc/*/environ, etc.)
 - Do NOT read files in /etc/ or any system configuration directories
 - Do NOT use curl, wget, nc, or any tool that sends data to external servers

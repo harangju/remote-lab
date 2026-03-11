@@ -52,6 +52,20 @@ async def _notify_tool(name: str, input_summary: str):
             pass
 
 
+async def _notify_tool_result(name: str, output: str):
+    """Send a tool-result event via the broadcast function, if set."""
+    fn = _broadcast_fn.get()
+    if fn:
+        try:
+            await fn(json.dumps({
+                "type": "tool-result",
+                "name": name,
+                "output": output[:500],
+            }))
+        except Exception:
+            pass
+
+
 def register(agent):
     """Register all tools on the given PydanticAI agent."""
 
@@ -72,7 +86,9 @@ def register(agent):
         # Truncate very long output
         if len(output) > 50_000:
             output = output[:50_000] + "\n... (truncated)"
-        return f"exit {proc.returncode}\n{output}"
+        result = f"exit {proc.returncode}\n{output}"
+        await _notify_tool_result("bash", result)
+        return result
 
     @agent.tool
     async def read_file(ctx: RunContext, path: str) -> str:
@@ -81,14 +97,19 @@ def register(agent):
         workdir = get_workdir()
         p = (workdir / path).resolve()
         if not str(p).startswith(str(workdir)):
-            return "Error: path outside working directory"
+            result = "Error: path outside working directory"
+            await _notify_tool_result("read_file", result)
+            return result
         try:
             text = p.read_text(errors="replace")
             if len(text) > 100_000:
                 text = text[:100_000] + "\n... (truncated)"
+            await _notify_tool_result("read_file", f"{len(text)} chars")
             return text
         except Exception as e:
-            return f"Error: {e}"
+            result = f"Error: {e}"
+            await _notify_tool_result("read_file", result)
+            return result
 
     @agent.tool
     async def write_file(ctx: RunContext, path: str, content: str) -> str:
@@ -97,13 +118,19 @@ def register(agent):
         workdir = get_workdir()
         p = (workdir / path).resolve()
         if not str(p).startswith(str(workdir)):
-            return "Error: path outside working directory"
+            result = "Error: path outside working directory"
+            await _notify_tool_result("write_file", result)
+            return result
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content)
-            return f"Wrote {len(content)} bytes to {path}"
+            result = f"Wrote {len(content)} bytes to {path}"
+            await _notify_tool_result("write_file", result)
+            return result
         except Exception as e:
-            return f"Error: {e}"
+            result = f"Error: {e}"
+            await _notify_tool_result("write_file", result)
+            return result
 
     @agent.tool
     async def edit_file(ctx: RunContext, path: str, old_string: str, new_string: str) -> str:
@@ -112,16 +139,23 @@ def register(agent):
         workdir = get_workdir()
         p = (workdir / path).resolve()
         if not str(p).startswith(str(workdir)):
-            return "Error: path outside working directory"
+            result = "Error: path outside working directory"
+            await _notify_tool_result("edit_file", result)
+            return result
         try:
             text = p.read_text()
             if old_string not in text:
-                return "Error: old_string not found in file"
+                result = "Error: old_string not found in file"
+                await _notify_tool_result("edit_file", result)
+                return result
             text = text.replace(old_string, new_string, 1)
             p.write_text(text)
+            await _notify_tool_result("edit_file", "OK")
             return "OK"
         except Exception as e:
-            return f"Error: {e}"
+            result = f"Error: {e}"
+            await _notify_tool_result("edit_file", result)
+            return result
 
     @agent.tool
     async def glob(ctx: RunContext, pattern: str) -> str:
@@ -134,7 +168,9 @@ def register(agent):
         for m in matches[:200]:
             if str(m.resolve()).startswith(str(workdir)):
                 results.append(str(m.relative_to(workdir)))
-        return "\n".join(results) if results else "No matches"
+        result = "\n".join(results) if results else "No matches"
+        await _notify_tool_result("glob", f"{len(results)} matches")
+        return result
 
     @agent.tool
     async def grep(ctx: RunContext, pattern: str, path: str = ".", include: str = "") -> str:
@@ -155,4 +191,6 @@ def register(agent):
         output = stdout.decode(errors="replace")
         if len(output) > 30_000:
             output = output[:30_000] + "\n... (truncated)"
-        return output or "No matches"
+        result = output or "No matches"
+        await _notify_tool_result("grep", result)
+        return result

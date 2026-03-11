@@ -13,12 +13,16 @@ import { backLink, input as inputStyle, btnPrimary } from "../styles";
 interface ToolCall {
   name: string;
   input?: string;
+  output?: string;
 }
+
+type StreamBlock =
+  | { type: "text"; content: string }
+  | { type: "tool"; name: string; input?: string; output?: string };
 
 interface DisplayMessage {
   role: "user" | "assistant";
-  content: string;
-  tools?: ToolCall[];
+  blocks: StreamBlock[];
 }
 
 interface MetaInfo {
@@ -71,17 +75,18 @@ const toolIcons: Record<string, React.FC<{ size?: number }>> = {
 function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
   const [open, setOpen] = useState(false);
   const Icon = toolIcons[tool.name] || Settings;
+  const hasDetail = !!(tool.input || tool.output);
 
   return (
     <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0 }}>
       <button
-        onClick={() => tool.input && setOpen(!open)}
+        onClick={() => hasDetail && setOpen(!open)}
         style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
           borderRadius: "6px",
           padding: "4px 8px",
-          cursor: tool.input ? "pointer" : "default",
+          cursor: hasDetail ? "pointer" : "default",
           color: "var(--text-muted)",
           fontSize: "0.78rem",
           display: "inline-flex",
@@ -98,12 +103,13 @@ function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
           display: "inline-block",
           animation: "pulse 1.5s infinite",
         }} />}
-        {tool.input && (open
+        {tool.output && !live && <span style={{ opacity: 0.5 }}>&#10003;</span>}
+        {hasDetail && (open
           ? <ChevronUp size={13} style={{ opacity: 0.5 }} />
           : <ChevronDown size={13} style={{ opacity: 0.5 }} />
         )}
       </button>
-      {open && tool.input && (
+      {open && hasDetail && (
         <pre style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
@@ -116,7 +122,7 @@ function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
           maxHeight: "120px",
           overflowY: "auto",
           color: "var(--text)",
-        }}>{tool.input}</pre>
+        }}>{tool.input}{tool.input && tool.output ? "\n---\n" : ""}{tool.output}</pre>
       )}
     </div>
   );
@@ -194,9 +200,8 @@ function MdContent({ text }: { text: string }) {
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [streaming, setStreaming] = useState("");
+  const [streamBlocks, setStreamBlocks] = useState<StreamBlock[]>([]);
   const [thinking, setThinking] = useState(false);
-  const [tools, setTools] = useState<ToolCall[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState<MetaInfo | null>(null);
@@ -205,14 +210,14 @@ export function Chat() {
   const [wsAttempt, setWsAttempt] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const toolsRef = useRef<ToolCall[]>([]);
+  const blocksRef = useRef<StreamBlock[]>([]);
   const reconnectTimer = useRef<number>();
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  useEffect(scrollToBottom, [messages, streaming, thinking, tools, scrollToBottom]);
+  useEffect(scrollToBottom, [messages, streamBlocks, thinking, scrollToBottom]);
 
   // Load existing messages — interleave tool calls with assistant messages
   useEffect(() => {
@@ -220,30 +225,29 @@ export function Chat() {
     getConvo(convId)
       .then((detail) => {
         const msgs: DisplayMessage[] = [];
-        let pendingTools: ToolCall[] = [];
+        let pendingBlocks: StreamBlock[] = [];
 
         for (const m of detail.messages) {
           if (m.role === "tool") {
-            pendingTools.push({ name: (m as any).name, input: (m as any).input });
+            pendingBlocks.push({ type: "tool", name: (m as any).name, input: (m as any).input });
           } else if (m.role === "user") {
-            // Flush any standalone tool calls (e.g. compact) before a user message
-            if (pendingTools.length > 0) {
-              msgs.push({ role: "assistant", content: "", tools: [...pendingTools] });
-              pendingTools = [];
+            // Flush any standalone tool blocks (e.g. compact) before a user message
+            if (pendingBlocks.length > 0) {
+              msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
+              pendingBlocks = [];
             }
-            msgs.push({ role: "user", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) });
+            msgs.push({ role: "user", blocks: [{ type: "text", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }] });
           } else if (m.role === "assistant") {
-            msgs.push({
-              role: "assistant",
-              content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-              tools: pendingTools.length > 0 ? [...pendingTools] : undefined,
-            });
-            pendingTools = [];
+            const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+            const blocks: StreamBlock[] = [...pendingBlocks];
+            if (content) blocks.push({ type: "text", content });
+            msgs.push({ role: "assistant", blocks });
+            pendingBlocks = [];
           }
         }
-        // Flush any trailing standalone tool calls
-        if (pendingTools.length > 0) {
-          msgs.push({ role: "assistant", content: "", tools: [...pendingTools] });
+        // Flush any trailing standalone tool blocks
+        if (pendingBlocks.length > 0) {
+          msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
         }
         setMessages(msgs);
         // Sum cost from all assistant messages in the persisted history
@@ -286,30 +290,45 @@ export function Chat() {
         case "thinking-delta":
           setThinking(true);
           break;
-        case "text-delta":
+        case "text-delta": {
           setThinking(false);
-          setStreaming((prev) => prev + data.delta);
+          const blocks = blocksRef.current;
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "text") {
+            last.content += data.delta;
+          } else {
+            blocks.push({ type: "text", content: data.delta });
+          }
+          blocksRef.current = [...blocks];
+          setStreamBlocks(blocksRef.current);
           break;
+        }
         case "tool-use": {
-          const tc: ToolCall = { name: data.name, input: data.input };
-          toolsRef.current = [...toolsRef.current, tc];
-          setTools([...toolsRef.current]);
+          blocksRef.current = [...blocksRef.current, { type: "tool", name: data.name, input: data.input }];
+          setStreamBlocks(blocksRef.current);
+          break;
+        }
+        case "tool-result": {
+          // Find the last tool block with matching name and update its output
+          const blocks = [...blocksRef.current];
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const b = blocks[i];
+            if (b.type === "tool" && b.name === data.name && !b.output) {
+              blocks[i] = { ...b, output: data.output };
+              break;
+            }
+          }
+          blocksRef.current = blocks;
+          setStreamBlocks(blocksRef.current);
           break;
         }
         case "done": {
-          const doneTools = toolsRef.current.length > 0 ? [...toolsRef.current] : undefined;
-          setStreaming((prev) => {
-            if (prev) {
-              setMessages((msgs) => [...msgs, {
-                role: "assistant",
-                content: prev,
-                tools: doneTools,
-              }]);
-            }
-            return "";
-          });
-          toolsRef.current = [];
-          setTools([]);
+          const finalBlocks = blocksRef.current;
+          if (finalBlocks.length > 0) {
+            setMessages((msgs) => [...msgs, { role: "assistant", blocks: [...finalBlocks] }]);
+          }
+          blocksRef.current = [];
+          setStreamBlocks([]);
           setThinking(false);
           setMeta((prev) => ({
             cost: (prev?.cost ?? 0) + data.cost,
@@ -324,21 +343,17 @@ export function Chat() {
           setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev);
           setMessages((msgs) => [...msgs, {
             role: "assistant" as const,
-            content: "",
-            tools: [{ name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }],
+            blocks: [{ type: "tool" as const, name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }],
           }]);
           setBusy(false);
           break;
         case "error":
           setError(data.message);
-          setStreaming((prev) => {
-            if (prev) {
-              setMessages((msgs) => [...msgs, { role: "assistant", content: prev }]);
-            }
-            return "";
-          });
-          toolsRef.current = [];
-          setTools([]);
+          if (blocksRef.current.length > 0) {
+            setMessages((msgs) => [...msgs, { role: "assistant", blocks: [...blocksRef.current] }]);
+          }
+          blocksRef.current = [];
+          setStreamBlocks([]);
           setThinking(false);
           setBusy(false);
           break;
@@ -371,7 +386,7 @@ export function Chat() {
     if (!text || busy || !wsRef.current) return;
     const isCommand = text.startsWith("/");
     if (!isCommand) {
-      setMessages((prev) => [...prev, { role: "user", content: text }]);
+      setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
     }
     setInput("");
     setBusy(true);
@@ -422,22 +437,22 @@ export function Chat() {
       <div style={{ flex: 1, overflowY: "auto", padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px" }}>
         {messages.map((m, i) => (
           <React.Fragment key={i}>
-            {/* Tool chips above assistant bubble */}
-            {m.tools && m.tools.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
-                {m.tools.map((t, j) => <ToolChip key={j} tool={t} />)}
-              </div>
-            )}
-            {m.content && (
-              <div style={msgBubble(m.role)}>
-                <MdContent text={m.content} />
-              </div>
-            )}
+            {m.blocks.map((b, j) => (
+              b.type === "tool" ? (
+                <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+                  <ToolChip tool={b} />
+                </div>
+              ) : b.content ? (
+                <div key={j} style={msgBubble(m.role)}>
+                  <MdContent text={b.content} />
+                </div>
+              ) : null
+            ))}
           </React.Fragment>
         ))}
 
         {/* Status indicator */}
-        {busy && !streaming && (
+        {busy && streamBlocks.length === 0 && (
           <div style={{
             alignSelf: "flex-start",
             padding: "10px 14px",
@@ -452,23 +467,22 @@ export function Chat() {
               <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.2s" }}>.</span>
               <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.4s" }}>.</span>
             </span>
-            <span>{thinking ? "Thinking" : tools.length > 0 ? "Using tools" : "Waiting for response"}</span>
+            <span>{thinking ? "Thinking" : "Waiting for response"}</span>
           </div>
         )}
 
-        {/* Live tool calls while streaming */}
-        {tools.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
-            {tools.map((t, j) => <ToolChip key={j} tool={t} live />)}
-          </div>
-        )}
-
-        {/* Currently streaming */}
-        {streaming && (
-          <div style={msgBubble("assistant")}>
-            <MdContent text={streaming} />
-          </div>
-        )}
+        {/* Live streaming blocks — interleaved tool calls and text */}
+        {streamBlocks.map((b, j) => (
+          b.type === "tool" ? (
+            <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+              <ToolChip tool={b} live={!b.output} />
+            </div>
+          ) : b.content ? (
+            <div key={j} style={msgBubble("assistant")}>
+              <MdContent text={b.content} />
+            </div>
+          ) : null
+        ))}
 
         {/* Error */}
         {error && (

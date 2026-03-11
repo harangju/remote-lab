@@ -23,6 +23,12 @@ from pydantic_ai.messages import (
     ModelMessagesTypeAdapter,
     TextPart,
     ToolCallPart,
+    PartStartEvent,
+    PartDeltaEvent,
+    TextPartDelta,
+    ThinkingPartDelta,
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
 )
 
 from backend.agents import agent, USAGE_LIMITS, get_context_limit
@@ -58,8 +64,7 @@ class RunState:
     """Tracks an in-flight agent run independently of WebSocket connections."""
     convo_id: str
     task: asyncio.Task | None = None
-    deltas: list[str] = field(default_factory=list)
-    tool_events: list[dict] = field(default_factory=list)
+    events: list[str] = field(default_factory=list)  # ordered JSON strings for replay
     full_text: str = ""
     done_event: dict | None = None
     error_msg: str | None = None
@@ -86,54 +91,68 @@ active_runs: dict[str, RunState] = {}
 
 async def _run_agent_task(run: RunState, prompt: str, message_history: list, convo_id: str):
     """Execute an agent run in the background, broadcasting to subscribers."""
-    # Set up broadcast function that also buffers tool events
-    async def _bcast(msg_str: str):
-        try:
-            event = json.loads(msg_str)
-        except Exception:
-            event = {}
-        if event.get("type") == "tool-use":
-            run.tool_events.append(event)
+
+    async def _emit(msg_str: str):
+        """Buffer an event and broadcast to subscribers."""
+        run.events.append(msg_str)
         await run.broadcast(msg_str)
 
-    agent_tools.set_broadcast(_bcast)
+    # Disable the per-tool broadcast — we get events from agent.iter() instead
+    agent_tools.set_broadcast(None)
 
     try:
-        async with agent.run_stream(
+        async with agent.iter(
             prompt,
             message_history=message_history if message_history else None,
             usage_limits=USAGE_LIMITS,
-        ) as result:
-            # Stream text deltas
-            async for delta in result.stream_text(delta=True):
-                run.full_text += delta
-                run.deltas.append(delta)
-                await run.broadcast(TextDelta(delta=delta).model_dump_json())
+        ) as agent_run:
+            async for node in agent_run:
+                if agent.is_model_request_node(node):
+                    # Stream text deltas from the model response
+                    async with node.stream(agent_run.ctx) as stream:
+                        async for event in stream:
+                            if isinstance(event, PartDeltaEvent):
+                                if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
+                                    run.full_text += event.delta.content_delta
+                                    await _emit(TextDelta(delta=event.delta.content_delta).model_dump_json())
+                                elif isinstance(event.delta, ThinkingPartDelta):
+                                    await _emit(ThinkingDelta(delta=event.delta.content_delta or "").model_dump_json())
+                elif agent.is_call_tools_node(node):
+                    # Stream tool call and result events
+                    async with node.stream(agent_run.ctx) as tool_stream:
+                        async for event in tool_stream:
+                            if isinstance(event, FunctionToolCallEvent):
+                                await _emit(json.dumps({
+                                    "type": "tool-use",
+                                    "name": event.part.tool_name,
+                                    "input": str(event.part.args)[:200],
+                                }))
+                                storage.append_message(convo_id, {
+                                    "role": "tool",
+                                    "name": event.part.tool_name,
+                                    "input": str(event.part.args)[:200],
+                                    "timestamp": _iso_now(),
+                                })
+                            elif isinstance(event, FunctionToolResultEvent):
+                                output = str(event.content)[:500] if event.content else "OK"
+                                await _emit(json.dumps({
+                                    "type": "tool-result",
+                                    "name": event.result.tool_name if hasattr(event.result, "tool_name") else "",
+                                    "output": output,
+                                }))
 
             # Compute cost and context info
             turns = len([
-                m for m in result.all_messages()
+                m for m in agent_run.all_messages()
                 if isinstance(m, ModelResponse)
             ])
-            usage = result.usage()
+            usage = agent_run.usage()
             cost = usage.total_tokens / 1000 * 0.003
             context_tokens = usage.request_tokens or 0
             context_limit = get_context_limit()
 
-            # Persist tool calls
-            for msg_item in result.new_messages():
-                if isinstance(msg_item, ModelResponse):
-                    for part in msg_item.parts:
-                        if isinstance(part, ToolCallPart):
-                            storage.append_message(convo_id, {
-                                "role": "tool",
-                                "name": part.tool_name,
-                                "input": str(part.args)[:200],
-                                "timestamp": _iso_now(),
-                            })
-
             # Update run state
-            run.message_history = result.all_messages()
+            run.message_history = agent_run.all_messages()
             run.last_context_tokens = context_tokens
 
             # Persist agent history
@@ -156,7 +175,7 @@ async def _run_agent_task(run: RunState, prompt: str, message_history: list, con
             done = Done(cost=cost, turns=turns, context_tokens=context_tokens, context_limit=context_limit)
             run.done_event = done.model_dump()
             run.status = "done"
-            await run.broadcast(done.model_dump_json())
+            await _emit(done.model_dump_json())
 
         storage.update_conversation_status(convo_id, ConvoStatus.done)
 
@@ -164,7 +183,7 @@ async def _run_agent_task(run: RunState, prompt: str, message_history: list, con
         run.error_msg = str(e)
         run.status = "error"
         storage.update_conversation_status(convo_id, ConvoStatus.error)
-        await run.broadcast(Error(message=str(e), recoverable=True).model_dump_json())
+        await _emit(Error(message=str(e), recoverable=True).model_dump_json())
 
     finally:
         agent_tools.clear_broadcast()
@@ -591,16 +610,12 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         # ----- Check for active run (reconnection scenario) -----
         existing_run = active_runs.get(convo_id)
         if existing_run and existing_run.status == "running":
-            # Subscribe to the existing run and replay buffered content
+            # Subscribe to the existing run and replay all buffered events in order
             existing_run.subscribers.add(ws)
             await ws.send_text(Running().model_dump_json())
-            # Replay buffered tool events
-            for event in existing_run.tool_events:
-                await ws.send_text(json.dumps(event))
-            # Replay accumulated text as a single delta
-            if existing_run.full_text:
-                await ws.send_text(TextDelta(delta=existing_run.full_text).model_dump_json())
-            print(f"ws[{convo_id[:8]}]: subscribed to active run ({len(existing_run.deltas)} deltas buffered)")
+            for event_str in existing_run.events:
+                await ws.send_text(event_str)
+            print(f"ws[{convo_id[:8]}]: subscribed to active run ({len(existing_run.events)} events buffered)")
         elif existing_run and existing_run.status in ("done", "error"):
             # Run completed while disconnected — sync state
             message_history = existing_run.message_history

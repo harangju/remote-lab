@@ -42,6 +42,13 @@ class Running(BaseModel):
     type: Literal["running"] = "running"
 
 
+class ToolResult(BaseModel):
+    """Sent after a tool finishes executing."""
+    type: Literal["tool-result"] = "tool-result"
+    name: str
+    output: str
+
+
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str
