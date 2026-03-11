@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2 } from "lucide-react";
 import { getConvo, connectWs, type WsEvent } from "../api";
 import { backLink, input as inputStyle, btnPrimary } from "../styles";
 
@@ -65,7 +65,7 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
 
 const toolIcons: Record<string, React.FC<{ size?: number }>> = {
   bash: Terminal, read_file: FileText, write_file: Pencil,
-  edit_file: Pencil, glob: Search, grep: Search,
+  edit_file: Pencil, glob: Search, grep: Search, compact: Minimize2,
 };
 
 function ToolChip({ tool, live }: { tool: ToolCall; live?: boolean }) {
@@ -224,7 +224,11 @@ export function Chat() {
           if (m.role === "tool") {
             pendingTools.push({ name: (m as any).name, input: (m as any).input });
           } else if (m.role === "user") {
-            pendingTools = [];
+            // Flush any standalone tool calls (e.g. compact) before a user message
+            if (pendingTools.length > 0) {
+              msgs.push({ role: "assistant", content: "", tools: [...pendingTools] });
+              pendingTools = [];
+            }
             msgs.push({ role: "user", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) });
           } else if (m.role === "assistant") {
             msgs.push({
@@ -234,6 +238,10 @@ export function Chat() {
             });
             pendingTools = [];
           }
+        }
+        // Flush any trailing standalone tool calls
+        if (pendingTools.length > 0) {
+          msgs.push({ role: "assistant", content: "", tools: [...pendingTools] });
         }
         setMessages(msgs);
         // Sum cost from all assistant messages in the persisted history
@@ -311,7 +319,8 @@ export function Chat() {
           setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev);
           setMessages((msgs) => [...msgs, {
             role: "assistant" as const,
-            content: `Context compacted: ${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens`,
+            content: "",
+            tools: [{ name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }],
           }]);
           setBusy(false);
           break;
@@ -403,9 +412,11 @@ export function Chat() {
                 {m.tools.map((t, j) => <ToolChip key={j} tool={t} />)}
               </div>
             )}
-            <div style={msgBubble(m.role)}>
-              <MdContent text={m.content} />
-            </div>
+            {m.content && (
+              <div style={msgBubble(m.role)}>
+                <MdContent text={m.content} />
+              </div>
+            )}
           </React.Fragment>
         ))}
 
@@ -466,10 +477,9 @@ export function Chat() {
           placeholder={busy ? "Waiting for response..." : "Type a message..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          disabled={busy}
           autoFocus
         />
-        <button type="submit" style={{ ...btnPrimary, opacity: busy ? 0.5 : 1 }} disabled={busy}>
+        <button type="submit" style={{ ...btnPrimary, opacity: busy ? 0.5 : 1 }} disabled={busy || !input.trim()}>
           Send
         </button>
       </form>

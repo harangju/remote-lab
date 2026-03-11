@@ -44,7 +44,7 @@ DOCS_DIR = Path(__file__).parent.parent / "docs"
 WS_TOKEN = os.getenv("WS_TOKEN", "")
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "")
 
-active_ws = 0
+active_ws: dict[str, WebSocket] = {}  # convo_id → WebSocket
 
 # ---------------------------------------------------------------------------
 # REST API — /api routes
@@ -384,14 +384,23 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         await ws.close(code=4403, reason="Forbidden")
         return
 
-    # Concurrency limit
-    if active_ws >= 1:
+    # If there's an existing connection for this convo, close it
+    old_ws = active_ws.get(convo_id)
+    if old_ws:
+        try:
+            await old_ws.close(code=4409, reason="Replaced by new connection")
+        except Exception:
+            pass
+
+    # Global concurrency limit (different conversations)
+    other_convos = {k for k in active_ws if k != convo_id}
+    if len(other_convos) >= 1:
         await ws.close(code=4429, reason="Too many connections")
         return
 
     await ws.accept()
-    active_ws += 1
-    print(f"ws[{convo_id[:8]}]: connected (active: {active_ws})")
+    active_ws[convo_id] = ws
+    print(f"ws[{convo_id[:8]}]: connected (active: {len(active_ws)})")
 
     # Save the original WORKDIR so we can restore it on disconnect
     original_workdir = agent_tools.WORKDIR
@@ -463,6 +472,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             await ws.send_text(json.dumps({"type": "history", "messages": persisted}))
 
         # ----- Chat loop -----
+        partial_text = ""  # tracks in-flight response for crash recovery
         while True:
             prompt = await ws.receive_text()
 
@@ -475,10 +485,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         est_tokens = sum(len(str(m)) for m in message_history) // 4
                         last_context_tokens = est_tokens
                         storage.append_message(convo_id, {
-                            "role": "assistant",
-                            "content": f"Context compacted: {old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
-                            "compact_old_tokens": old_tokens,
-                            "compact_new_tokens": est_tokens,
+                            "role": "tool",
+                            "name": "compact",
+                            "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
                             "timestamp": _iso_now(),
                         })
                         storage.save_agent_history(
@@ -515,10 +524,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 if summary:
                     est_tokens = sum(len(str(m)) for m in message_history) // 4
                     storage.append_message(convo_id, {
-                        "role": "assistant",
-                        "content": f"Context auto-compacted: {old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
-                        "compact_old_tokens": old_tokens,
-                        "compact_new_tokens": est_tokens,
+                        "role": "tool",
+                        "name": "compact",
+                        "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
                         "timestamp": _iso_now(),
                     })
                     last_context_tokens = est_tokens
@@ -538,10 +546,12 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     usage_limits=USAGE_LIMITS,
                 ) as result:
                     full_text = ""
+                    partial_text = ""
 
                     # Stream text deltas to the client
                     async for delta in result.stream_text(delta=True):
                         full_text += delta
+                        partial_text = full_text
                         await ws.send_text(TextDelta(delta=delta).model_dump_json())
 
                     # Get final result for cost/turn info
@@ -611,5 +621,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
     finally:
         agent_tools.clear_active_ws()
         agent_tools.WORKDIR = original_workdir
-        active_ws -= 1
-        print(f"ws[{convo_id[:8]}]: disconnected (active: {active_ws})")
+        # Only remove if we're still the active connection for this convo
+        if active_ws.get(convo_id) is ws:
+            del active_ws[convo_id]
+        print(f"ws[{convo_id[:8]}]: disconnected (active: {len(active_ws)})")
