@@ -4,7 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, type WsEvent, type AgentConfig } from "../api";
-import { backLink, input as inputStyle, btnPrimary } from "../styles";
+import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
 import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
@@ -750,8 +750,8 @@ export function Chat() {
         {/* Header */}
         <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         <div style={{ padding: "12px 1.5rem", maxWidth: "48rem", margin: "0 auto" }}>
-          <Link to={`/${projectId}`} style={backLink}>&larr; Conversations</Link>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Link to={`/${projectId}`} style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.1rem" }} title="Conversations">&larr;</Link>
             {editing ? (
               <input
                 autoFocus

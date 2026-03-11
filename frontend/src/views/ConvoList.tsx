@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Pencil, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, type Project, type ConvoMeta, type AgentConfig } from "../api";
-import { container, card, btnPrimary, btnDanger, backLink, badge, input as inputStyle } from "../styles";
+import { container, card, btnPrimary, btnDanger, badge, input as inputStyle } from "../styles";
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -145,9 +145,9 @@ export function ConvoList() {
 
   return (
     <div style={container}>
-      <Link to="/" style={backLink}>&larr; Projects</Link>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Link to="/" style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.3rem" }} title="Projects">&larr;</Link>
           {editingProject ? (
             <input
               autoFocus
