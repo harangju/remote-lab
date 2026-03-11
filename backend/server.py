@@ -30,12 +30,14 @@ from pydantic_ai.messages import (
     FunctionToolResultEvent,
 )
 
+from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
+
 from backend.agent_config import AgentConfig
 from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, Error
+from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, Error
 from backend.skills import get_skills, get_skill, SkillType
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
@@ -75,6 +77,10 @@ class RunState:
     # Carry forward after completion
     message_history: list = field(default_factory=list)
     last_context_tokens: int = 0
+    # Tool approval
+    pending_approvals: set = field(default_factory=set)  # tool_call_ids awaiting decision
+    approval_decisions: dict = field(default_factory=dict)  # tool_call_id → True/False
+    approval_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def broadcast(self, msg_str: str):
         """Send a serialized JSON message to all current subscribers."""
@@ -149,111 +155,165 @@ async def _run_agent_task(
     agent_tools.set_broadcast(None)
 
     try:
-        async with active_agent.iter(
-            prompt,
-            message_history=message_history if message_history else None,
-            usage_limits=USAGE_LIMITS,
-            instructions=instructions,
-        ) as agent_run:
-            async for node in agent_run:
-                if active_agent.is_model_request_node(node):
-                    # Stream text deltas from the model response
-                    segment_text = ""
-                    async with node.stream(agent_run.ctx) as stream:
-                        async for event in stream:
-                            if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart) and event.part.content:
-                                segment_text += event.part.content
-                                run.full_text += event.part.content
-                                await _emit(TextDelta(delta=event.part.content, agent_id=agent_id).model_dump_json())
-                            elif isinstance(event, PartDeltaEvent):
-                                if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
-                                    segment_text += event.delta.content_delta
-                                    run.full_text += event.delta.content_delta
-                                    await _emit(TextDelta(delta=event.delta.content_delta, agent_id=agent_id).model_dump_json())
-                                elif isinstance(event.delta, ThinkingPartDelta):
-                                    await _emit(ThinkingDelta(delta=event.delta.content_delta or "", agent_id=agent_id).model_dump_json())
-                    # Persist this text segment immediately so reload interleaves correctly
-                    if segment_text:
-                        msg: dict = {
-                            "role": "assistant",
-                            "content": segment_text,
-                            "timestamp": _iso_now(),
-                        }
-                        if agent_id:
-                            msg["agent_id"] = agent_id
-                        storage.append_message(convo_id, msg)
-                elif active_agent.is_call_tools_node(node):
-                    # Stream tool call and result events
-                    async with node.stream(agent_run.ctx) as tool_stream:
-                        async for event in tool_stream:
-                            if isinstance(event, FunctionToolCallEvent):
-                                ev: dict = {
-                                    "type": "tool-use",
-                                    "name": event.part.tool_name,
-                                    "input": str(event.part.args)[:200],
-                                }
-                                if agent_id:
-                                    ev["agent_id"] = agent_id
-                                await _emit(json.dumps(ev))
-                                persisted: dict = {
-                                    "role": "tool",
-                                    "name": event.part.tool_name,
-                                    "input": str(event.part.args)[:200],
-                                    "timestamp": _iso_now(),
-                                }
-                                if agent_id:
-                                    persisted["agent_id"] = agent_id
-                                storage.append_message(convo_id, persisted)
-                            elif isinstance(event, FunctionToolResultEvent):
-                                output = str(event.content)[:500] if event.content else "OK"
-                                ev = {
-                                    "type": "tool-result",
-                                    "name": event.result.tool_name if hasattr(event.result, "tool_name") else "",
-                                    "output": output,
-                                }
-                                if agent_id:
-                                    ev["agent_id"] = agent_id
-                                await _emit(json.dumps(ev))
+        # Approval loop: run agent, handle deferred approvals, resume as needed
+        current_prompt: str | None = prompt
+        current_history = message_history if message_history else None
+        deferred_results: DeferredToolResults | None = None
+        total_cost = 0.0
+        total_turns = 0
 
-            # Compute cost and context info
-            turns = len([
-                m for m in agent_run.all_messages()
-                if isinstance(m, ModelResponse)
-            ])
-            usage = agent_run.usage()
-            cost = usage.total_tokens / 1000 * 0.003
-            context_tokens = usage.request_tokens or 0
-            context_limit = get_context_limit()
-
-            # Update run state
-            run.message_history = agent_run.all_messages()
-            run.last_context_tokens = context_tokens
-
-            # Persist agent history (per-agent if multi-agent)
-            storage.save_agent_history(
-                convo_id,
-                ModelMessagesTypeAdapter.dump_json(run.message_history),
-                agent_id=agent_id,
+        while True:
+            iter_kwargs: dict = dict(
+                message_history=current_history,
+                usage_limits=USAGE_LIMITS,
+                instructions=instructions,
             )
+            if deferred_results:
+                iter_kwargs["deferred_tool_results"] = deferred_results
+                deferred_results = None
 
-            # Persist cost/context metadata (text segments already persisted above)
-            meta_msg: dict = {
-                "role": "assistant",
-                "content": "",
-                "timestamp": _iso_now(),
-                "cost": cost,
-                "turns": turns,
-                "context_tokens": context_tokens,
-                "context_limit": context_limit,
-            }
-            if agent_id:
-                meta_msg["agent_id"] = agent_id
-            storage.append_message(convo_id, meta_msg)
+            async with active_agent.iter(
+                current_prompt,
+                **iter_kwargs,
+            ) as agent_run:
+                async for node in agent_run:
+                    if active_agent.is_model_request_node(node):
+                        # Stream text deltas from the model response
+                        segment_text = ""
+                        async with node.stream(agent_run.ctx) as stream:
+                            async for event in stream:
+                                if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart) and event.part.content:
+                                    segment_text += event.part.content
+                                    run.full_text += event.part.content
+                                    await _emit(TextDelta(delta=event.part.content, agent_id=agent_id).model_dump_json())
+                                elif isinstance(event, PartDeltaEvent):
+                                    if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
+                                        segment_text += event.delta.content_delta
+                                        run.full_text += event.delta.content_delta
+                                        await _emit(TextDelta(delta=event.delta.content_delta, agent_id=agent_id).model_dump_json())
+                                    elif isinstance(event.delta, ThinkingPartDelta):
+                                        await _emit(ThinkingDelta(delta=event.delta.content_delta or "", agent_id=agent_id).model_dump_json())
+                        # Persist this text segment immediately so reload interleaves correctly
+                        if segment_text:
+                            msg: dict = {
+                                "role": "assistant",
+                                "content": segment_text,
+                                "timestamp": _iso_now(),
+                            }
+                            if agent_id:
+                                msg["agent_id"] = agent_id
+                            storage.append_message(convo_id, msg)
+                    elif active_agent.is_call_tools_node(node):
+                        # Stream tool call and result events
+                        async with node.stream(agent_run.ctx) as tool_stream:
+                            async for event in tool_stream:
+                                if isinstance(event, FunctionToolCallEvent):
+                                    ev: dict = {
+                                        "type": "tool-use",
+                                        "name": event.part.tool_name,
+                                        "input": str(event.part.args)[:200],
+                                    }
+                                    if agent_id:
+                                        ev["agent_id"] = agent_id
+                                    await _emit(json.dumps(ev))
+                                    persisted: dict = {
+                                        "role": "tool",
+                                        "name": event.part.tool_name,
+                                        "input": str(event.part.args)[:200],
+                                        "timestamp": _iso_now(),
+                                    }
+                                    if agent_id:
+                                        persisted["agent_id"] = agent_id
+                                    storage.append_message(convo_id, persisted)
+                                elif isinstance(event, FunctionToolResultEvent):
+                                    output = str(event.content)[:500] if event.content else "OK"
+                                    ev = {
+                                        "type": "tool-result",
+                                        "name": event.result.tool_name if hasattr(event.result, "tool_name") else "",
+                                        "output": output,
+                                    }
+                                    if agent_id:
+                                        ev["agent_id"] = agent_id
+                                    await _emit(json.dumps(ev))
 
-            done = Done(cost=cost, turns=turns, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
-            run.done_event = done.model_dump()
-            run.status = "done"
-            await _emit(done.model_dump_json())
+                # Accumulate usage
+                usage = agent_run.usage()
+                total_cost += usage.total_tokens / 1000 * 0.003
+                total_turns += len([
+                    m for m in agent_run.all_messages()
+                    if isinstance(m, ModelResponse)
+                ])
+
+                # Check if this run ended with deferred tool approvals
+                result = agent_run.result
+                if result and isinstance(result.output, DeferredToolRequests) and result.output.approvals:
+                    approvals_needed = result.output.approvals
+                    # Broadcast tool-confirm events for each pending approval
+                    run.pending_approvals = set()
+                    run.approval_decisions = {}
+                    run.approval_event = asyncio.Event()
+
+                    for tool_call in approvals_needed:
+                        run.pending_approvals.add(tool_call.tool_call_id)
+                        await _emit(ToolConfirm(
+                            tool_call_id=tool_call.tool_call_id,
+                            name=tool_call.tool_name,
+                            args=str(tool_call.args)[:500] if tool_call.args else None,
+                            agent_id=agent_id,
+                        ).model_dump_json())
+
+                    # Wait for all approval decisions
+                    await run.approval_event.wait()
+
+                    # Build DeferredToolResults from decisions
+                    approval_map: dict = {}
+                    for tc_id, approved in run.approval_decisions.items():
+                        if approved:
+                            approval_map[tc_id] = ToolApproved()
+                        else:
+                            approval_map[tc_id] = ToolDenied(message="User denied this tool call")
+
+                    deferred_results = DeferredToolResults(approvals=approval_map)
+                    current_history = agent_run.all_messages()
+                    current_prompt = None  # resuming, no new prompt
+                    continue  # loop again with deferred results
+
+                # Normal completion — no deferred tools
+                break
+
+        # Finalization (after the approval loop completes)
+        context_tokens = usage.request_tokens or 0
+        context_limit = get_context_limit()
+
+        # Update run state
+        run.message_history = agent_run.all_messages()
+        run.last_context_tokens = context_tokens
+
+        # Persist agent history (per-agent if multi-agent)
+        storage.save_agent_history(
+            convo_id,
+            ModelMessagesTypeAdapter.dump_json(run.message_history),
+            agent_id=agent_id,
+        )
+
+        # Persist cost/context metadata (text segments already persisted above)
+        meta_msg: dict = {
+            "role": "assistant",
+            "content": "",
+            "timestamp": _iso_now(),
+            "cost": total_cost,
+            "turns": total_turns,
+            "context_tokens": context_tokens,
+            "context_limit": context_limit,
+        }
+        if agent_id:
+            meta_msg["agent_id"] = agent_id
+        storage.append_message(convo_id, meta_msg)
+
+        done = Done(cost=total_cost, turns=total_turns, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
+        run.done_event = done.model_dump()
+        run.status = "done"
+        await _emit(done.model_dump_json())
 
         storage.update_conversation_status(convo_id, ConvoStatus.done)
 
@@ -1020,6 +1080,17 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                     storage.update_conversation_status(convo_id, ConvoStatus.idle)
                                     done_ev = Done(cost=0, turns=0, context_tokens=0, context_limit=0)
                                     await ws.send_text(done_ev.model_dump_json())
+                                elif isinstance(ctrl, dict) and ctrl.get("type") == "tool-confirm-response":
+                                    # Route approval decision to the appropriate run
+                                    tc_id = ctrl.get("tool_call_id", "")
+                                    approved = ctrl.get("approved", False)
+                                    for r in runs:
+                                        if tc_id in r.pending_approvals:
+                                            r.approval_decisions[tc_id] = approved
+                                            r.pending_approvals.discard(tc_id)
+                                            if not r.pending_approvals:
+                                                r.approval_event.set()
+                                            break
                             except (json.JSONDecodeError, TypeError):
                                 pass
                             except WebSocketDisconnect:

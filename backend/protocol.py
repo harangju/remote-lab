@@ -69,6 +69,15 @@ class SkillResult(BaseModel):
     output: str
 
 
+class ToolConfirm(BaseModel):
+    """Sent when a tool requires user approval before execution."""
+    type: Literal["tool-confirm"] = "tool-confirm"
+    tool_call_id: str
+    name: str
+    args: dict | str | None = None
+    agent_id: str | None = None
+
+
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str

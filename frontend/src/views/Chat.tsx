@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, type WsEvent, type AgentConfig, type Skill } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
@@ -22,7 +22,8 @@ interface ToolCall {
 
 type StreamBlock =
   | { type: "text"; content: string }
-  | { type: "tool"; name: string; input?: string; output?: string };
+  | { type: "tool"; name: string; input?: string; output?: string }
+  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied" };
 
 interface DisplayMessage {
   role: "user" | "assistant";
@@ -185,6 +186,122 @@ function ToolChip({ tool, live, onOpenFile }: {
           overflowY: "auto",
           color: "var(--text)",
         }}>{tool.input}{tool.input && tool.output ? "\n---\n" : ""}{tool.output}</pre>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ApprovalCard — inline approve/deny for tool calls requiring permission
+// ---------------------------------------------------------------------------
+
+function ApprovalCard({ block, onRespond }: {
+  block: Extract<StreamBlock, { type: "tool-confirm" }>;
+  onRespond: (toolCallId: string, approved: boolean) => void;
+}) {
+  const Icon = toolIcons[block.name] || Settings;
+  const summary = toolSummary(block.name, block.args);
+  const isPending = block.status === "pending";
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div style={{
+      background: "var(--bg-surface)",
+      border: `1px solid ${isPending ? "var(--accent)" : "var(--border)"}`,
+      borderRadius: "8px",
+      padding: "8px 12px",
+      maxWidth: "85%",
+      opacity: isPending ? 1 : 0.6,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.82rem" }}>
+        <Icon size={14} />
+        <span style={{ fontFamily: "monospace", fontWeight: 500 }}>{block.name}</span>
+        {summary && (
+          <span style={{
+            fontFamily: "monospace",
+            opacity: 0.7,
+            maxWidth: "300px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}>{summary}</span>
+        )}
+        {block.args && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "var(--text-muted)", padding: 0, display: "flex",
+            }}
+          >
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+        )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+          {isPending ? (
+            <>
+              <button
+                onClick={() => onRespond(block.tool_call_id, true)}
+                style={{
+                  background: "var(--accent)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "3px 10px",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <ShieldCheck size={12} /> Allow
+              </button>
+              <button
+                onClick={() => onRespond(block.tool_call_id, false)}
+                style={{
+                  background: "transparent",
+                  color: "var(--text-muted)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "5px",
+                  padding: "3px 10px",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <ShieldX size={12} /> Deny
+              </button>
+            </>
+          ) : (
+            <span style={{
+              fontSize: "0.75rem",
+              color: block.status === "approved" ? "var(--accent)" : "var(--text-muted)",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}>
+              {block.status === "approved" ? <><ShieldCheck size={12} /> Allowed</> : <><ShieldX size={12} /> Denied</>}
+            </span>
+          )}
+        </div>
+      </div>
+      {expanded && block.args && (
+        <pre style={{
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: "6px",
+          padding: "6px 10px",
+          marginTop: "6px",
+          fontSize: "0.75rem",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          maxHeight: "150px",
+          overflowY: "auto",
+          color: "var(--text)",
+        }}>{block.args}</pre>
       )}
     </div>
   );
@@ -532,6 +649,18 @@ export function Chat() {
           setStreamBlocks(blocksRef.current);
           break;
         }
+        case "tool-confirm": {
+          setWaitingForModel(false);
+          blocksRef.current = [...blocksRef.current, {
+            type: "tool-confirm" as const,
+            tool_call_id: data.tool_call_id,
+            name: data.name,
+            args: data.args,
+            status: "pending" as const,
+          }];
+          setStreamBlocks(blocksRef.current);
+          break;
+        }
         case "done": {
           const finalBlocks = blocksRef.current;
           if (finalBlocks.length > 0) {
@@ -772,6 +901,21 @@ export function Chat() {
     setWaitingForModel(false);
   };
 
+  const handleToolApproval = useCallback((toolCallId: string, approved: boolean) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "tool-confirm-response", tool_call_id: toolCallId, approved }));
+    }
+    // Update the block status
+    const blocks = blocksRef.current.map((b) =>
+      b.type === "tool-confirm" && b.tool_call_id === toolCallId
+        ? { ...b, status: approved ? "approved" as const : "denied" as const }
+        : b
+    );
+    blocksRef.current = blocks;
+    setStreamBlocks([...blocks]);
+  }, []);
+
   // Shared logic for sending a text message to the agent
   const sendText = (text: string) => {
     if (!text || busy) return;
@@ -986,11 +1130,15 @@ export function Chat() {
                 </div>
               )}
               {m.blocks.map((b, j) => (
-                b.type === "tool" ? (
+                b.type === "tool-confirm" ? (
+                  <div key={j} style={{ alignSelf: "flex-start", margin: "4px 0 2px" }}>
+                    <ApprovalCard block={b} onRespond={handleToolApproval} />
+                  </div>
+                ) : b.type === "tool" ? (
                   <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
                     <ToolChip tool={b} onOpenFile={handleOpenFile} />
                   </div>
-                ) : b.content ? (
+                ) : b.type === "text" && b.content ? (
                   <div key={j} style={msgBubble(m.role, m.agent_color)}>
                     {m.role === "user" && editingMsgIdx === i ? (
                       <form onSubmit={(e) => {
@@ -1091,11 +1239,15 @@ export function Chat() {
 
           {/* Live streaming blocks */}
           {streamBlocks.map((b, j) => (
-            b.type === "tool" ? (
+            b.type === "tool-confirm" ? (
+              <div key={j} style={{ alignSelf: "flex-start", margin: "4px 0 2px" }}>
+                <ApprovalCard block={b} onRespond={handleToolApproval} />
+              </div>
+            ) : b.type === "tool" ? (
               <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
                 <ToolChip tool={b} live={!b.output} onOpenFile={handleOpenFile} />
               </div>
-            ) : b.content ? (
+            ) : b.type === "text" && b.content ? (
               <div key={j} style={msgBubble("assistant", activeAgent?.color)}>
                 <MdContent text={b.content} />
               </div>

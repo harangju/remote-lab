@@ -239,7 +239,7 @@ async def _web_search(ctx: RunContext, query: str, count: int = 5) -> str:
 # Tool registry
 # ---------------------------------------------------------------------------
 
-# All available tools: name → (impl, always_available)
+# All available tools: name → (impl,)
 ALL_TOOLS: dict[str, tuple] = {
     "bash": (_bash,),
     "read_file": (_read_file,),
@@ -252,6 +252,9 @@ ALL_TOOLS: dict[str, tuple] = {
 if _brave_key:
     ALL_TOOLS["web_search"] = (_web_search,)
 
+# Tools that require user approval before execution
+APPROVAL_REQUIRED = {"bash", "write_file", "edit_file"}
+
 
 def register(agent, allowed: list[str] | None = None):
     """Register tools on the given PydanticAI agent.
@@ -263,4 +266,4 @@ def register(agent, allowed: list[str] | None = None):
             continue
         # PydanticAI uses __name__ for the tool name — override the leading underscore
         impl.__name__ = name
-        agent.tool(impl)
+        agent.tool(impl, requires_approval=name in APPROVAL_REQUIRED)
