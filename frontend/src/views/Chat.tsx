@@ -202,9 +202,11 @@ export function Chat() {
   const [meta, setMeta] = useState<MetaInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [wsAttempt, setWsAttempt] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const toolsRef = useRef<ToolCall[]>([]);
+  const reconnectTimer = useRef<number>();
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -278,6 +280,9 @@ export function Chat() {
         case "auth-ok":
           setConnected(true);
           break;
+        case "running":
+          setBusy(true);
+          break;
         case "thinking-delta":
           setThinking(true);
           break;
@@ -340,14 +345,25 @@ export function Chat() {
       }
     });
 
-    ws.addEventListener("close", () => setConnected(false));
+    ws.addEventListener("close", (event) => {
+      setConnected(false);
+      // Auto-reconnect on unexpected close (not user-initiated or replaced)
+      if (event.code !== 1000 && event.code !== 4409) {
+        reconnectTimer.current = window.setTimeout(
+          () => setWsAttempt((a) => a + 1),
+          2000,
+        );
+      }
+    });
     ws.addEventListener("error", () => {
-      setError("WebSocket connection error");
       setConnected(false);
     });
 
-    return () => { ws.close(); };
-  }, [convId]);
+    return () => {
+      clearTimeout(reconnectTimer.current);
+      ws.close();
+    };
+  }, [convId, wsAttempt]);
 
   const send = (e: React.FormEvent) => {
     e.preventDefault();

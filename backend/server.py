@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import os
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,7 +27,7 @@ from pydantic_ai.messages import (
 
 from backend.agents import agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
-from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Compacted, Error
+from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, Compacted, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoDetail,
@@ -45,6 +47,132 @@ WS_TOKEN = os.getenv("WS_TOKEN", "")
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "")
 
 active_ws: dict[str, WebSocket] = {}  # convo_id → WebSocket
+
+# ---------------------------------------------------------------------------
+# Run state — decouples agent runs from WebSocket lifecycle
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RunState:
+    """Tracks an in-flight agent run independently of WebSocket connections."""
+    convo_id: str
+    task: asyncio.Task | None = None
+    deltas: list[str] = field(default_factory=list)
+    tool_events: list[dict] = field(default_factory=list)
+    full_text: str = ""
+    done_event: dict | None = None
+    error_msg: str | None = None
+    status: str = "running"  # running | done | error
+    subscribers: set = field(default_factory=set)  # set of WebSocket
+    # Carry forward after completion
+    message_history: list = field(default_factory=list)
+    last_context_tokens: int = 0
+
+    async def broadcast(self, msg_str: str):
+        """Send a serialized JSON message to all current subscribers."""
+        dead: set[WebSocket] = set()
+        for ws in self.subscribers:
+            try:
+                await ws.send_text(msg_str)
+            except Exception:
+                dead.add(ws)
+        self.subscribers -= dead
+
+
+# convo_id → RunState for in-flight or recently completed runs
+active_runs: dict[str, RunState] = {}
+
+
+async def _run_agent_task(run: RunState, prompt: str, message_history: list, convo_id: str):
+    """Execute an agent run in the background, broadcasting to subscribers."""
+    # Set up broadcast function that also buffers tool events
+    async def _bcast(msg_str: str):
+        try:
+            event = json.loads(msg_str)
+        except Exception:
+            event = {}
+        if event.get("type") == "tool-use":
+            run.tool_events.append(event)
+        await run.broadcast(msg_str)
+
+    agent_tools.set_broadcast(_bcast)
+
+    try:
+        async with agent.run_stream(
+            prompt,
+            message_history=message_history if message_history else None,
+            usage_limits=USAGE_LIMITS,
+        ) as result:
+            # Stream text deltas
+            async for delta in result.stream_text(delta=True):
+                run.full_text += delta
+                run.deltas.append(delta)
+                await run.broadcast(TextDelta(delta=delta).model_dump_json())
+
+            # Compute cost and context info
+            turns = len([
+                m for m in result.all_messages()
+                if isinstance(m, ModelResponse)
+            ])
+            usage = result.usage()
+            cost = usage.total_tokens / 1000 * 0.003
+            context_tokens = usage.request_tokens or 0
+            context_limit = get_context_limit()
+
+            # Persist tool calls
+            for msg_item in result.new_messages():
+                if isinstance(msg_item, ModelResponse):
+                    for part in msg_item.parts:
+                        if isinstance(part, ToolCallPart):
+                            storage.append_message(convo_id, {
+                                "role": "tool",
+                                "name": part.tool_name,
+                                "input": str(part.args)[:200],
+                                "timestamp": _iso_now(),
+                            })
+
+            # Update run state
+            run.message_history = result.all_messages()
+            run.last_context_tokens = context_tokens
+
+            # Persist agent history
+            storage.save_agent_history(
+                convo_id,
+                ModelMessagesTypeAdapter.dump_json(run.message_history),
+            )
+
+            # Persist assistant response
+            storage.append_message(convo_id, {
+                "role": "assistant",
+                "content": run.full_text,
+                "timestamp": _iso_now(),
+                "cost": cost,
+                "turns": turns,
+                "context_tokens": context_tokens,
+                "context_limit": context_limit,
+            })
+
+            done = Done(cost=cost, turns=turns, context_tokens=context_tokens, context_limit=context_limit)
+            run.done_event = done.model_dump()
+            run.status = "done"
+            await run.broadcast(done.model_dump_json())
+
+        storage.update_conversation_status(convo_id, ConvoStatus.done)
+
+    except Exception as e:
+        run.error_msg = str(e)
+        run.status = "error"
+        storage.update_conversation_status(convo_id, ConvoStatus.error)
+        await run.broadcast(Error(message=str(e), recoverable=True).model_dump_json())
+
+    finally:
+        agent_tools.clear_broadcast()
+        # Clean up after a delay to allow reconnecting clients to pick up the result
+        await asyncio.sleep(10)
+        if active_runs.get(convo_id) is run:
+            del active_runs[convo_id]
+
 
 # ---------------------------------------------------------------------------
 # REST API — /api routes
@@ -402,9 +530,6 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
     active_ws[convo_id] = ws
     print(f"ws[{convo_id[:8]}]: connected (active: {len(active_ws)})")
 
-    # Save the original WORKDIR so we can restore it on disconnect
-    original_workdir = agent_tools.WORKDIR
-
     try:
         # ----- Auth handshake (first-message pattern) -----
         raw = await ws.receive_text()
@@ -433,9 +558,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
         # Scope agent tools to the project's path
         project_path = Path(project.path)
-        if project_path.exists() and project_path.is_dir():
-            agent_tools.WORKDIR = project_path
-        else:
+        if not project_path.exists() or not project_path.is_dir():
             await ws.send_text(
                 Error(message=f"Project path does not exist: {project.path}").model_dump_json()
             )
@@ -465,16 +588,42 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 print(f"ws[{convo_id[:8]}]: failed to restore agent history: {e}")
                 message_history = []
 
-        persisted = storage.read_messages(convo_id)
-        # Send persisted messages to the client so reconnecting picks up
-        # where it left off (client can render them).
-        if persisted:
-            await ws.send_text(json.dumps({"type": "history", "messages": persisted}))
+        # ----- Check for active run (reconnection scenario) -----
+        existing_run = active_runs.get(convo_id)
+        if existing_run and existing_run.status == "running":
+            # Subscribe to the existing run and replay buffered content
+            existing_run.subscribers.add(ws)
+            await ws.send_text(Running().model_dump_json())
+            # Replay buffered tool events
+            for event in existing_run.tool_events:
+                await ws.send_text(json.dumps(event))
+            # Replay accumulated text as a single delta
+            if existing_run.full_text:
+                await ws.send_text(TextDelta(delta=existing_run.full_text).model_dump_json())
+            print(f"ws[{convo_id[:8]}]: subscribed to active run ({len(existing_run.deltas)} deltas buffered)")
+        elif existing_run and existing_run.status in ("done", "error"):
+            # Run completed while disconnected — sync state
+            message_history = existing_run.message_history
+            last_context_tokens = existing_run.last_context_tokens
+            if active_runs.get(convo_id) is existing_run:
+                del active_runs[convo_id]
 
         # ----- Chat loop -----
-        partial_text = ""  # tracks in-flight response for crash recovery
         while True:
             prompt = await ws.receive_text()
+
+            # Sync state from a completed run (if user sends next message after reconnecting)
+            completed_run = active_runs.get(convo_id)
+            if completed_run and completed_run.task and completed_run.task.done():
+                message_history = completed_run.message_history
+                last_context_tokens = completed_run.last_context_tokens
+                if active_runs.get(convo_id) is completed_run:
+                    del active_runs[convo_id]
+            elif completed_run and completed_run.status == "running":
+                await ws.send_text(
+                    Error(message="Agent is still running", recoverable=True).model_dump_json()
+                )
+                continue
 
             # Handle /compact command
             if prompt.strip() == "/compact":
@@ -538,89 +687,36 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
                     )
 
+            # Launch agent run as a background task
+            run = RunState(
+                convo_id=convo_id,
+                message_history=list(message_history),
+            )
+            run.subscribers.add(ws)
+            active_runs[convo_id] = run
+
+            # Set workdir in the current context — create_task copies it
+            agent_tools.set_workdir(project_path)
+            run.task = asyncio.create_task(_run_agent_task(run, prompt, message_history, convo_id))
+
+            # Wait for the run to complete, but allow WS disconnect to break out
             try:
-                agent_tools.set_active_ws(ws)
-                async with agent.run_stream(
-                    prompt,
-                    message_history=message_history if message_history else None,
-                    usage_limits=USAGE_LIMITS,
-                ) as result:
-                    full_text = ""
-                    partial_text = ""
+                await run.task
+            except asyncio.CancelledError:
+                pass
 
-                    # Stream text deltas to the client
-                    async for delta in result.stream_text(delta=True):
-                        full_text += delta
-                        partial_text = full_text
-                        await ws.send_text(TextDelta(delta=delta).model_dump_json())
-
-                    # Get final result for cost/turn info
-                    turns = len([
-                        m for m in result.all_messages()
-                        if isinstance(m, ModelResponse)
-                    ])
-
-                    usage = result.usage()
-                    cost = usage.total_tokens / 1000 * 0.003
-                    context_tokens = usage.request_tokens or 0
-                    context_limit = get_context_limit()
-
-                    # Persist tool calls from message history
-                    for msg_item in result.new_messages():
-                        if isinstance(msg_item, ModelResponse):
-                            for part in msg_item.parts:
-                                if isinstance(part, ToolCallPart):
-                                    storage.append_message(convo_id, {
-                                        "role": "tool",
-                                        "name": part.tool_name,
-                                        "input": str(part.args)[:200],
-                                        "timestamp": _iso_now(),
-                                    })
-
-                    # Update message history and token tracking for next turn
-                    message_history = result.all_messages()
-                    last_context_tokens = context_tokens
-
-                    # Persist agent history for session recovery
-                    storage.save_agent_history(
-                        convo_id,
-                        ModelMessagesTypeAdapter.dump_json(message_history),
-                    )
-
-                    # Persist the assistant response
-                    storage.append_message(convo_id, {
-                        "role": "assistant",
-                        "content": full_text,
-                        "timestamp": _iso_now(),
-                        "cost": cost,
-                        "turns": turns,
-                        "context_tokens": context_tokens,
-                        "context_limit": context_limit,
-                    })
-
-                    await ws.send_text(
-                        Done(
-                            cost=cost,
-                            turns=turns,
-                            context_tokens=context_tokens,
-                            context_limit=context_limit,
-                        ).model_dump_json()
-                    )
-
-                # Mark conversation as done after successful response
-                storage.update_conversation_status(convo_id, ConvoStatus.done)
-
-            except Exception as e:
-                storage.update_conversation_status(convo_id, ConvoStatus.error)
-                await ws.send_text(
-                    Error(message=str(e), recoverable=True).model_dump_json()
-                )
+            # Sync state from completed run
+            if run.status == "done":
+                message_history = run.message_history
+                last_context_tokens = run.last_context_tokens
 
     except WebSocketDisconnect:
-        pass
+        # Unsubscribe from any active run (task continues in background)
+        run = active_runs.get(convo_id)
+        if run:
+            run.subscribers.discard(ws)
+            print(f"ws[{convo_id[:8]}]: disconnected, run continues in background")
     finally:
-        agent_tools.clear_active_ws()
-        agent_tools.WORKDIR = original_workdir
         # Only remove if we're still the active connection for this convo
         if active_ws.get(convo_id) is ws:
             del active_ws[convo_id]

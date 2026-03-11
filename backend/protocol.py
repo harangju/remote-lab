@@ -37,6 +37,11 @@ class Compacted(BaseModel):
     new_tokens: int
 
 
+class Running(BaseModel):
+    """Sent when a client connects to a conversation with an in-flight agent run."""
+    type: Literal["running"] = "running"
+
+
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str

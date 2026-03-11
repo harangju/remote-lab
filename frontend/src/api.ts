@@ -136,6 +136,7 @@ export function deleteConvo(convoId: string): Promise<void> {
 
 export type WsEvent =
   | { type: "auth-ok" }
+  | { type: "running" }
   | { type: "thinking-delta"; delta: string }
   | { type: "text-delta"; delta: string }
   | { type: "tool-use"; name: string; input?: string }
