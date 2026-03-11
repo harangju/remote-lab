@@ -560,14 +560,47 @@ async def chat_page(rest: str = ""):
         return Response("Chat not configured", status_code=503)
     if not FRONTEND_DIR.exists() or not (FRONTEND_DIR / "index.html").exists():
         return Response("Frontend not built. Run: cd frontend && bun run build", status_code=503)
-    # Serve static assets from dist/ (JS, CSS)
+    # Serve static assets from dist/ (JS, CSS, etc.)
     if rest and "." in rest:
         asset = FRONTEND_DIR / rest
         if asset.exists() and asset.is_file():
             suffix = asset.suffix.lower()
-            media_types = {".js": "application/javascript", ".css": "text/css", ".map": "application/json"}
+            media_types = {
+                ".js": "application/javascript", ".css": "text/css",
+                ".map": "application/json", ".json": "application/json",
+                ".png": "image/png", ".svg": "image/svg+xml",
+                ".webmanifest": "application/manifest+json",
+            }
             return Response(asset.read_bytes(), media_type=media_types.get(suffix, "application/octet-stream"))
     return HTMLResponse((FRONTEND_DIR / "index.html").read_text())
+
+
+# PWA files served from root (manifest, service worker, icons)
+_PWA_FILES = {"manifest.json", "sw.js", "icon-192.png", "icon-512.png"}
+_PWA_MEDIA = {
+    ".json": "application/json", ".js": "application/javascript",
+    ".png": "image/png",
+}
+
+
+@app.get("/manifest.json")
+@app.get("/sw.js")
+@app.get("/icon-192.png")
+@app.get("/icon-512.png")
+async def pwa_root_files(request: Request):
+    name = request.url.path.lstrip("/")
+    if name not in _PWA_FILES:
+        return Response("Not found", status_code=404)
+    f = FRONTEND_DIR / name
+    if not f.exists():
+        return Response("Not found", status_code=404)
+    ext = f.suffix.lower()
+    ct = _PWA_MEDIA.get(ext, "application/octet-stream")
+    headers = {}
+    if name == "sw.js":
+        headers["Service-Worker-Allowed"] = "/"
+        headers["Cache-Control"] = "no-cache"
+    return Response(f.read_bytes(), media_type=ct, headers=headers)
 
 
 # Static assets from docs/

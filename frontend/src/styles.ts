@@ -47,12 +47,18 @@ export function injectTheme() {
     *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     /* Prevent iOS zoom on input focus */
     input, textarea, select { font-size: 16px !important; }
-    body {
+    html, body {
       margin: 0;
+      height: 100%;
+    }
+    body {
       font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.5;
+    }
+    #root {
+      height: 100%;
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }

@@ -638,7 +638,7 @@ export function Chat() {
   }, [panelWidth]);
 
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       {/* Chat column */}
       <div style={{
         display: "flex",
@@ -845,7 +845,7 @@ export function Chat() {
           style={{
             width: `${panelWidth}px`,
             flexShrink: 0,
-            height: "100vh",
+            height: "calc(var(--vh, 1vh) * 100)",
             overflow: "hidden",
           }}
         >
