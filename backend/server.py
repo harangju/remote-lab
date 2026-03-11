@@ -298,6 +298,29 @@ async def api_list_projects():
 
 @api.post("/projects", response_model=Project, status_code=201)
 async def api_create_project(body: ProjectCreate):
+    if body.github_url:
+        # Clone the repo into the target path
+        target = Path(body.path)
+        if target.exists() and any(target.iterdir()):
+            raise HTTPException(status_code=400, detail="Target directory already exists and is not empty")
+        # Convert HTTPS GitHub URLs to SSH for auth
+        clone_url = body.github_url
+        import re as _re
+        m = _re.match(r"https?://github\.com/(.+)", clone_url)
+        if m:
+            clone_url = f"git@github.com:{m.group(1)}"
+            if not clone_url.endswith(".git"):
+                clone_url += ".git"
+        clone_env = {**os.environ, "GIT_SSH_COMMAND": "ssh -i /root/.ssh/id_ed25519_github -o StrictHostKeyChecking=accept-new"}
+        proc = await asyncio.create_subprocess_exec(
+            "git", "clone", "--depth", "1", clone_url, str(target),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=clone_env,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise HTTPException(status_code=400, detail=f"git clone failed: {stderr.decode().strip()}")
     return storage.create_project(body)
 
 

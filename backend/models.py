@@ -28,6 +28,7 @@ class ConvoStatus(str, Enum):
 class ProjectCreate(BaseModel):
     name: str
     path: str
+    github_url: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):

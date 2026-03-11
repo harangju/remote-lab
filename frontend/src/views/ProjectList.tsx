@@ -9,9 +9,8 @@ export function ProjectList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [path, setPath] = useState("/srv/projects/");
-  const [pathTouched, setPathTouched] = useState(false);
+  const [input, setInput] = useState("");
+  const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [agents, setAgents] = useState<AgentConfig[]>([]);
@@ -28,18 +27,37 @@ export function ProjectList() {
 
   useEffect(load, []);
 
+  const isUrl = (s: string) => /^(https?:\/\/|git@)/.test(s.trim());
+
+  const repoNameFromUrl = (url: string): string => {
+    // Extract repo name from GitHub URL or git@... SSH URL
+    const match = url.trim().replace(/\.git$/, "").match(/[/:]([^/:]+)$/);
+    return match ? match[1] : "";
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !path.trim()) return;
+    const val = input.trim();
+    if (!val) return;
+    setCreating(true);
+    setError(null);
     try {
-      const p = await createProject({ name: name.trim(), path: path.trim() });
+      const url = isUrl(val);
+      const name = url ? repoNameFromUrl(val) : val;
+      const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      const body: { name: string; path: string; github_url?: string } = {
+        name,
+        path: `/srv/projects/${slug}`,
+      };
+      if (url) body.github_url = val;
+      const p = await createProject(body);
       setProjects((prev) => [...prev, p]);
-      setName("");
-      setPath("/srv/projects/");
-      setPathTouched(false);
+      setInput("");
       setShowForm(false);
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -112,15 +130,15 @@ export function ProjectList() {
 
       {showForm && (
         <form onSubmit={handleCreate} style={{ ...card, flexDirection: "column", gap: "8px", alignItems: "stretch" }}>
-          <input style={inputStyle} placeholder="Project name" value={name} onChange={(e) => {
-            setName(e.target.value);
-            if (!pathTouched) {
-              const slug = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-              setPath(`/srv/projects/${slug}`);
-            }
-          }} autoFocus />
-          <input style={inputStyle} placeholder="/srv/projects/my-project" value={path} onChange={(e) => { setPath(e.target.value); setPathTouched(true); }} />
-          <button type="submit" style={{ ...btnPrimary, alignSelf: "flex-end" }}>Create</button>
+          <input style={inputStyle} placeholder="Project name or GitHub URL" value={input} onChange={(e) => setInput(e.target.value)} autoFocus />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+              {input.trim() ? (isUrl(input) ? `clone → /srv/projects/${repoNameFromUrl(input)}` : `/srv/projects/${input.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "")}`) : "\u00A0"}
+            </div>
+            <button type="submit" disabled={creating || !input.trim()} style={{ ...btnPrimary, opacity: creating || !input.trim() ? 0.6 : 1 }}>
+              {creating ? "Cloning..." : isUrl(input) ? "Clone" : "Create"}
+            </button>
+          </div>
         </form>
       )}
 

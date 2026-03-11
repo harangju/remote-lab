@@ -82,7 +82,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Unauthorized");
   }
 
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `${res.status} ${res.statusText}`);
+  }
 
   if (res.status === 204) return undefined as unknown as T;
   return res.json();
@@ -100,7 +103,7 @@ export function getProject(id: string): Promise<Project> {
   return request(`/projects/${id}`);
 }
 
-export function createProject(body: { name: string; path: string }): Promise<Project> {
+export function createProject(body: { name: string; path: string; github_url?: string }): Promise<Project> {
   return request("/projects", {
     method: "POST",
     body: JSON.stringify(body),
