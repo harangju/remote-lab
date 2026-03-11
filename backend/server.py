@@ -89,7 +89,10 @@ class RunState:
 active_runs: dict[str, RunState] = {}
 
 
-async def _run_agent_task(run: RunState, prompt: str, message_history: list, convo_id: str):
+async def _run_agent_task(
+    run: RunState, prompt: str, message_history: list, convo_id: str,
+    instructions: str | None = None,
+):
     """Execute an agent run in the background, broadcasting to subscribers."""
 
     async def _emit(msg_str: str):
@@ -105,6 +108,7 @@ async def _run_agent_task(run: RunState, prompt: str, message_history: list, con
             prompt,
             message_history=message_history if message_history else None,
             usage_limits=USAGE_LIMITS,
+            instructions=instructions,
         ) as agent_run:
             async for node in agent_run:
                 if agent.is_model_request_node(node):
@@ -861,9 +865,16 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             # Notify client that the run is starting
             await ws.send_text(Running().model_dump_json())
 
+            # Build project-specific context instructions
+            from backend.context import build_project_instructions
+            is_first_turn = len(message_history) == 0
+            instructions = build_project_instructions(project_path, is_first_turn)
+
             # Set workdir in the current context — create_task copies it
             agent_tools.set_workdir(project_path)
-            run.task = asyncio.create_task(_run_agent_task(run, prompt, message_history, convo_id))
+            run.task = asyncio.create_task(
+                _run_agent_task(run, prompt, message_history, convo_id, instructions=instructions)
+            )
 
             # Wait for the run to complete, but allow WS disconnect to break out
             try:
