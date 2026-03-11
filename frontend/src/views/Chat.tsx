@@ -412,15 +412,21 @@ export function Chat() {
   const send = (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text || busy || !wsRef.current) return;
+    if (!text || busy) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setError("Not connected — try refreshing");
+      return;
+    }
     const isCommand = text.startsWith("/");
     if (!isCommand) {
       setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
     }
     setInput("");
     setBusy(true);
+    setWaitingForModel(true);
     setError(null);
-    wsRef.current.send(text);
+    ws.send(text);
   };
 
   // Styles
@@ -582,7 +588,7 @@ export function Chat() {
           onChange={(e) => setInput(e.target.value)}
           autoFocus
         />
-        <button type="submit" style={{ ...btnPrimary, opacity: busy ? 0.5 : 1 }} disabled={busy || !input.trim()}>
+        <button type="submit" style={{ ...btnPrimary, opacity: (busy || !connected) ? 0.5 : 1 }} disabled={busy || !connected || !input.trim()}>
           Send
         </button>
       </form>

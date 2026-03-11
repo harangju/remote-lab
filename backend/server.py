@@ -559,6 +559,17 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             pass
 
     # Global concurrency limit (different conversations)
+    # Clean up stale connections first (e.g. from navigation between convos)
+    stale = []
+    for k, other_ws in active_ws.items():
+        if k != convo_id:
+            try:
+                if other_ws.client_state.name != "CONNECTED":
+                    stale.append(k)
+            except Exception:
+                stale.append(k)
+    for k in stale:
+        del active_ws[k]
     other_convos = {k for k in active_ws if k != convo_id}
     if len(other_convos) >= 1:
         await ws.close(code=4429, reason="Too many connections")
@@ -728,6 +739,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             )
             run.subscribers.add(ws)
             active_runs[convo_id] = run
+
+            # Notify client that the run is starting
+            await ws.send_text(Running().model_dump_json())
 
             # Set workdir in the current context — create_task copies it
             agent_tools.set_workdir(project_path)
