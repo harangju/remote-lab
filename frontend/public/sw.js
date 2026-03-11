@@ -1,5 +1,5 @@
 // Service worker — network-first for API/WS, cache-first for static assets
-const CACHE_NAME = "rl-v2";
+const CACHE_NAME = "rl-v3";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => {
@@ -16,8 +16,8 @@ self.addEventListener("fetch", (e) => {
   // Never cache API calls or WebSocket upgrades
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/ws/")) return;
 
-  // Static assets (.js, .css, images) — cache-first
-  if (/\.(js|css|png|jpg|svg|woff2?)$/.test(url.pathname)) {
+  // Images and fonts — cache-first (these rarely change)
+  if (/\.(png|jpg|svg|woff2?)$/.test(url.pathname)) {
     e.respondWith(
       caches.match(e.request).then((cached) =>
         cached || fetch(e.request).then((res) => {
@@ -30,7 +30,7 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // HTML pages — network-first (so app updates are picked up)
+  // JS, CSS, HTML — network-first (so app updates are picked up)
   e.respondWith(
     fetch(e.request)
       .then((res) => {
