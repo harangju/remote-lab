@@ -62,7 +62,7 @@ export function injectTheme() {
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    [data-tooltip] { position: relative; }
+    [data-tooltip]:hover { position: relative; z-index: 99999; }
     [data-tooltip]:hover::after {
       content: attr(data-tooltip);
       position: absolute;
@@ -77,7 +77,6 @@ export function injectTheme() {
       white-space: nowrap;
       border-radius: 4px;
       pointer-events: none;
-      z-index: 10;
     }
     button {
       cursor: pointer;
