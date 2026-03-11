@@ -1077,7 +1077,7 @@ export function Chat() {
                 background: "transparent",
                 border: "none",
               }}
-              placeholder={busy ? "Waiting for response..." : "Type a message... (@ to mention agents or files)"}
+              placeholder={busy ? "Waiting for response..." : "Type a message... (@ for agents or files)"}
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
