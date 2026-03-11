@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2 } from "lucide-react";
-import { getConvo, connectWs, type WsEvent } from "../api";
+import { getConvo, updateConvo, connectWs, type WsEvent } from "../api";
 import { backLink, input as inputStyle, btnPrimary } from "../styles";
 
 // ---------------------------------------------------------------------------
@@ -207,6 +207,9 @@ export function Chat() {
   const [meta, setMeta] = useState<MetaInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [title, setTitle] = useState("Untitled");
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
   const [wsAttempt, setWsAttempt] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -224,6 +227,7 @@ export function Chat() {
     if (!convId) return;
     getConvo(convId)
       .then((detail) => {
+        setTitle(detail.title || "Untitled");
         const msgs: DisplayMessage[] = [];
         let pendingBlocks: StreamBlock[] = [];
 
@@ -380,6 +384,22 @@ export function Chat() {
     };
   }, [convId, wsAttempt]);
 
+  const startEdit = () => {
+    setEditValue(title);
+    setEditing(true);
+  };
+
+  const saveTitle = async () => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== title && convId) {
+      try {
+        await updateConvo(convId, { title: trimmed });
+        setTitle(trimmed);
+      } catch {}
+    }
+    setEditing(false);
+  };
+
   const send = (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
@@ -414,7 +434,48 @@ export function Chat() {
       <div style={{ padding: "12px 1.5rem", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         <Link to={`/p/${projectId}`} style={backLink}>&larr; Conversations</Link>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontWeight: 600 }}>Chat</span>
+          {editing ? (
+            <input
+              autoFocus
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveTitle();
+                if (e.key === "Escape") setEditing(false);
+              }}
+              style={{
+                fontWeight: 600,
+                fontSize: "1rem",
+                background: "var(--bg-surface)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+                borderRadius: "4px",
+                padding: "1px 6px",
+                outline: "none",
+                minWidth: 0,
+                maxWidth: "20rem",
+              }}
+            />
+          ) : (
+            <>
+              <span style={{ fontWeight: 600 }}>{title}</span>
+              <button
+                onClick={startEdit}
+                data-tooltip="Rename"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "2px",
+                  color: "var(--text-muted)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                }}
+              >
+                <Pencil size={14} />
+              </button>
+            </>
+          )}
           <span
             data-tooltip={connected ? "Connected" : "Disconnected"}
             style={{

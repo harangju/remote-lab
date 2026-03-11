@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { getProject, listConvos, createConvo, deleteConvo, type Project, type ConvoMeta } from "../api";
+import { Pencil } from "lucide-react";
+import { getProject, listConvos, createConvo, updateConvo, deleteConvo, type Project, type ConvoMeta } from "../api";
 import { container, card, btnPrimary, btnDanger, backLink, badge } from "../styles";
 
 function timeAgo(iso: string): string {
@@ -20,6 +21,8 @@ export function ConvoList() {
   const [convos, setConvos] = useState<ConvoMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
 
   useEffect(() => {
     if (!projectId) return;
@@ -41,6 +44,24 @@ export function ConvoList() {
     } catch (err: any) {
       setError(err.message);
     }
+  };
+
+  const startRename = (c: ConvoMeta) => {
+    setEditingId(c.id);
+    setEditValue(c.title || "Untitled");
+  };
+
+  const saveRename = async (id: string) => {
+    const trimmed = editValue.trim();
+    if (trimmed) {
+      try {
+        const updated = await updateConvo(id, { title: trimmed });
+        setConvos((prev) => prev.map((c) => (c.id === id ? { ...c, title: updated.title } : c)));
+      } catch (err: any) {
+        setError(err.message);
+      }
+    }
+    setEditingId(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -72,9 +93,55 @@ export function ConvoList() {
           <div key={c.id} style={card}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Link to={`/p/${projectId}/c/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {c.title || "Untitled"}
-                </Link>
+                {editingId === c.id ? (
+                  <input
+                    autoFocus
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => saveRename(c.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveRename(c.id);
+                      if (e.key === "Escape") setEditingId(null);
+                    }}
+                    style={{
+                      fontWeight: 600,
+                      fontSize: "0.875rem",
+                      background: "var(--bg)",
+                      color: "var(--text)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "4px",
+                      padding: "1px 6px",
+                      outline: "none",
+                      minWidth: 0,
+                      maxWidth: "16rem",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <>
+                    <Link to={`/p/${projectId}/c/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {c.title || "Untitled"}
+                    </Link>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); startRename(c); }}
+                      data-tooltip="Rename"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: "2px",
+                        color: "var(--text-muted)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        opacity: 0.5,
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </>
+                )}
                 <span style={badge(c.status)}>{c.status}</span>
               </div>
               <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "2px" }}>

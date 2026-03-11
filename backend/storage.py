@@ -200,6 +200,16 @@ def delete_conversation(convo_id: str) -> bool:
     return True
 
 
+def update_conversation_title(convo_id: str, title: str) -> ConvoMeta | None:
+    meta = _read_meta(convo_id)
+    if meta is None:
+        return None
+    meta.title = title
+    meta.updated_at = _now()
+    _write_meta(meta)
+    return meta
+
+
 def update_conversation_status(convo_id: str, status: ConvoStatus) -> ConvoMeta | None:
     meta = _read_meta(convo_id)
     if meta is None:

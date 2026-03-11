@@ -36,7 +36,7 @@ from backend.compact import compact, needs_compaction
 from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, Compacted, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
-    ConvoMeta, ConvoCreate, ConvoDetail,
+    ConvoMeta, ConvoCreate, ConvoUpdate, ConvoDetail,
     ConvoStatus,
 )
 from backend import storage
@@ -269,6 +269,16 @@ async def api_get_convo(convo_id: str):
     if not convo:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return convo
+
+
+@api.patch("/convos/{convo_id}", response_model=ConvoMeta)
+async def api_update_convo(convo_id: str, body: ConvoUpdate):
+    if body.title is not None:
+        meta = storage.update_conversation_title(convo_id, body.title)
+        if not meta:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return meta
+    raise HTTPException(status_code=400, detail="No fields to update")
 
 
 @api.delete("/convos/{convo_id}", status_code=204)

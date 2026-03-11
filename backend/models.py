@@ -51,6 +51,10 @@ class ConvoCreate(BaseModel):
     title: Optional[str] = None
 
 
+class ConvoUpdate(BaseModel):
+    title: Optional[str] = None
+
+
 class ConvoMeta(BaseModel):
     id: str
     project_id: str

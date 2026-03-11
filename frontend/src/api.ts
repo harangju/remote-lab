@@ -126,6 +126,13 @@ export function getConvo(convoId: string): Promise<ConvoDetail> {
   return request(`/convos/${convoId}`);
 }
 
+export function updateConvo(convoId: string, body: { title?: string }): Promise<ConvoMeta> {
+  return request(`/convos/${convoId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
 export function deleteConvo(convoId: string): Promise<void> {
   return request(`/convos/${convoId}`, { method: "DELETE" });
 }
