@@ -1,6 +1,6 @@
 # Setup
 
-Step-by-step guide to get Remote Lab running on a VPS.
+Step-by-step guide to set up Remote Lab on a VPS.
 
 ## 1. Get a VPS
 

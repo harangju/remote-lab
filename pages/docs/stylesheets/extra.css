@@ -1,3 +1,13 @@
+/* Narrow the sidebar */
+[data-slot="sidebar-wrapper"] {
+  --sidebar-width: 180px !important;
+}
+@media (min-width: 1024px) {
+  [data-slot="sidebar-wrapper"] {
+    --sidebar-width: 200px !important;
+  }
+}
+
 /* Code block overflow fix */
 pre {
   overflow-x: auto;
