@@ -202,6 +202,7 @@ export function Chat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamBlocks, setStreamBlocks] = useState<StreamBlock[]>([]);
   const [thinking, setThinking] = useState(false);
+  const [waitingForModel, setWaitingForModel] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState<MetaInfo | null>(null);
@@ -245,7 +246,9 @@ export function Chat() {
             const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
             const blocks: StreamBlock[] = [...pendingBlocks];
             if (content) blocks.push({ type: "text", content });
-            msgs.push({ role: "assistant", blocks });
+            if (blocks.length > 0) {
+              msgs.push({ role: "assistant", blocks });
+            }
             pendingBlocks = [];
           }
         }
@@ -290,12 +293,14 @@ export function Chat() {
           break;
         case "running":
           setBusy(true);
+          setWaitingForModel(true);
           break;
         case "thinking-delta":
           setThinking(true);
           break;
         case "text-delta": {
           setThinking(false);
+          setWaitingForModel(false);
           const blocks = blocksRef.current;
           const last = blocks[blocks.length - 1];
           if (last && last.type === "text") {
@@ -308,11 +313,13 @@ export function Chat() {
           break;
         }
         case "tool-use": {
+          setWaitingForModel(false);
           blocksRef.current = [...blocksRef.current, { type: "tool", name: data.name, input: data.input }];
           setStreamBlocks(blocksRef.current);
           break;
         }
         case "tool-result": {
+          setWaitingForModel(true);
           // Find the last tool block with matching name and update its output
           const blocks = [...blocksRef.current];
           for (let i = blocks.length - 1; i >= 0; i--) {
@@ -334,6 +341,7 @@ export function Chat() {
           blocksRef.current = [];
           setStreamBlocks([]);
           setThinking(false);
+          setWaitingForModel(false);
           setMeta((prev) => ({
             cost: (prev?.cost ?? 0) + data.cost,
             turns: data.turns,
@@ -359,6 +367,7 @@ export function Chat() {
           blocksRef.current = [];
           setStreamBlocks([]);
           setThinking(false);
+          setWaitingForModel(false);
           setBusy(false);
           break;
       }
@@ -515,8 +524,21 @@ export function Chat() {
           </React.Fragment>
         ))}
 
-        {/* Status indicator */}
-        {busy && streamBlocks.length === 0 && (
+        {/* Live streaming blocks — interleaved tool calls and text */}
+        {streamBlocks.map((b, j) => (
+          b.type === "tool" ? (
+            <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+              <ToolChip tool={b} live={!b.output} />
+            </div>
+          ) : b.content ? (
+            <div key={j} style={msgBubble("assistant")}>
+              <MdContent text={b.content} />
+            </div>
+          ) : null
+        ))}
+
+        {/* Thinking / waiting indicator — shows before first response and between tool rounds */}
+        {waitingForModel && (
           <div style={{
             alignSelf: "flex-start",
             padding: "10px 14px",
@@ -531,22 +553,9 @@ export function Chat() {
               <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.2s" }}>.</span>
               <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.4s" }}>.</span>
             </span>
-            <span>{thinking ? "Thinking" : "Waiting for response"}</span>
+            <span>{thinking ? "Thinking" : "Working..."}</span>
           </div>
         )}
-
-        {/* Live streaming blocks — interleaved tool calls and text */}
-        {streamBlocks.map((b, j) => (
-          b.type === "tool" ? (
-            <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
-              <ToolChip tool={b} live={!b.output} />
-            </div>
-          ) : b.content ? (
-            <div key={j} style={msgBubble("assistant")}>
-              <MdContent text={b.content} />
-            </div>
-          ) : null
-        ))}
 
         {/* Error */}
         {error && (

@@ -109,14 +109,23 @@ async def _run_agent_task(run: RunState, prompt: str, message_history: list, con
             async for node in agent_run:
                 if agent.is_model_request_node(node):
                     # Stream text deltas from the model response
+                    segment_text = ""
                     async with node.stream(agent_run.ctx) as stream:
                         async for event in stream:
                             if isinstance(event, PartDeltaEvent):
                                 if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
+                                    segment_text += event.delta.content_delta
                                     run.full_text += event.delta.content_delta
                                     await _emit(TextDelta(delta=event.delta.content_delta).model_dump_json())
                                 elif isinstance(event.delta, ThinkingPartDelta):
                                     await _emit(ThinkingDelta(delta=event.delta.content_delta or "").model_dump_json())
+                    # Persist this text segment immediately so reload interleaves correctly
+                    if segment_text:
+                        storage.append_message(convo_id, {
+                            "role": "assistant",
+                            "content": segment_text,
+                            "timestamp": _iso_now(),
+                        })
                 elif agent.is_call_tools_node(node):
                     # Stream tool call and result events
                     async with node.stream(agent_run.ctx) as tool_stream:
@@ -161,10 +170,10 @@ async def _run_agent_task(run: RunState, prompt: str, message_history: list, con
                 ModelMessagesTypeAdapter.dump_json(run.message_history),
             )
 
-            # Persist assistant response
+            # Persist cost/context metadata (text segments already persisted above)
             storage.append_message(convo_id, {
                 "role": "assistant",
-                "content": run.full_text,
+                "content": "",
                 "timestamp": _iso_now(),
                 "cost": cost,
                 "turns": turns,
