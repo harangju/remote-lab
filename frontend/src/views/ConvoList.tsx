@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Pencil } from "lucide-react";
-import { getProject, listConvos, createConvo, updateConvo, deleteConvo, type Project, type ConvoMeta } from "../api";
+import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, type Project, type ConvoMeta } from "../api";
 import { container, card, btnPrimary, btnDanger, backLink, badge } from "../styles";
 
 function timeAgo(iso: string): string {
@@ -23,6 +23,8 @@ export function ConvoList() {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [editingProject, setEditingProject] = useState(false);
+  const [projectNameValue, setProjectNameValue] = useState("");
 
   useEffect(() => {
     if (!projectId) return;
@@ -35,6 +37,24 @@ export function ConvoList() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  const startProjectRename = () => {
+    setEditingProject(true);
+    setProjectNameValue(project?.name ?? "");
+  };
+
+  const saveProjectRename = async () => {
+    const trimmed = projectNameValue.trim();
+    if (trimmed && projectId) {
+      try {
+        const updated = await updateProject(projectId, { name: trimmed });
+        setProject((prev) => prev ? { ...prev, name: updated.name } : prev);
+      } catch (err: any) {
+        setError(err.message);
+      }
+    }
+    setEditingProject(false);
+  };
 
   const handleNew = async () => {
     if (!projectId) return;
@@ -78,7 +98,55 @@ export function ConvoList() {
     <div style={container}>
       <Link to="/" style={backLink}>&larr; Projects</Link>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <h1 style={{ margin: 0, fontSize: "1.5rem" }}>{project?.name ?? "Project"}</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {editingProject ? (
+            <input
+              autoFocus
+              value={projectNameValue}
+              onChange={(e) => setProjectNameValue(e.target.value)}
+              onBlur={() => saveProjectRename()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveProjectRename();
+                if (e.key === "Escape") setEditingProject(false);
+              }}
+              style={{
+                fontWeight: 600,
+                fontSize: "1.5rem",
+                background: "var(--bg)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+                borderRadius: "4px",
+                padding: "1px 6px",
+                outline: "none",
+                minWidth: 0,
+                maxWidth: "20rem",
+                margin: 0,
+              }}
+            />
+          ) : (
+            <>
+              <h1 style={{ margin: 0, fontSize: "1.5rem" }}>{project?.name ?? "Project"}</h1>
+              <button
+                onClick={startProjectRename}
+                data-tooltip="Rename"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "2px",
+                  color: "var(--text-muted)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  opacity: 0.5,
+                  flexShrink: 0,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+              >
+                <Pencil size={15} />
+              </button>
+            </>
+          )}
+        </div>
         <button style={btnPrimary} onClick={handleNew}>New Conversation</button>
       </div>
 

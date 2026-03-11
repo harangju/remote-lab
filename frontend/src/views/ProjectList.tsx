@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { listProjects, createProject, deleteProject, type Project } from "../api";
+import { Pencil } from "lucide-react";
+import { listProjects, createProject, updateProject, deleteProject, type Project } from "../api";
 import { container, card, btnPrimary, btnDanger, input as inputStyle } from "../styles";
 
 export function ProjectList() {
@@ -11,6 +12,8 @@ export function ProjectList() {
   const [name, setName] = useState("");
   const [path, setPath] = useState("/srv/projects/");
   const [pathTouched, setPathTouched] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -35,6 +38,24 @@ export function ProjectList() {
     } catch (err: any) {
       setError(err.message);
     }
+  };
+
+  const startRename = (p: Project) => {
+    setEditingId(p.id);
+    setEditValue(p.name);
+  };
+
+  const saveRename = async (id: string) => {
+    const trimmed = editValue.trim();
+    if (trimmed) {
+      try {
+        const updated = await updateProject(id, { name: trimmed });
+        setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, name: updated.name } : p)));
+      } catch (err: any) {
+        setError(err.message);
+      }
+    }
+    setEditingId(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -79,8 +100,56 @@ export function ProjectList() {
       ) : (
         projects.map((p) => (
           <div key={p.id} style={card}>
-            <div>
-              <Link to={`/p/${p.id}`} style={{ fontWeight: 600 }}>{p.name}</Link>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {editingId === p.id ? (
+                  <input
+                    autoFocus
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => saveRename(p.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveRename(p.id);
+                      if (e.key === "Escape") setEditingId(null);
+                    }}
+                    style={{
+                      fontWeight: 600,
+                      fontSize: "0.875rem",
+                      background: "var(--bg)",
+                      color: "var(--text)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "4px",
+                      padding: "1px 6px",
+                      outline: "none",
+                      minWidth: 0,
+                      maxWidth: "16rem",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <>
+                    <Link to={`/p/${p.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</Link>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); startRename(p); }}
+                      data-tooltip="Rename"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: "2px",
+                        color: "var(--text-muted)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        opacity: 0.5,
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </>
+                )}
+              </div>
               <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "2px" }}>{p.path}</div>
             </div>
             <button style={btnDanger} onClick={() => handleDelete(p.id)}>Delete</button>
