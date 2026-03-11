@@ -112,7 +112,11 @@ async def _run_agent_task(run: RunState, prompt: str, message_history: list, con
                     segment_text = ""
                     async with node.stream(agent_run.ctx) as stream:
                         async for event in stream:
-                            if isinstance(event, PartDeltaEvent):
+                            if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart) and event.part.content:
+                                segment_text += event.part.content
+                                run.full_text += event.part.content
+                                await _emit(TextDelta(delta=event.part.content).model_dump_json())
+                            elif isinstance(event, PartDeltaEvent):
                                 if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
                                     segment_text += event.delta.content_delta
                                     run.full_text += event.delta.content_delta
