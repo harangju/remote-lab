@@ -49,7 +49,7 @@ function LoginGate({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <LoginGate>
-      <BrowserRouter basename="/p">
+      <BrowserRouter>
         <Routes>
           <Route path="/" element={<ProjectList />} />
           <Route path="/:projectId" element={<ConvoList />} />

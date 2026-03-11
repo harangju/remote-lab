@@ -1,7 +1,7 @@
 {
   "name": "Remote Lab",
   "short_name": "Remote Lab",
-  "start_url": "/p/",
+  "start_url": "/",
   "scope": "/",
   "display": "minimal-ui",
   "background_color": "#191919",

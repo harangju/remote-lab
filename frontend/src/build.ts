@@ -23,7 +23,7 @@ const scriptName = jsFile ? jsFile.path.split("/").pop()! : "main.js";
 const html = await Bun.file(resolve(publicDir, "index.html")).text();
 await Bun.write(
   resolve(outDir, "index.html"),
-  html.replace("/main.js", `/p/${scriptName}`),
+  html.replace("/main.js", `/${scriptName}`),
 );
 
 // Copy all other public files (manifest, icons, sw.js, etc.)

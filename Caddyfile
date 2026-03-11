@@ -1,3 +1,7 @@
-yourdomain.com {
+lab.harangju.com {
 	reverse_proxy localhost:3000
+}
+
+docs.harangju.com {
+	reverse_proxy localhost:3001
 }

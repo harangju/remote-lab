@@ -1,34 +1,53 @@
 # remote-lab
 
-PydanticAI + FastAPI server for a personal remote development lab. Multi-provider LLM chat with server-side tools, plus markdown document serving.
+A personal remote development lab. Two services on one VPS:
+
+- **`lab.harangju.com`** — AI coding assistant with chat UI, file editor, and agentic tool use
+- **`docs.harangju.com`** — Markdown and HTML document server with access control
 
 ## How it works
 
 ```
-browser → Caddy (HTTPS, port 443) → FastAPI/Uvicorn (port 3000) → PydanticAI agent
+browser → Caddy (HTTPS, port 443) → lab (port 3000) or docs (port 3001)
 ```
 
-- **`backend/server.py`** — FastAPI app. Serves markdown docs from `docs/`, REST API, WebSocket chat, and the React frontend.
+### Lab (`backend/server.py`)
+
+- **`backend/server.py`** — FastAPI app. REST API, WebSocket chat, React frontend serving.
 - **`backend/agents.py`** — PydanticAI agent with multi-provider fallback. System prompt sandboxing and usage limits.
 - **`backend/tools.py`** — Server-side tools: bash, read/write/edit files, glob, grep.
 - **`backend/protocol.py`** — Pydantic models for WebSocket chat events.
 - **`backend/models.py`** — Pydantic models for REST API (projects, conversations).
 - **`backend/storage.py`** — Flat-file storage for projects and conversations.
 - **`frontend/`** — React + TypeScript chat UI, built with Bun.
-- **`docs/`** — Drop `.md` files here. They show up on the index page sorted by last modified.
+
+### Docs (`backend/docs_server.py`)
+
+- **`backend/docs_server.py`** — Standalone FastAPI app. Renders markdown as HTML, serves `.html` files as-is, serves static assets.
+- **`docs/`** — Drop `.md` or `.html` files here. They show up on the index page sorted by last modified.
+
+### Shared
+
 - **`Caddyfile`** — Reference copy. The live one is at `/etc/caddy/Caddyfile`.
 
 ## Routes
 
+### Lab (`lab.harangju.com`)
+
 | Route | What it does |
 |-------|-------------|
-| `/` | Lists all `.md` files in `docs/`, sorted by last modified |
-| `/:slug` | Renders `docs/{slug}.md` as HTML |
-| `/chat` | React chat UI (requires `WS_TOKEN` env var) |
+| `/` | React chat UI (requires `WS_TOKEN` env var) |
 | `/api/projects` | REST API for project management |
 | `/api/ws/{convo_id}` | WebSocket endpoint for agent chat (requires auth) |
 
-## What's in the HTML template
+### Docs (`docs.harangju.com`)
+
+| Route | What it does |
+|-------|-------------|
+| `/` | Lists all `.md` and `.html` files in `docs/`, sorted by last modified |
+| `/:slug` | Renders `docs/{slug}.md` as HTML, or serves `docs/{slug}.html` as-is |
+
+## What's in the docs HTML template
 
 - **MathJax v3** — renders LaTeX math. Inline `$...$` and display `$$...$$`.
 - **Hypothesis** — adds inline annotation/commenting sidebar (via hypothes.is embed script).
@@ -64,15 +83,17 @@ At least one LLM API key is required. The agent uses dynamic fallback based on a
 ### 3. Run locally
 
 ```bash
-uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000
+uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000       # lab
+uv run uvicorn backend.docs_server:app --host 0.0.0.0 --port 3001  # docs
 ```
 
 ## Adding documents
 
-Drop a markdown file in `docs/`:
+Drop a markdown or HTML file in `docs/`:
 
 ```bash
 cp ~/notes.md /srv/remote-lab/docs/
+cp ~/page.html /srv/remote-lab/docs/
 ```
 
 Or symlink from another repo:
@@ -83,9 +104,9 @@ ln -s /path/to/other-repo/paper.md /srv/remote-lab/docs/paper.md
 
 ## Services
 
-Two systemd services run this:
+Three systemd services run this:
 
-### remote-lab (the FastAPI app)
+### remote-lab (the chat/agent app)
 
 ```
 /etc/systemd/system/remote-lab.service
@@ -101,7 +122,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/srv/remote-lab
 EnvironmentFile=/srv/remote-lab/.env
-ExecStart=/root/.local/bin/uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000
+ExecStart=/usr/local/bin/uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000
 Restart=always
 
 [Install]
@@ -114,13 +135,42 @@ systemctl restart remote-lab    # restart after code changes
 journalctl -u remote-lab -f     # tail logs
 ```
 
+### remote-lab-docs (the document server)
+
+```
+/etc/systemd/system/remote-lab-docs.service
+```
+
+```ini
+[Unit]
+Description=remote-lab-docs
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/srv/remote-lab
+EnvironmentFile=/srv/remote-lab/.env
+ExecStart=/usr/local/bin/uv run uvicorn backend.docs_server:app --host 0.0.0.0 --port 3001
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl status remote-lab-docs
+systemctl restart remote-lab-docs
+journalctl -u remote-lab-docs -f
+```
+
 ### Caddy (reverse proxy + HTTPS)
 
 ```
 /etc/caddy/Caddyfile
 ```
 
-Caddy reverse-proxies your domain → `localhost:3000` and auto-provisions Let's Encrypt TLS certs.
+Caddy routes each subdomain to its backend and auto-provisions Let's Encrypt TLS certs.
 
 ```bash
 systemctl status caddy
@@ -130,10 +180,10 @@ journalctl -u caddy -f
 
 ## Domain setup
 
-Get a domain and point an A record at your server IP — Caddy handles HTTPS automatically.
+Point two A records at your server IP — Caddy handles HTTPS automatically.
 
-1. Add an A record: **Host** = your subdomain (e.g. `lab`), **Value** = `<your-server-ip>`
-2. Update the `Caddyfile` with your domain
+1. Add A records: `lab.yourdomain.com` and `docs.yourdomain.com` → `<your-server-ip>`
+2. Update the `Caddyfile` with your domains
 3. Reload Caddy: `systemctl reload caddy`
 
 ## Access control
@@ -150,7 +200,7 @@ Restrict access to individual documents using `docs/.access.json`. Documents not
 Each key is a document slug, and the value is a list of tokens that grant access. Share the secret link:
 
 ```
-https://yourdomain.com/my-private-doc?t=tok_abc123
+https://docs.harangju.com/my-private-doc?t=tok_abc123
 ```
 
 Tokens also work via `Authorization: Bearer tok_abc123` header.
@@ -165,9 +215,7 @@ Restricted documents are hidden from the index unless the viewer has a valid tok
 
 ## Chat
 
-The `/chat` route serves a React-based chat UI that connects to the agent via WebSocket.
-
-Visit `https://lab.harangju.com/chat` and enter the token when prompted. It's saved in `localStorage` for subsequent visits.
+Visit `https://lab.harangju.com` and enter the token when prompted. It's saved in `localStorage` for subsequent visits.
 
 ### Projects and conversations
 
