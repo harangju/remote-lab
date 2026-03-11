@@ -62,6 +62,13 @@ class ToolResult(BaseModel):
     agent_id: str | None = None
 
 
+class SkillResult(BaseModel):
+    """Sent after a server-side skill finishes executing."""
+    type: Literal["skill-result"] = "skill-result"
+    skill: str
+    output: str
+
+
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str

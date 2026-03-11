@@ -81,6 +81,7 @@ _available = [model_id for env_var, model_id in _PROVIDERS if os.environ.get(env
 if not _available:
     raise RuntimeError("No LLM provider API keys found in environment")
 model = _available[0] if len(_available) == 1 else FallbackModel(*_available)
+active_model: str = _available[0]  # human-readable name of the current primary model
 
 agent = Agent(
     model=model,
@@ -92,6 +93,23 @@ tools.register(agent)
 
 # Default budget per request
 USAGE_LIMITS = UsageLimits(request_limit=25)
+
+
+def set_model(model_id: str) -> str:
+    """Switch the active model. Returns the resolved model ID."""
+    global model, active_model
+    # Allow short names (e.g. "sonnet", "gpt", "gemini")
+    resolved = None
+    for mid in _available:
+        if mid == model_id or model_id in mid:
+            resolved = mid
+            break
+    if not resolved:
+        raise ValueError(f"Unknown model: {model_id}. Available: {', '.join(_available)}")
+    model = resolved
+    active_model = resolved
+    agent.model = resolved  # type: ignore
+    return resolved
 
 
 def create_agent(config: "AgentConfig | None" = None) -> Agent:

@@ -7,6 +7,7 @@ __pycache__/
 .venv/
 data/
 !data/.gitkeep
+!data/skills/
 frontend/node_modules/
 frontend/dist/
 frontend/bun.lock

@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen } from "lucide-react";
-import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, type WsEvent, type AgentConfig } from "../api";
+import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, type WsEvent, type AgentConfig, type Skill } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
 import { FilePanel } from "../components/FilePanel";
@@ -314,6 +314,9 @@ export function Chat() {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
   const [projectFiles, setProjectFiles] = useState<string[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [slashQuery, setSlashQuery] = useState<string | null>(null);
+  const [slashIdx, setSlashIdx] = useState(0);
   // Track active agent info during streaming (for multi-agent labeling)
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
   const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
@@ -448,12 +451,15 @@ export function Chat() {
       .catch((e) => setError(e.message));
   }, [convId, projectId]);
 
-  // Load file list for @file autocomplete
+  // Load file list + skills for autocomplete
   useEffect(() => {
     if (!projectId) return;
     listFiles(projectId)
       .then((res) => setProjectFiles(res.files))
       .catch(() => setProjectFiles([]));
+    listSkills(projectId)
+      .then(setSkills)
+      .catch(() => setSkills([]));
   }, [projectId]);
 
   // Connect WebSocket
@@ -559,6 +565,15 @@ export function Chat() {
             role: "assistant" as const,
             blocks: [{ type: "tool" as const, name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }],
           }]);
+          setWaitingForModel(false);
+          setBusy(false);
+          break;
+        case "skill-result":
+          setMessages((msgs) => [...msgs, {
+            role: "assistant" as const,
+            blocks: [{ type: "tool" as const, name: data.skill, input: data.output }],
+          }]);
+          setWaitingForModel(false);
           setBusy(false);
           break;
         case "error":
@@ -647,6 +662,12 @@ export function Chat() {
     return results;
   }, [mentionQuery, agents, projectFiles]);
 
+  const slashMatches = useMemo((): Skill[] => {
+    if (slashQuery === null) return [];
+    const q = slashQuery.toLowerCase();
+    return skills.filter((s) => s.name.toLowerCase().startsWith(q));
+  }, [slashQuery, skills]);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setInput(val);
@@ -660,6 +681,15 @@ export function Chat() {
       setMentionIdx(0);
     } else {
       setMentionQuery(null);
+    }
+
+    // Detect /slash command at start of input
+    const slashMatch = val.match(/^\/(\w*)$/);
+    if (slashMatch) {
+      setSlashQuery(slashMatch[1]);
+      setSlashIdx(0);
+    } else {
+      setSlashQuery(null);
     }
   };
 
@@ -675,7 +705,38 @@ export function Chat() {
     inputRef.current?.focus();
   };
 
+  const insertSlashCommand = (skill: Skill) => {
+    setInput(`/${skill.name} `);
+    setSlashQuery(null);
+    inputRef.current?.focus();
+  };
+
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Slash command autocomplete
+    if (slashQuery !== null && slashMatches.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIdx((i) => Math.min(i + 1, slashMatches.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault();
+        insertSlashCommand(slashMatches[slashIdx]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashQuery(null);
+        return;
+      }
+    }
+
+    // @mention autocomplete
     if (mentionQuery !== null && mentionMatches.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -703,6 +764,7 @@ export function Chat() {
   const send = (e: React.FormEvent) => {
     e.preventDefault();
     setMentionQuery(null);
+    setSlashQuery(null);
     const text = input.trim();
     if (!text || busy) return;
     const ws = wsRef.current;
@@ -711,7 +773,14 @@ export function Chat() {
       return;
     }
     const isCommand = text.startsWith("/");
-    if (!isCommand) {
+    if (isCommand) {
+      const cmdName = text.split(/\s/)[0].slice(1);
+      const skill = skills.find((s) => s.name === cmdName);
+      // Show prompt-type skills as user messages (they'll be sent to the agent)
+      if (skill?.type === "prompt") {
+        setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
+      }
+    } else {
       setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
     }
     setInput("");
@@ -976,6 +1045,43 @@ export function Chat() {
         {/* Input */}
         <div style={{ flexShrink: 0, padding: "0 1.5rem 12px" }}>
         <div style={{ position: "relative", maxWidth: "48rem", width: "100%", margin: "0 auto" }}>
+          {/* /slash command autocomplete dropdown */}
+          {slashQuery !== null && slashMatches.length > 0 && (
+            <div style={{
+              position: "absolute",
+              bottom: "100%",
+              left: 14,
+              marginBottom: 4,
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border)",
+              borderRadius: "8px",
+              padding: "4px 0",
+              minWidth: 240,
+              maxHeight: 300,
+              overflowY: "auto",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+              zIndex: 100,
+            }}>
+              {slashMatches.map((s, i) => (
+                <div
+                  key={s.name}
+                  onMouseDown={(e) => { e.preventDefault(); insertSlashCommand(s); }}
+                  style={{
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "0.85rem",
+                    background: i === slashIdx ? "var(--bg-user)" : "transparent",
+                  }}
+                >
+                  <span style={{ fontWeight: 600, fontFamily: "monospace" }}>/{s.name}</span>
+                  <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{s.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {/* @mention autocomplete dropdown (agents + files) */}
           {mentionQuery !== null && mentionMatches.length > 0 && (() => {
             const agentMatches = mentionMatches.filter((m): m is MentionMatch & { type: "agent" } => m.type === "agent");
@@ -1077,7 +1183,7 @@ export function Chat() {
                 background: "transparent",
                 border: "none",
               }}
-              placeholder={busy ? "Waiting for response..." : "Type a message... (@ for agents or files)"}
+              placeholder={busy ? "Waiting for response..." : "Type a message... (@ for agents/files, / for commands)"}
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}

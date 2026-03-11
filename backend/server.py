@@ -35,7 +35,8 @@ from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, Error
+from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, Error
+from backend.skills import get_skills, get_skill, SkillType
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoUpdate, ConvoDetail,
@@ -412,6 +413,19 @@ async def api_delete_project_agents(project_id: str):
     return {"ok": True}
 
 
+# -- Skills ------------------------------------------------------------------
+
+@api.get("/projects/{project_id}/skills")
+async def api_list_skills(project_id: str):
+    """List available skills for a project (built-in + file-based)."""
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_path = Path(proj.path)
+    skills = get_skills(project_path if project_path.is_dir() else None)
+    return [s.model_dump() for s in skills]
+
+
 # -- Files -------------------------------------------------------------------
 
 @api.get("/projects/{project_id}/file")
@@ -716,37 +730,107 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 )
                 continue
 
-            # Handle /compact command (compacts default agent history)
-            if prompt.strip() == "/compact":
-                hist, ctx_tokens = _load_history(None)
-                if hist:
-                    old_tokens = ctx_tokens
-                    hist, summary = await compact(hist)
-                    if summary:
-                        est_tokens = sum(len(str(m)) for m in hist) // 4
-                        agent_histories[None] = (hist, est_tokens)
+            # Handle slash commands (skills)
+            if prompt.strip().startswith("/"):
+                parts = prompt.strip().split(None, 1)
+                cmd_name = parts[0][1:]  # strip leading /
+                cmd_args = parts[1] if len(parts) > 1 else ""
+                skill = get_skill(cmd_name, project_path)
+
+                if skill and skill.type == SkillType.server:
+                    # --- Server skill: /compact ---
+                    if skill.name == "compact":
+                        # Discover all agent histories (on disk + already loaded)
+                        for p in storage.CONVOS_DIR.glob(f"{convo_id}.agent*.json"):
+                            parts = p.stem.replace(f"{convo_id}.agent", "")
+                            aid = parts.lstrip(".") or None
+                            _load_history(aid)
+
+                        aids_to_compact = [aid for aid, (h, _) in agent_histories.items() if h]
+                        if not aids_to_compact:
+                            await ws.send_text(
+                                Error(message="No message history to compact", recoverable=True).model_dump_json()
+                            )
+                        else:
+                            compacted_any = False
+                            for aid in aids_to_compact:
+                                hist, ctx_tokens = agent_histories[aid]
+                                old_tokens = ctx_tokens
+                                hist, summary = await compact(hist)
+                                if summary:
+                                    compacted_any = True
+                                    est_tokens = sum(len(str(m)) for m in hist) // 4
+                                    agent_histories[aid] = (hist, est_tokens)
+                                    label = f"@{aid} " if aid else ""
+                                    storage.append_message(convo_id, {
+                                        "role": "tool",
+                                        "name": "compact",
+                                        "input": f"{label}{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
+                                        "timestamp": _iso_now(),
+                                    })
+                                    storage.save_agent_history(
+                                        convo_id,
+                                        ModelMessagesTypeAdapter.dump_json(hist),
+                                        agent_id=aid,
+                                    )
+                                    await ws.send_text(
+                                        Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
+                                    )
+                            if not compacted_any:
+                                await ws.send_text(
+                                    Error(message="Not enough history to compact", recoverable=True).model_dump_json()
+                                )
+
+                    # --- Server skill: /model [name] ---
+                    elif skill.name == "model":
+                        from backend.agents import active_model, _available, set_model
+                        if cmd_args.strip():
+                            # Switch model
+                            try:
+                                new_model = set_model(cmd_args.strip())
+                                # Clear agent cache so next message uses new model
+                                _agent_cache.clear()
+                                output = f"Switched to {new_model}"
+                            except ValueError as e:
+                                output = str(e)
+                        else:
+                            # Show current model + available alternatives
+                            output = f"Model: {active_model}"
+                            others = [m for m in _available if m != active_model]
+                            if others:
+                                output += "\nAvailable: " + ", ".join(others)
+                                # Show short switch commands
+                                def _short(m: str) -> str:
+                                    # "anthropic:claude-sonnet-4-6" → "sonnet"
+                                    # "openai:gpt-5-nano" → "gpt-5-nano"
+                                    # "google-gla:gemini-2.5-flash" → "gemini"
+                                    name = m.split(":")[-1]
+                                    # Strip known prefixes
+                                    if name.startswith("claude-"):
+                                        name = name[len("claude-"):]
+                                    return name
+                                output += "\nSwitch: " + ", ".join(f"/model {_short(m)}" for m in others)
                         storage.append_message(convo_id, {
                             "role": "tool",
-                            "name": "compact",
-                            "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
+                            "name": "model",
+                            "input": output,
                             "timestamp": _iso_now(),
                         })
-                        storage.save_agent_history(
-                            convo_id,
-                            ModelMessagesTypeAdapter.dump_json(hist),
-                        )
                         await ws.send_text(
-                            Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
+                            SkillResult(skill="model", output=output).model_dump_json()
                         )
-                    else:
-                        await ws.send_text(
-                            Error(message="Not enough history to compact", recoverable=True).model_dump_json()
-                        )
-                else:
-                    await ws.send_text(
-                        Error(message="No message history to compact", recoverable=True).model_dump_json()
-                    )
-                continue
+
+                    continue
+
+                elif skill and skill.type == SkillType.prompt:
+                    # Rewrite prompt: prepend the skill's prompt template
+                    user_text = cmd_args.strip()
+                    prompt = f"{skill.prompt}\n\n{user_text}" if user_text else skill.prompt
+                    # Fall through to normal message handling below
+
+                elif not skill:
+                    # Unknown command — send as regular message
+                    pass
 
             # Invalidate cached messages since we're about to append
             _invalidate_message_cache()

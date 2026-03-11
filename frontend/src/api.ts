@@ -200,6 +200,21 @@ export function deleteProjectAgents(projectId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+
+export interface Skill {
+  name: string;
+  type: "server" | "prompt";
+  description: string;
+  prompt?: string;
+}
+
+export function listSkills(projectId: string): Promise<Skill[]> {
+  return request(`/projects/${projectId}/skills`);
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket
 // ---------------------------------------------------------------------------
 
@@ -213,6 +228,7 @@ export type WsEvent =
   | { type: "tool-result"; name: string; output: string; agent_id?: string }
   | { type: "done"; cost: number; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
+  | { type: "skill-result"; skill: string; output: string }
   | { type: "error"; message: string };
 
 export function connectWs(convoId: string): WebSocket {
