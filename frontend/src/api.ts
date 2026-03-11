@@ -27,7 +27,18 @@ export interface ConvoDetail extends ConvoMeta {
 export interface Message {
   role: "user" | "assistant";
   content: string;
+  agent_id?: string;
   [key: string]: unknown;
+}
+
+export interface AgentConfig {
+  id: string;
+  name: string;
+  model?: string;
+  system_prompt?: string;
+  tools?: string[];
+  color?: string;
+  is_default: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,17 +168,50 @@ export function listFiles(projectId: string): Promise<{ root: string; files: str
 }
 
 // ---------------------------------------------------------------------------
+// Agents
+// ---------------------------------------------------------------------------
+
+// Global agents (default for all projects)
+export function listGlobalAgents(): Promise<AgentConfig[]> {
+  return request("/agents");
+}
+
+export function saveGlobalAgents(agents: AgentConfig[]): Promise<AgentConfig[]> {
+  return request("/agents", {
+    method: "PUT",
+    body: JSON.stringify(agents),
+  });
+}
+
+// Per-project agents (override or fallback to global)
+export function listProjectAgents(projectId: string): Promise<{ agents: AgentConfig[]; custom: boolean }> {
+  return request(`/projects/${projectId}/agents`);
+}
+
+export function saveProjectAgents(projectId: string, agents: AgentConfig[]): Promise<AgentConfig[]> {
+  return request(`/projects/${projectId}/agents`, {
+    method: "PUT",
+    body: JSON.stringify(agents),
+  });
+}
+
+export function deleteProjectAgents(projectId: string): Promise<void> {
+  return request(`/projects/${projectId}/agents`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket
 // ---------------------------------------------------------------------------
 
 export type WsEvent =
   | { type: "auth-ok" }
   | { type: "running" }
-  | { type: "thinking-delta"; delta: string }
-  | { type: "text-delta"; delta: string }
-  | { type: "tool-use"; name: string; input?: string }
-  | { type: "tool-result"; name: string; output: string }
-  | { type: "done"; cost: number; turns: number; context_tokens: number; context_limit: number }
+  | { type: "agent-start"; agent_id: string; agent_name: string; agent_color?: string }
+  | { type: "thinking-delta"; delta: string; agent_id?: string }
+  | { type: "text-delta"; delta: string; agent_id?: string }
+  | { type: "tool-use"; name: string; input?: string; agent_id?: string }
+  | { type: "tool-result"; name: string; output: string; agent_id?: string }
+  | { type: "done"; cost: number; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "error"; message: string };
 

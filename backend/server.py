@@ -31,9 +31,11 @@ from pydantic_ai.messages import (
     FunctionToolResultEvent,
 )
 
-from backend.agents import agent, USAGE_LIMITS, get_context_limit
+from backend.agent_config import AgentConfig
+from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
-from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, Compacted, Error
+from backend.mentions import parse_mentions
+from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoUpdate, ConvoDetail,
@@ -89,11 +91,54 @@ class RunState:
 active_runs: dict[str, RunState] = {}
 
 
+def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int = 50) -> str:
+    """Build a summary of recent conversation for cross-agent context.
+
+    Reads the shared JSONL display log and formats messages from other agents
+    and the user so this agent knows what's been discussed.
+    """
+    messages = storage.read_messages(convo_id)
+    if not messages:
+        return ""
+
+    # Take the most recent messages
+    recent = messages[-max_messages:]
+    lines: list[str] = []
+    for msg in recent:
+        role = msg.get("role", "")
+        if role == "user":
+            lines.append(f"User: {msg.get('content', '')}")
+        elif role == "assistant":
+            content = msg.get("content", "")
+            if not content:
+                continue
+            aid = msg.get("agent_id")
+            if aid and aid != agent_id:
+                lines.append(f"[@{aid}]: {content}")
+            elif aid == agent_id:
+                lines.append(f"You (earlier): {content}")
+            else:
+                lines.append(f"Assistant: {content}")
+        elif role == "tool":
+            aid = msg.get("agent_id")
+            name = msg.get("name", "")
+            inp = msg.get("input", "")
+            if aid and aid != agent_id:
+                lines.append(f"[@{aid} used {name}]: {inp}")
+
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
 async def _run_agent_task(
     run: RunState, prompt: str, message_history: list, convo_id: str,
     instructions: str | None = None,
+    agent_instance: "Agent | None" = None,
+    agent_id: str | None = None,
 ):
     """Execute an agent run in the background, broadcasting to subscribers."""
+    active_agent = agent_instance or agent
 
     async def _emit(msg_str: str):
         """Buffer an event and broadcast to subscribers."""
@@ -104,14 +149,14 @@ async def _run_agent_task(
     agent_tools.set_broadcast(None)
 
     try:
-        async with agent.iter(
+        async with active_agent.iter(
             prompt,
             message_history=message_history if message_history else None,
             usage_limits=USAGE_LIMITS,
             instructions=instructions,
         ) as agent_run:
             async for node in agent_run:
-                if agent.is_model_request_node(node):
+                if active_agent.is_model_request_node(node):
                     # Stream text deltas from the model response
                     segment_text = ""
                     async with node.stream(agent_run.ctx) as stream:
@@ -119,44 +164,56 @@ async def _run_agent_task(
                             if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart) and event.part.content:
                                 segment_text += event.part.content
                                 run.full_text += event.part.content
-                                await _emit(TextDelta(delta=event.part.content).model_dump_json())
+                                await _emit(TextDelta(delta=event.part.content, agent_id=agent_id).model_dump_json())
                             elif isinstance(event, PartDeltaEvent):
                                 if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
                                     segment_text += event.delta.content_delta
                                     run.full_text += event.delta.content_delta
-                                    await _emit(TextDelta(delta=event.delta.content_delta).model_dump_json())
+                                    await _emit(TextDelta(delta=event.delta.content_delta, agent_id=agent_id).model_dump_json())
                                 elif isinstance(event.delta, ThinkingPartDelta):
-                                    await _emit(ThinkingDelta(delta=event.delta.content_delta or "").model_dump_json())
+                                    await _emit(ThinkingDelta(delta=event.delta.content_delta or "", agent_id=agent_id).model_dump_json())
                     # Persist this text segment immediately so reload interleaves correctly
                     if segment_text:
-                        storage.append_message(convo_id, {
+                        msg: dict = {
                             "role": "assistant",
                             "content": segment_text,
                             "timestamp": _iso_now(),
-                        })
-                elif agent.is_call_tools_node(node):
+                        }
+                        if agent_id:
+                            msg["agent_id"] = agent_id
+                        storage.append_message(convo_id, msg)
+                elif active_agent.is_call_tools_node(node):
                     # Stream tool call and result events
                     async with node.stream(agent_run.ctx) as tool_stream:
                         async for event in tool_stream:
                             if isinstance(event, FunctionToolCallEvent):
-                                await _emit(json.dumps({
+                                ev: dict = {
                                     "type": "tool-use",
                                     "name": event.part.tool_name,
                                     "input": str(event.part.args)[:200],
-                                }))
-                                storage.append_message(convo_id, {
+                                }
+                                if agent_id:
+                                    ev["agent_id"] = agent_id
+                                await _emit(json.dumps(ev))
+                                persisted: dict = {
                                     "role": "tool",
                                     "name": event.part.tool_name,
                                     "input": str(event.part.args)[:200],
                                     "timestamp": _iso_now(),
-                                })
+                                }
+                                if agent_id:
+                                    persisted["agent_id"] = agent_id
+                                storage.append_message(convo_id, persisted)
                             elif isinstance(event, FunctionToolResultEvent):
                                 output = str(event.content)[:500] if event.content else "OK"
-                                await _emit(json.dumps({
+                                ev = {
                                     "type": "tool-result",
                                     "name": event.result.tool_name if hasattr(event.result, "tool_name") else "",
                                     "output": output,
-                                }))
+                                }
+                                if agent_id:
+                                    ev["agent_id"] = agent_id
+                                await _emit(json.dumps(ev))
 
             # Compute cost and context info
             turns = len([
@@ -172,14 +229,15 @@ async def _run_agent_task(
             run.message_history = agent_run.all_messages()
             run.last_context_tokens = context_tokens
 
-            # Persist agent history
+            # Persist agent history (per-agent if multi-agent)
             storage.save_agent_history(
                 convo_id,
                 ModelMessagesTypeAdapter.dump_json(run.message_history),
+                agent_id=agent_id,
             )
 
             # Persist cost/context metadata (text segments already persisted above)
-            storage.append_message(convo_id, {
+            meta_msg: dict = {
                 "role": "assistant",
                 "content": "",
                 "timestamp": _iso_now(),
@@ -187,9 +245,12 @@ async def _run_agent_task(
                 "turns": turns,
                 "context_tokens": context_tokens,
                 "context_limit": context_limit,
-            })
+            }
+            if agent_id:
+                meta_msg["agent_id"] = agent_id
+            storage.append_message(convo_id, meta_msg)
 
-            done = Done(cost=cost, turns=turns, context_tokens=context_tokens, context_limit=context_limit)
+            done = Done(cost=cost, turns=turns, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
             run.done_event = done.model_dump()
             run.status = "done"
             await _emit(done.model_dump_json())
@@ -303,6 +364,56 @@ async def api_delete_convo(convo_id: str):
     if not storage.delete_conversation(convo_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+
+# -- Agents ------------------------------------------------------------------
+
+@api.get("/agents")
+async def api_list_global_agents():
+    """List global (default) agents."""
+    return [a.model_dump() for a in storage.load_global_agents()]
+
+
+@api.put("/agents")
+async def api_save_global_agents(body: list[AgentConfig]):
+    """Save global (default) agents."""
+    storage.save_global_agents(body)
+    return [a.model_dump() for a in body]
+
+
+@api.get("/projects/{project_id}/agents")
+async def api_list_agents(project_id: str):
+    """List agents for a project (per-project override or global fallback)."""
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    agents = storage.load_project_agents(project_id)
+    return {
+        "agents": [a.model_dump() for a in agents],
+        "custom": storage.has_project_agents(project_id),
+    }
+
+
+@api.put("/projects/{project_id}/agents")
+async def api_save_agents(project_id: str, body: list[AgentConfig]):
+    """Save per-project agent override."""
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    storage.save_project_agents(project_id, body)
+    return [a.model_dump() for a in body]
+
+
+@api.delete("/projects/{project_id}/agents")
+async def api_delete_project_agents(project_id: str):
+    """Remove per-project override, revert to global agents."""
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    storage.delete_project_agents(project_id)
+    return {"ok": True}
+
+
+# -- Files -------------------------------------------------------------------
 
 @api.get("/projects/{project_id}/file")
 async def api_read_file(project_id: str, path: str):
@@ -739,39 +850,50 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         await ws.send_text(AuthOk().model_dump_json())
         print(f"ws[{convo_id[:8]}]: authenticated, project={project.name}, path={project.path}")
 
-        # ----- Load existing message history -----
-        message_history: list = []
-        last_context_tokens = 0
+        # ----- Load agent configs for the project -----
+        project_agents = storage.load_project_agents(project.id)
 
-        # Restore PydanticAI agent history if available
-        agent_history_bytes = storage.load_agent_history(convo_id)
-        if agent_history_bytes:
-            try:
-                message_history = ModelMessagesTypeAdapter.validate_json(agent_history_bytes)
-                # Restore last known context tokens from persisted messages
-                persisted_msgs = storage.read_messages(convo_id)
-                for msg in reversed(persisted_msgs):
-                    if msg.get("role") == "assistant" and "context_tokens" in msg:
-                        last_context_tokens = msg["context_tokens"]
-                        break
-                print(f"ws[{convo_id[:8]}]: restored {len(message_history)} agent messages")
-            except Exception as e:
-                print(f"ws[{convo_id[:8]}]: failed to restore agent history: {e}")
-                message_history = []
+        # ----- Load existing message history -----
+        # Per-agent histories: agent_id → (message_history, last_context_tokens)
+        agent_histories: dict[str | None, tuple[list, int]] = {}
+
+        def _load_history(aid: str | None) -> tuple[list, int]:
+            """Load message history for a specific agent (or default)."""
+            if aid in agent_histories:
+                return agent_histories[aid]
+            hist: list = []
+            ctx_tokens = 0
+            hist_bytes = storage.load_agent_history(convo_id, agent_id=aid)
+            if hist_bytes:
+                try:
+                    hist = ModelMessagesTypeAdapter.validate_json(hist_bytes)
+                    persisted_msgs = storage.read_messages(convo_id)
+                    for msg in reversed(persisted_msgs):
+                        if msg.get("role") == "assistant" and "context_tokens" in msg:
+                            # Match agent_id for multi-agent, or accept any for legacy
+                            if aid is None or msg.get("agent_id") == aid:
+                                ctx_tokens = msg["context_tokens"]
+                                break
+                    print(f"ws[{convo_id[:8]}]: restored {len(hist)} messages for agent={aid or 'default'}")
+                except Exception as e:
+                    print(f"ws[{convo_id[:8]}]: failed to restore history for agent={aid}: {e}")
+                    hist = []
+            agent_histories[aid] = (hist, ctx_tokens)
+            return hist, ctx_tokens
+
+        # Pre-load default agent history
+        _load_history(None)
 
         # ----- Check for active run (reconnection scenario) -----
         existing_run = active_runs.get(convo_id)
         if existing_run and existing_run.status == "running":
-            # Subscribe to the existing run and replay all buffered events in order
             existing_run.subscribers.add(ws)
             await ws.send_text(Running().model_dump_json())
             for event_str in existing_run.events:
                 await ws.send_text(event_str)
             print(f"ws[{convo_id[:8]}]: subscribed to active run ({len(existing_run.events)} events buffered)")
         elif existing_run and existing_run.status in ("done", "error"):
-            # Run completed while disconnected — sync state
-            message_history = existing_run.message_history
-            last_context_tokens = existing_run.last_context_tokens
+            agent_histories[None] = (existing_run.message_history, existing_run.last_context_tokens)
             if active_runs.get(convo_id) is existing_run:
                 del active_runs[convo_id]
 
@@ -779,11 +901,10 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         while True:
             prompt = await ws.receive_text()
 
-            # Sync state from a completed run (if user sends next message after reconnecting)
+            # Sync state from a completed run
             completed_run = active_runs.get(convo_id)
             if completed_run and completed_run.task and completed_run.task.done():
-                message_history = completed_run.message_history
-                last_context_tokens = completed_run.last_context_tokens
+                agent_histories[None] = (completed_run.message_history, completed_run.last_context_tokens)
                 if active_runs.get(convo_id) is completed_run:
                     del active_runs[convo_id]
             elif completed_run and completed_run.status == "running":
@@ -792,14 +913,15 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 )
                 continue
 
-            # Handle /compact command
+            # Handle /compact command (compacts default agent history)
             if prompt.strip() == "/compact":
-                if message_history:
-                    old_tokens = last_context_tokens
-                    message_history, summary = await compact(message_history)
+                hist, ctx_tokens = _load_history(None)
+                if hist:
+                    old_tokens = ctx_tokens
+                    hist, summary = await compact(hist)
                     if summary:
-                        est_tokens = sum(len(str(m)) for m in message_history) // 4
-                        last_context_tokens = est_tokens
+                        est_tokens = sum(len(str(m)) for m in hist) // 4
+                        agent_histories[None] = (hist, est_tokens)
                         storage.append_message(convo_id, {
                             "role": "tool",
                             "name": "compact",
@@ -808,7 +930,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         })
                         storage.save_agent_history(
                             convo_id,
-                            ModelMessagesTypeAdapter.dump_json(message_history),
+                            ModelMessagesTypeAdapter.dump_json(hist),
                         )
                         await ws.send_text(
                             Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
@@ -833,59 +955,103 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             # Mark conversation as running
             storage.update_conversation_status(convo_id, ConvoStatus.running)
 
-            # Auto-compact if over budget
-            if message_history and needs_compaction(last_context_tokens):
-                old_tokens = last_context_tokens
-                message_history, summary = await compact(message_history)
-                if summary:
-                    est_tokens = sum(len(str(m)) for m in message_history) // 4
-                    storage.append_message(convo_id, {
-                        "role": "tool",
-                        "name": "compact",
-                        "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
-                        "timestamp": _iso_now(),
-                    })
-                    last_context_tokens = est_tokens
-                    storage.save_agent_history(
-                        convo_id,
-                        ModelMessagesTypeAdapter.dump_json(message_history),
-                    )
-                    await ws.send_text(
-                        Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
-                    )
+            # Determine target agents
+            if project_agents:
+                target_agents, cleaned_prompt = parse_mentions(prompt, project_agents)
+            else:
+                target_agents = [None]  # None = use default global agent
+                cleaned_prompt = prompt
 
-            # Launch agent run as a background task
-            run = RunState(
-                convo_id=convo_id,
-                message_history=list(message_history),
-            )
-            run.subscribers.add(ws)
-            active_runs[convo_id] = run
+            # Build project-specific context instructions
+            from backend.context import build_project_instructions
 
             # Notify client that the run is starting
             await ws.send_text(Running().model_dump_json())
 
-            # Build project-specific context instructions
-            from backend.context import build_project_instructions
-            is_first_turn = len(message_history) == 0
-            instructions = build_project_instructions(project_path, is_first_turn)
-
-            # Set workdir in the current context — create_task copies it
+            # Set workdir
             agent_tools.set_workdir(project_path)
-            run.task = asyncio.create_task(
-                _run_agent_task(run, prompt, message_history, convo_id, instructions=instructions)
-            )
 
-            # Wait for the run to complete, but allow WS disconnect to break out
+            # Launch a RunState per target agent
+            runs: list[RunState] = []
+            for ac in target_agents:
+                aid = ac.id if ac else None
+                hist, ctx_tokens = _load_history(aid)
+
+                # Auto-compact if over budget
+                if hist and needs_compaction(ctx_tokens):
+                    old_tokens = ctx_tokens
+                    hist, summary = await compact(hist)
+                    if summary:
+                        est_tokens = sum(len(str(m)) for m in hist) // 4
+                        agent_histories[aid] = (hist, est_tokens)
+                        storage.append_message(convo_id, {
+                            "role": "tool",
+                            "name": "compact",
+                            "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
+                            "timestamp": _iso_now(),
+                        })
+                        storage.save_agent_history(
+                            convo_id,
+                            ModelMessagesTypeAdapter.dump_json(hist),
+                            agent_id=aid,
+                        )
+                        await ws.send_text(
+                            Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
+                        )
+
+                is_first_turn = len(hist) == 0
+                instructions = build_project_instructions(project_path, is_first_turn)
+
+                # Build the prompt — prepend shared conversation context so
+                # this agent can see what other agents and the user discussed
+                agent_prompt = cleaned_prompt
+                if ac:
+                    shared_ctx = _build_shared_context(convo_id, aid)
+                    if shared_ctx:
+                        agent_prompt = (
+                            f"[Conversation context]\n{shared_ctx}\n\n"
+                            f"[New message from user]\n{cleaned_prompt}"
+                        )
+
+                # Send agent-start event for multi-agent
+                if ac:
+                    await ws.send_text(AgentStart(
+                        agent_id=ac.id, agent_name=ac.name, agent_color=ac.color,
+                    ).model_dump_json())
+
+                agent_instance = create_agent(ac)
+
+                run = RunState(
+                    convo_id=convo_id,
+                    message_history=list(hist),
+                )
+                run.subscribers.add(ws)
+                active_runs[convo_id] = run  # last one wins for reconnect
+
+                run.task = asyncio.create_task(
+                    _run_agent_task(
+                        run, agent_prompt, hist, convo_id,
+                        instructions=instructions,
+                        agent_instance=agent_instance,
+                        agent_id=aid,
+                    )
+                )
+                runs.append(run)
+
+            # Wait for all runs to complete
             try:
-                await run.task
+                await asyncio.gather(*[r.task for r in runs if r.task], return_exceptions=True)
             except asyncio.CancelledError:
                 pass
 
-            # Sync state from completed run
-            if run.status == "done":
-                message_history = run.message_history
-                last_context_tokens = run.last_context_tokens
+            # Sync state from completed runs
+            for r in runs:
+                if r.status == "done":
+                    # Determine which agent this run was for
+                    aid = None
+                    if r.done_event and r.done_event.get("agent_id"):
+                        aid = r.done_event["agent_id"]
+                    agent_histories[aid] = (r.message_history, r.last_context_tokens)
 
     except WebSocketDisconnect:
         # Unsubscribe from any active run (task continues in background)
@@ -894,7 +1060,6 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             run.subscribers.discard(ws)
             print(f"ws[{convo_id[:8]}]: disconnected, run continues in background")
     finally:
-        # Only remove if we're still the active connection for this convo
         if active_ws.get(convo_id) is ws:
             del active_ws[convo_id]
         print(f"ws[{convo_id[:8]}]: disconnected (active: {len(active_ws)})")

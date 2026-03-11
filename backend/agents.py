@@ -92,3 +92,23 @@ tools.register(agent)
 
 # Default budget per request
 USAGE_LIMITS = UsageLimits(request_limit=25)
+
+
+def create_agent(config: "AgentConfig | None" = None) -> Agent:
+    """Create a PydanticAI Agent from an AgentConfig.
+
+    If config is None, returns the default global agent.
+    """
+    if config is None:
+        return agent
+
+    from backend.agent_config import AgentConfig  # noqa: F811
+
+    agent_model = config.model if config.model else model
+    prompt = SYSTEM_PROMPT
+    if config.system_prompt:
+        prompt = prompt + "\n\n" + config.system_prompt
+
+    new_agent = Agent(model=agent_model, system_prompt=prompt)
+    tools.register(new_agent, allowed=config.tools)
+    return new_agent

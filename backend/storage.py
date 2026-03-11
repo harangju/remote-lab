@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from backend.agent_config import AgentConfig
 from backend.models import (
     ConvoDetail,
     ConvoMeta,
@@ -29,6 +30,7 @@ from backend.models import (
 DATA_DIR = Path(__file__).parent.parent / "data"
 PROJECTS_FILE = DATA_DIR / "projects.json"
 CONVOS_DIR = DATA_DIR / "conversations"
+AGENTS_DIR = DATA_DIR / "agents"
 
 
 def _ensure_dirs() -> None:
@@ -112,6 +114,58 @@ def delete_project(project_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Agent config per project
+# ---------------------------------------------------------------------------
+
+
+def _load_agents_file(path: Path) -> list[AgentConfig]:
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text())
+    return [AgentConfig(**a) for a in data.get("agents", [])]
+
+
+def _save_agents_file(path: Path, agents: list[AgentConfig]) -> None:
+    AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"agents": [a.model_dump() for a in agents]}, indent=2))
+
+
+def load_global_agents() -> list[AgentConfig]:
+    """Load global agent configs (shared across all projects)."""
+    return _load_agents_file(AGENTS_DIR / "_global.json")
+
+
+def save_global_agents(agents: list[AgentConfig]) -> None:
+    _save_agents_file(AGENTS_DIR / "_global.json", agents)
+
+
+def has_project_agents(project_id: str) -> bool:
+    """Check if a project has its own agent overrides."""
+    return (AGENTS_DIR / f"{project_id}.json").exists()
+
+
+def load_project_agents(project_id: str) -> list[AgentConfig]:
+    """Load agent configs for a project. Falls back to global agents."""
+    p = AGENTS_DIR / f"{project_id}.json"
+    if p.exists():
+        return _load_agents_file(p)
+    return load_global_agents()
+
+
+def save_project_agents(project_id: str, agents: list[AgentConfig]) -> None:
+    _save_agents_file(AGENTS_DIR / f"{project_id}.json", agents)
+
+
+def delete_project_agents(project_id: str) -> bool:
+    """Remove per-project override, reverting to global agents."""
+    p = AGENTS_DIR / f"{project_id}.json"
+    if p.exists():
+        p.unlink()
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Conversation helpers
 # ---------------------------------------------------------------------------
 
@@ -188,15 +242,15 @@ def get_conversation(convo_id: str) -> ConvoDetail | None:
 
 def delete_conversation(convo_id: str) -> bool:
     meta_p = _meta_path(convo_id)
-    msg_p = _messages_path(convo_id)
-    agent_p = _agent_history_path(convo_id)
     if not meta_p.exists():
         return False
     meta_p.unlink()
+    msg_p = _messages_path(convo_id)
     if msg_p.exists():
         msg_p.unlink()
-    if agent_p.exists():
-        agent_p.unlink()
+    # Remove all agent history files (legacy + per-agent)
+    for p in CONVOS_DIR.glob(f"{convo_id}.agent*.json"):
+        p.unlink()
     return True
 
 
@@ -238,20 +292,25 @@ def append_message(convo_id: str, event: dict) -> None:
         _write_meta(meta)
 
 
-def _agent_history_path(convo_id: str) -> Path:
+def _agent_history_path(convo_id: str, agent_id: str | None = None) -> Path:
+    if agent_id:
+        return CONVOS_DIR / f"{convo_id}.agent.{agent_id}.json"
     return CONVOS_DIR / f"{convo_id}.agent.json"
 
 
-def save_agent_history(convo_id: str, data: bytes) -> None:
+def save_agent_history(convo_id: str, data: bytes, agent_id: str | None = None) -> None:
     """Save serialized PydanticAI message history."""
     _ensure_dirs()
-    _agent_history_path(convo_id).write_bytes(data)
+    _agent_history_path(convo_id, agent_id).write_bytes(data)
 
 
-def load_agent_history(convo_id: str) -> bytes | None:
+def load_agent_history(convo_id: str, agent_id: str | None = None) -> bytes | None:
     """Load serialized PydanticAI message history, if it exists."""
-    p = _agent_history_path(convo_id)
+    p = _agent_history_path(convo_id, agent_id)
     if not p.exists():
+        # Fallback: try legacy path (no agent_id) for backward compat
+        if agent_id:
+            return load_agent_history(convo_id, agent_id=None)
         return None
     return p.read_bytes()
 

@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen } from "lucide-react";
-import { getConvo, updateConvo, connectWs, type WsEvent } from "../api";
+import { getConvo, updateConvo, connectWs, listProjectAgents, type WsEvent, type AgentConfig } from "../api";
 import { backLink, input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
 import { FilePanel } from "../components/FilePanel";
@@ -27,6 +27,9 @@ type StreamBlock =
 interface DisplayMessage {
   role: "user" | "assistant";
   blocks: StreamBlock[];
+  agent_id?: string;
+  agent_name?: string;
+  agent_color?: string;
 }
 
 interface MetaInfo {
@@ -307,10 +310,17 @@ export function Chat() {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [wsAttempt, setWsAttempt] = useState(0);
+  const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  // Track active agent info during streaming (for multi-agent labeling)
+  const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
+  const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef<StreamBlock[]>([]);
   const reconnectTimer = useRef<number | undefined>(undefined);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Panel hook
   const panel = usePanel(projectId);
@@ -378,18 +388,23 @@ export function Chat() {
     }
   }, [panel]);
 
-  // Load existing messages — interleave tool calls with assistant messages
+  // Load agent configs + existing messages together so agent labels resolve
   useEffect(() => {
-    if (!convId) return;
-    getConvo(convId)
-      .then((detail) => {
+    if (!convId || !projectId) return;
+    Promise.all([
+      getConvo(convId),
+      listProjectAgents(projectId),
+    ]).then(([detail, agentRes]) => {
+        const agentList = agentRes.agents;
+        setAgents(agentList);
         setTitle(detail.title || "Untitled");
         const msgs: DisplayMessage[] = [];
         let pendingBlocks: StreamBlock[] = [];
 
         for (const m of detail.messages) {
-          if ((m as any).role === "tool") {
-            pendingBlocks.push({ type: "tool", name: (m as any).name, input: (m as any).input });
+          const mAny = m as any;
+          if (mAny.role === "tool") {
+            pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input });
           } else if (m.role === "user") {
             if (pendingBlocks.length > 0) {
               msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
@@ -401,7 +416,14 @@ export function Chat() {
             const blocks: StreamBlock[] = [...pendingBlocks];
             if (content) blocks.push({ type: "text", content });
             if (blocks.length > 0) {
-              msgs.push({ role: "assistant", blocks });
+              const agentId = mAny.agent_id;
+              const agentCfg = agentId ? agentList.find((a: AgentConfig) => a.id === agentId) : undefined;
+              msgs.push({
+                role: "assistant", blocks,
+                agent_id: agentId,
+                agent_name: agentCfg?.name,
+                agent_color: agentCfg?.color,
+              });
             }
             pendingBlocks = [];
           }
@@ -423,7 +445,7 @@ export function Chat() {
         }
       })
       .catch((e) => setError(e.message));
-  }, [convId]);
+  }, [convId, projectId]);
 
   // Connect WebSocket
   useEffect(() => {
@@ -447,6 +469,12 @@ export function Chat() {
           setBusy(true);
           setWaitingForModel(true);
           break;
+        case "agent-start": {
+          const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color };
+          activeAgentRef.current = ag;
+          setActiveAgent(ag);
+          break;
+        }
         case "thinking-delta":
           setThinking(true);
           break;
@@ -492,12 +520,21 @@ export function Chat() {
         case "done": {
           const finalBlocks = blocksRef.current;
           if (finalBlocks.length > 0) {
-            setMessages((msgs) => [...msgs, { role: "assistant", blocks: [...finalBlocks] }]);
+            const ag = activeAgentRef.current;
+            setMessages((msgs) => [...msgs, {
+              role: "assistant",
+              blocks: [...finalBlocks],
+              agent_id: data.agent_id || ag?.id,
+              agent_name: ag?.name,
+              agent_color: ag?.color,
+            }]);
           }
           blocksRef.current = [];
           setStreamBlocks([]);
           setThinking(false);
           setWaitingForModel(false);
+          activeAgentRef.current = null;
+          setActiveAgent(null);
           setMeta((prev) => ({
             cost: (prev?.cost ?? 0) + data.cost,
             turns: data.turns,
@@ -564,8 +601,71 @@ export function Chat() {
     setEditing(false);
   };
 
+  // @mention autocomplete filtering
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null || agents.length === 0) return [];
+    const q = mentionQuery.toLowerCase();
+    return agents.filter((a) =>
+      a.id.toLowerCase().startsWith(q) || a.name.toLowerCase().startsWith(q)
+    );
+  }, [mentionQuery, agents]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInput(val);
+
+    // Detect @mention in progress
+    if (agents.length > 0) {
+      const pos = e.target.selectionStart ?? val.length;
+      const before = val.slice(0, pos);
+      const atMatch = before.match(/@(\w*)$/);
+      if (atMatch) {
+        setMentionQuery(atMatch[1]);
+        setMentionIdx(0);
+      } else {
+        setMentionQuery(null);
+      }
+    }
+  };
+
+  const insertMention = (agent: AgentConfig) => {
+    const pos = inputRef.current?.selectionStart ?? input.length;
+    const before = input.slice(0, pos);
+    const after = input.slice(pos);
+    const atIdx = before.lastIndexOf("@");
+    const newVal = before.slice(0, atIdx) + `@${agent.id} ` + after;
+    setInput(newVal);
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (mentionQuery !== null && mentionMatches.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIdx((i) => Math.min(i + 1, mentionMatches.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault();
+        insertMention(mentionMatches[mentionIdx]);
+        return;
+      }
+      if (e.key === "Escape") {
+        setMentionQuery(null);
+        return;
+      }
+    }
+  };
+
   const send = (e: React.FormEvent) => {
     e.preventDefault();
+    setMentionQuery(null);
     const text = input.trim();
     if (!text || busy) return;
     const ws = wsRef.current;
@@ -597,7 +697,7 @@ export function Chat() {
   }, [panel.toggleFileFinder]);
 
   // Styles
-  const msgBubble = (role: "user" | "assistant"): React.CSSProperties => ({
+  const msgBubble = (role: "user" | "assistant", agentColor?: string): React.CSSProperties => ({
     maxWidth: "85%",
     padding: "10px 14px",
     borderRadius: "12px",
@@ -608,6 +708,7 @@ export function Chat() {
     background: role === "user" ? "var(--bg-user)" : "var(--bg-surface)",
     color: "var(--text)",
     border: `1px solid ${role === "user" ? "var(--border-user)" : "var(--border)"}`,
+    ...(agentColor ? { borderLeft: `3px solid ${agentColor}` } : {}),
   });
 
   // Resizable panel width
@@ -735,19 +836,61 @@ export function Chat() {
         <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px", maxWidth: "48rem", width: "100%", margin: "0 auto", flex: 1 }}>
           {messages.map((m, i) => (
             <React.Fragment key={i}>
+              {m.role === "assistant" && m.agent_name && (
+                <div style={{
+                  fontSize: "0.7rem",
+                  fontWeight: 600,
+                  color: m.agent_color || "var(--text-muted)",
+                  marginTop: "6px",
+                  marginBottom: "1px",
+                  alignSelf: "flex-start",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: "50%",
+                    background: m.agent_color || "var(--text-muted)",
+                    display: "inline-block",
+                  }} />
+                  {m.agent_name}
+                </div>
+              )}
               {m.blocks.map((b, j) => (
                 b.type === "tool" ? (
                   <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
                     <ToolChip tool={b} onOpenFile={handleOpenFile} />
                   </div>
                 ) : b.content ? (
-                  <div key={j} style={msgBubble(m.role)}>
+                  <div key={j} style={msgBubble(m.role, m.agent_color)}>
                     <MdContent text={b.content} />
                   </div>
                 ) : null
               ))}
             </React.Fragment>
           ))}
+
+          {/* Live streaming: agent label */}
+          {activeAgent && streamBlocks.length > 0 && (
+            <div style={{
+              fontSize: "0.7rem",
+              fontWeight: 600,
+              color: activeAgent.color || "var(--text-muted)",
+              marginTop: "6px",
+              marginBottom: "1px",
+              alignSelf: "flex-start",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: "50%",
+                background: activeAgent.color || "var(--text-muted)",
+                display: "inline-block",
+              }} />
+              {activeAgent.name}
+            </div>
+          )}
 
           {/* Live streaming blocks */}
           {streamBlocks.map((b, j) => (
@@ -756,7 +899,7 @@ export function Chat() {
                 <ToolChip tool={b} live={!b.output} onOpenFile={handleOpenFile} />
               </div>
             ) : b.content ? (
-              <div key={j} style={msgBubble("assistant")}>
+              <div key={j} style={msgBubble("assistant", activeAgent?.color)}>
                 <MdContent text={b.content} />
               </div>
             ) : null
@@ -795,32 +938,73 @@ export function Chat() {
 
         {/* Input */}
         <div style={{ flexShrink: 0, padding: "0 1.5rem 12px" }}>
-        <form onSubmit={send} style={{
-          display: "flex",
-          gap: "8px",
-          maxWidth: "48rem",
-          width: "100%",
-          margin: "0 auto",
-          padding: "10px 14px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "12px",
-        }}>
-          <input
-            style={{
-              ...inputStyle,
-              background: "transparent",
-              border: "none",
-            }}
-            placeholder={busy ? "Waiting for response..." : "Type a message..."}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            autoFocus
-          />
-          <button type="submit" style={{ ...btnPrimary, opacity: (busy || !connected) ? 0.5 : 1, borderRadius: "8px" }} disabled={busy || !connected || !input.trim()}>
-            Send
-          </button>
-        </form>
+        <div style={{ position: "relative", maxWidth: "48rem", width: "100%", margin: "0 auto" }}>
+          {/* @mention autocomplete dropdown */}
+          {mentionQuery !== null && mentionMatches.length > 0 && (
+            <div style={{
+              position: "absolute",
+              bottom: "100%",
+              left: 14,
+              marginBottom: 4,
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border)",
+              borderRadius: "8px",
+              padding: "4px 0",
+              minWidth: 180,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+              zIndex: 100,
+            }}>
+              {mentionMatches.map((a, i) => (
+                <div
+                  key={a.id}
+                  onMouseDown={(e) => { e.preventDefault(); insertMention(a); }}
+                  style={{
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "0.85rem",
+                    background: i === mentionIdx ? "var(--bg-user)" : "transparent",
+                  }}
+                >
+                  <span style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: a.color || "var(--text-muted)",
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ fontWeight: 600 }}>@{a.id}</span>
+                  <span style={{ color: "var(--text-muted)" }}>{a.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <form onSubmit={send} style={{
+            display: "flex",
+            gap: "8px",
+            padding: "10px 14px",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "12px",
+          }}>
+            <input
+              ref={inputRef}
+              style={{
+                ...inputStyle,
+                background: "transparent",
+                border: "none",
+              }}
+              placeholder={busy ? "Waiting for response..." : agents.length > 0 ? "Type a message... (@agent to mention)" : "Type a message..."}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
+              autoFocus
+            />
+            <button type="submit" style={{ ...btnPrimary, opacity: (busy || !connected) ? 0.5 : 1, borderRadius: "8px" }} disabled={busy || !connected || !input.trim()}>
+              Send
+            </button>
+          </form>
+        </div>
         </div>
       </div>
 
