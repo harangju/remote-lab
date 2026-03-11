@@ -91,7 +91,15 @@ uv sync
 cd frontend && bun install && bun run build && cd ..
 ```
 
-## 6. Configure
+## 6. Set permissions
+
+The service runs as `www-data`. Give it ownership of the project directory:
+
+```bash
+sudo chown -R www-data:www-data /srv/remote-lab
+```
+
+## 7. Configure
 
 ```bash
 cp .env.example .env
@@ -109,7 +117,7 @@ OPENAI_API_KEY=sk-...        # optional
 GOOGLE_API_KEY=AI...          # optional
 ```
 
-## 7. Set up Caddy
+## 8. Set up Caddy
 
 Edit `/etc/caddy/Caddyfile`:
 
@@ -129,7 +137,7 @@ systemctl reload caddy
 
 Caddy auto-provisions HTTPS certificates from Let's Encrypt.
 
-## 8. Create systemd services
+## 9. Create systemd services
 
 `/etc/systemd/system/remote-lab.service`:
 
@@ -177,7 +185,7 @@ systemctl enable --now remote-lab
 systemctl enable --now remote-lab-docs
 ```
 
-## 9. Verify
+## 10. Verify
 
 Open `https://lab.yourdomain.com` and enter your token.
 

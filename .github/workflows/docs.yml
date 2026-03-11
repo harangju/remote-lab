@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - pages/**
+      - docs/**
       - .github/workflows/docs.yml
   workflow_dispatch:
 
@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install mkdocs-shadcn
-      - run: mkdocs build -f pages/mkdocs.yml -d ../site
+      - run: mkdocs build -f docs/mkdocs.yml -d ../site
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site
