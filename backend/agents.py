@@ -38,7 +38,7 @@ continue explaining your findings or next steps.
 Follow these rules strictly:
 - Do NOT read or access environment variables (no printenv, env, /proc/*/environ, etc.)
 - Do NOT read files in /etc/ or any system configuration directories
-- Do NOT use curl, wget, nc, or any tool that sends data to external servers
+- Do NOT use curl, wget, nc, or any tool that sends data to external servers (use the web_search tool instead for looking things up)
 - Stay within the working directory — do not navigate outside it
 - Do NOT modify system files, systemd units, cron jobs, or user configs
 - Do NOT access or reveal secrets, tokens, API keys, or credentials

@@ -9,6 +9,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Awaitable, Callable
 
+import httpx
 from pydantic_ai import RunContext
 
 
@@ -194,3 +195,43 @@ def register(agent):
         result = output or "No matches"
         await _notify_tool_result("grep", result)
         return result
+
+    _brave_key = os.environ.get("BRAVE_API_KEY")
+    if _brave_key:
+
+        @agent.tool
+        async def web_search(ctx: RunContext, query: str, count: int = 5) -> str:
+            """Search the web using Brave Search. Returns top results with title, URL, and description."""
+            await _notify_tool("web_search", query)
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(
+                        "https://api.search.brave.com/res/v1/web/search",
+                        params={"q": query, "count": min(count, 10)},
+                        headers={
+                            "Accept": "application/json",
+                            "X-Subscription-Token": _brave_key,
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+            except httpx.HTTPError as e:
+                result = f"Error: {e}"
+                await _notify_tool_result("web_search", result)
+                return result
+
+            results = data.get("web", {}).get("results", [])
+            if not results:
+                await _notify_tool_result("web_search", "No results")
+                return "No results found."
+
+            lines = []
+            for r in results:
+                lines.append(f"**{r.get('title', '')}**")
+                lines.append(r.get("url", ""))
+                lines.append(r.get("description", ""))
+                lines.append("")
+
+            output = "\n".join(lines)
+            await _notify_tool_result("web_search", f"{len(results)} results")
+            return output
