@@ -46,7 +46,7 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
   return (
     <div
       style={{ display: "inline-flex", alignItems: "center", cursor: "default" }}
-      title={`${(tokens / 1000).toFixed(1)}k / ${(limit / 1000).toFixed(0)}k tokens (${Math.round(pct * 100)}%)`}
+      data-tooltip={`${(tokens / 1000).toFixed(1)}k / ${(limit / 1000).toFixed(0)}k tokens (${Math.round(pct * 100)}%)`}
     >
       <svg width="18" height="18" viewBox="0 0 18 18" style={{ transform: "rotate(-90deg)" }}>
         <circle cx="9" cy="9" r={r} fill="none" stroke="var(--border)" strokeWidth="2.5" />
@@ -415,11 +415,14 @@ export function Chat() {
         <Link to={`/p/${projectId}`} style={backLink}>&larr; Conversations</Link>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ fontWeight: 600 }}>Chat</span>
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: connected ? "#4d9375" : "#9b9a97",
-            display: "inline-block",
-          }} />
+          <span
+            data-tooltip={connected ? "Connected" : "Disconnected"}
+            style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: connected ? "#4d9375" : "#9b9a97",
+              display: "inline-block",
+            }}
+          />
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
             {meta && meta.context_limit > 0 && (
               <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />

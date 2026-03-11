@@ -54,6 +54,23 @@ export function injectTheme() {
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    [data-tooltip] { position: relative; }
+    [data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-top: 4px;
+      padding: 3px 8px;
+      background: var(--text);
+      color: var(--bg);
+      font-size: 0.7rem;
+      white-space: nowrap;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 10;
+    }
     button {
       cursor: pointer;
       font-family: inherit;
