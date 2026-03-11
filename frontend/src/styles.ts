@@ -44,7 +44,9 @@ export function injectTheme() {
         --code-bg: rgba(255,255,255,0.07);
       }
     }
-    *, *::before, *::after { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    /* Prevent iOS zoom on input focus */
+    input, textarea, select { font-size: 16px !important; }
     body {
       margin: 0;
       font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

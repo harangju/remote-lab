@@ -101,9 +101,11 @@ export function CodeMirrorEditor({ code, language, readOnly, onChange, onSave }:
             onChange(update.state.doc.toString());
           }
         }),
+        EditorView.lineWrapping,
         EditorView.theme({
           "&": { height: "100%", fontSize: "0.85rem" },
           ".cm-scroller": { overflow: "auto", fontFamily: "monospace" },
+          ".cm-content": { maxWidth: "100%" },
         }),
       ],
     });
