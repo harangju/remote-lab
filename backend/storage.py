@@ -131,9 +131,54 @@ def _save_agents_file(path: Path, agents: list[AgentConfig]) -> None:
     path.write_text(json.dumps({"agents": [a.model_dump() for a in agents]}, indent=2))
 
 
+DEFAULT_AGENTS = [
+    AgentConfig(
+        id="orchestrator",
+        name="Orchestrator",
+        system_prompt=(
+            "You are the orchestrator. You NEVER do work yourself — no answering questions, "
+            "no writing code, no summarizing. Your ONLY job is to evaluate what needs to be done "
+            'and delegate by @mentioning other agents (e.g. "@worker please read the README and '
+            'summarize it"). When an agent hands back to you, evaluate their work and either '
+            "delegate more work or report the result to the user."
+        ),
+        tools=[],
+        color="#9b7ed8",
+        is_default=True,
+    ),
+    AgentConfig(
+        id="worker",
+        name="Worker",
+        system_prompt=(
+            "You are a worker agent. Do the task assigned to you thoroughly. "
+            "When done, @orchestrator with a concise summary of what you did."
+        ),
+        color="#4d9375",
+        is_default=False,
+    ),
+    AgentConfig(
+        id="reviewer",
+        name="Reviewer",
+        system_prompt=(
+            "Critique the current direction. Be constructive yet absolutely honest. "
+            "When done, @orchestrator with your assessment."
+        ),
+        tools=["read_file", "glob", "grep"],
+        color="#d9a754",
+        is_default=False,
+    ),
+]
+
+
 def load_global_agents() -> list[AgentConfig]:
-    """Load global agent configs (shared across all projects)."""
-    return _load_agents_file(AGENTS_DIR / "_global.json")
+    """Load global agent configs (shared across all projects).
+
+    Seeds the default agents file if it doesn't exist.
+    """
+    path = AGENTS_DIR / "_global.json"
+    if not path.exists():
+        _save_agents_file(path, DEFAULT_AGENTS)
+    return _load_agents_file(path)
 
 
 def save_global_agents(agents: list[AgentConfig]) -> None:
