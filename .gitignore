@@ -1,6 +1,7 @@
 docs/
 !docs/example.md
 !docs/.access.example.json
+!pages/docs/
 .env
 __pycache__/
 *.pyc
