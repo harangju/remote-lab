@@ -86,6 +86,7 @@ def create_project(data: ProjectCreate) -> Project:
         path=data.path,
         created_at=_now(),
     )
+    Path(data.path).mkdir(parents=True, exist_ok=True)
     projects.append(proj.model_dump())
     _write_projects(projects)
     return proj
