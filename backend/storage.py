@@ -286,11 +286,6 @@ def append_message(convo_id: str, event: dict) -> None:
     p = _messages_path(convo_id)
     with p.open("a") as f:
         f.write(json.dumps(event) + "\n")
-    # Touch the meta updated_at
-    meta = _read_meta(convo_id)
-    if meta:
-        meta.updated_at = _now()
-        _write_meta(meta)
 
 
 def _agent_history_path(convo_id: str, agent_id: str | None = None) -> Path:

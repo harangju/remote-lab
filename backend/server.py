@@ -34,6 +34,7 @@ from pydantic_ai.messages import (
 from backend.agent_config import AgentConfig
 from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
+from backend.context import build_project_instructions
 from backend.mentions import parse_mentions
 from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, Error
 from backend.models import (
@@ -91,13 +92,13 @@ class RunState:
 active_runs: dict[str, RunState] = {}
 
 
-def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int = 50) -> str:
+def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int = 50, cached_messages: list[dict] | None = None) -> str:
     """Build a summary of recent conversation for cross-agent context.
 
     Reads the shared JSONL display log and formats messages from other agents
     and the user so this agent knows what's been discussed.
     """
-    messages = storage.read_messages(convo_id)
+    messages = cached_messages if cached_messages is not None else storage.read_messages(convo_id)
     if not messages:
         return ""
 
@@ -853,9 +854,29 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         # ----- Load agent configs for the project -----
         project_agents = storage.load_project_agents(project.id)
 
+        # ----- Caches for the session -----
+        # Agent instances: reuse across messages instead of recreating
+        _agent_cache: dict[str | None, "Agent"] = {}
+        # Project instructions: CLAUDE.md + dir tree (rarely changes mid-session)
+        _UNSET = object()
+        _cached_instructions: str | None | object = _UNSET
+        _cached_instructions_subsequent: str | None = None
+
         # ----- Load existing message history -----
         # Per-agent histories: agent_id → (message_history, last_context_tokens)
         agent_histories: dict[str | None, tuple[list, int]] = {}
+        # Cache JSONL messages to avoid repeated disk reads
+        _cached_messages: list[dict] | None = None
+
+        def _get_cached_messages() -> list[dict]:
+            nonlocal _cached_messages
+            if _cached_messages is None:
+                _cached_messages = storage.read_messages(convo_id)
+            return _cached_messages
+
+        def _invalidate_message_cache():
+            nonlocal _cached_messages
+            _cached_messages = None
 
         def _load_history(aid: str | None) -> tuple[list, int]:
             """Load message history for a specific agent (or default)."""
@@ -867,8 +888,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             if hist_bytes:
                 try:
                     hist = ModelMessagesTypeAdapter.validate_json(hist_bytes)
-                    persisted_msgs = storage.read_messages(convo_id)
-                    for msg in reversed(persisted_msgs):
+                    for msg in reversed(_get_cached_messages()):
                         if msg.get("role") == "assistant" and "context_tokens" in msg:
                             # Match agent_id for multi-agent, or accept any for legacy
                             if aid is None or msg.get("agent_id") == aid:
@@ -945,6 +965,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     )
                 continue
 
+            # Invalidate cached messages since we're about to append
+            _invalidate_message_cache()
+
             # Persist the user message
             storage.append_message(convo_id, {
                 "role": "user",
@@ -962,14 +985,21 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 target_agents = [None]  # None = use default global agent
                 cleaned_prompt = prompt
 
-            # Build project-specific context instructions
-            from backend.context import build_project_instructions
-
             # Notify client that the run is starting
             await ws.send_text(Running().model_dump_json())
 
             # Set workdir
             agent_tools.set_workdir(project_path)
+
+            # Build project instructions in a thread to avoid blocking event loop
+            # Cache after first turn since CLAUDE.md rarely changes mid-conversation
+            if _cached_instructions is _UNSET:
+                _cached_instructions = await asyncio.to_thread(
+                    build_project_instructions, project_path, True
+                )
+                _cached_instructions_subsequent = await asyncio.to_thread(
+                    build_project_instructions, project_path, False
+                )
 
             # Launch a RunState per target agent
             runs: list[RunState] = []
@@ -1000,13 +1030,13 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         )
 
                 is_first_turn = len(hist) == 0
-                instructions = build_project_instructions(project_path, is_first_turn)
+                instructions = _cached_instructions if is_first_turn else _cached_instructions_subsequent
 
                 # Build the prompt — prepend shared conversation context so
                 # this agent can see what other agents and the user discussed
                 agent_prompt = cleaned_prompt
                 if ac:
-                    shared_ctx = _build_shared_context(convo_id, aid)
+                    shared_ctx = _build_shared_context(convo_id, aid, cached_messages=_get_cached_messages())
                     if shared_ctx:
                         agent_prompt = (
                             f"[Conversation context]\n{shared_ctx}\n\n"
@@ -1019,7 +1049,11 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         agent_id=ac.id, agent_name=ac.name, agent_color=ac.color,
                     ).model_dump_json())
 
-                agent_instance = create_agent(ac)
+                agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
+                if ac:
+                    _agent_cache[ac.id] = agent_instance
+                else:
+                    _agent_cache[None] = agent_instance
 
                 run = RunState(
                     convo_id=convo_id,
