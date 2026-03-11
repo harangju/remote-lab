@@ -8,23 +8,28 @@ nav:
   - Usage: usage.md
 
 theme:
-  name: material
-  palette:
-    - scheme: default
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - scheme: slate
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
-  features:
-    - content.code.copy
+  name: shadcn
+  show_title: true
+  show_stargazers: false
+  pygments_style:
+    light: shadcn-light
+    dark: github-dark
+  topbar_sections: false
 
 markdown_extensions:
+  - md_in_html
   - pymdownx.highlight:
       anchor_linenums: true
+      use_pygments: true
+      pygments_lang_class: true
+      css_class: codehilite
   - pymdownx.superfences
   - pymdownx.inlinehilite
-  - admonition
-  - pymdownx.details
+
+extra_css:
+  - stylesheets/extra.css
+  - stylesheets/pygments.css
+
+extra_javascript:
+  - https://unpkg.com/lucide@latest/dist/umd/lucide.min.js
+  - javascripts/icons.js

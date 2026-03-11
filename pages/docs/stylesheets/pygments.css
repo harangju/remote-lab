@@ -1,0 +1,141 @@
+/* Light mode (default) */
+.codehilite .hll { background-color: #0969da4a }
+.codehilite { background: #f6f8fa; color: #24292F }
+.codehilite .c { color: #6E7781 }
+.codehilite .err { color: #CF222E }
+.codehilite .k { color: #CF222E }
+.codehilite .l { color: #953800 }
+.codehilite .n { color: #8250DF }
+.codehilite .o { color: #116329 }
+.codehilite .p { color: #24292F }
+.codehilite .ch { color: #6E7781 }
+.codehilite .cm { color: #6E7781 }
+.codehilite .cp { color: #6E7781 }
+.codehilite .cpf { color: #6E7781 }
+.codehilite .c1 { color: #6E7781 }
+.codehilite .cs { color: #6E7781 }
+.codehilite .gd { color: #82071e; background-color: #ffebe9 }
+.codehilite .ge { font-style: italic }
+.codehilite .gr { color: #CF222E }
+.codehilite .gh { color: #0550AE; font-weight: bold }
+.codehilite .gi { color: #116329; background-color: #dafbe1 }
+.codehilite .gs { font-weight: bold }
+.codehilite .gu { color: #0550AE }
+.codehilite .kc { color: #0550AE }
+.codehilite .kd { color: #CF222E }
+.codehilite .kn { color: #CF222E }
+.codehilite .kp { color: #CF222E }
+.codehilite .kr { color: #CF222E }
+.codehilite .kt { color: #CF222E }
+.codehilite .m { color: #0550AE }
+.codehilite .s { color: #0a3069 }
+.codehilite .na { color: #953800 }
+.codehilite .nb { color: #953800 }
+.codehilite .nc { color: #953800 }
+.codehilite .no { color: #0550AE }
+.codehilite .nd { color: #8250DF }
+.codehilite .ni { color: #24292F }
+.codehilite .ne { color: #953800 }
+.codehilite .nf { color: #8250DF }
+.codehilite .nl { color: #0550AE }
+.codehilite .nn { color: #953800 }
+.codehilite .nt { color: #116329 }
+.codehilite .nv { color: #953800 }
+.codehilite .ow { color: #CF222E }
+.codehilite .w { color: #bbbbbb }
+.codehilite .mb { color: #0550AE }
+.codehilite .mf { color: #0550AE }
+.codehilite .mh { color: #0550AE }
+.codehilite .mi { color: #0550AE }
+.codehilite .mo { color: #0550AE }
+.codehilite .sa { color: #0a3069 }
+.codehilite .sb { color: #0a3069 }
+.codehilite .sc { color: #0a3069 }
+.codehilite .dl { color: #0a3069 }
+.codehilite .sd { color: #6E7781 }
+.codehilite .s2 { color: #0a3069 }
+.codehilite .se { color: #0a3069 }
+.codehilite .sh { color: #0a3069 }
+.codehilite .si { color: #0a3069 }
+.codehilite .sx { color: #0a3069 }
+.codehilite .sr { color: #116329 }
+.codehilite .s1 { color: #0a3069 }
+.codehilite .ss { color: #0550AE }
+.codehilite .bp { color: #953800 }
+.codehilite .fm { color: #8250DF }
+.codehilite .vc { color: #953800 }
+.codehilite .vg { color: #953800 }
+.codehilite .vi { color: #24292F }
+.codehilite .vm { color: #953800 }
+.codehilite .il { color: #0550AE }
+
+/* Dark mode - via .dark class (theme switcher) */
+.dark .codehilite .hll { background-color: #6e76811a }
+.dark .codehilite { background: #161b22; color: #c9d1d9 }
+.dark .codehilite .c { color: #8b949e }
+.dark .codehilite .err { color: #f85149 }
+.dark .codehilite .k { color: #ff7b72 }
+.dark .codehilite .l { color: #a5d6ff }
+.dark .codehilite .n { color: #c9d1d9 }
+.dark .codehilite .o { color: #ff7b72 }
+.dark .codehilite .p { color: #c9d1d9 }
+.dark .codehilite .ch { color: #8b949e }
+.dark .codehilite .cm { color: #8b949e }
+.dark .codehilite .cp { color: #8b949e }
+.dark .codehilite .cpf { color: #8b949e }
+.dark .codehilite .c1 { color: #8b949e }
+.dark .codehilite .cs { color: #8b949e }
+.dark .codehilite .gd { color: #ffdcd7; background-color: #67060c }
+.dark .codehilite .ge { font-style: italic }
+.dark .codehilite .gr { color: #f85149 }
+.dark .codehilite .gh { color: #79c0ff; font-weight: bold }
+.dark .codehilite .gi { color: #aff5b4; background-color: #033a16 }
+.dark .codehilite .gs { font-weight: bold }
+.dark .codehilite .gu { color: #79c0ff }
+.dark .codehilite .kc { color: #79c0ff }
+.dark .codehilite .kd { color: #ff7b72 }
+.dark .codehilite .kn { color: #ff7b72 }
+.dark .codehilite .kp { color: #79c0ff }
+.dark .codehilite .kr { color: #ff7b72 }
+.dark .codehilite .kt { color: #ff7b72 }
+.dark .codehilite .m { color: #79c0ff }
+.dark .codehilite .s { color: #a5d6ff }
+.dark .codehilite .na { color: #c9d1d9 }
+.dark .codehilite .nb { color: #c9d1d9 }
+.dark .codehilite .nc { color: #f0883e }
+.dark .codehilite .no { color: #79c0ff }
+.dark .codehilite .nd { color: #d2a8ff }
+.dark .codehilite .ni { color: #c9d1d9 }
+.dark .codehilite .ne { color: #f0883e }
+.dark .codehilite .nf { color: #d2a8ff }
+.dark .codehilite .nl { color: #79c0ff }
+.dark .codehilite .nn { color: #ff7b72 }
+.dark .codehilite .nt { color: #7ee787 }
+.dark .codehilite .nv { color: #79c0ff }
+.dark .codehilite .ow { color: #ff7b72 }
+.dark .codehilite .w { color: #6e7681 }
+.dark .codehilite .mb { color: #79c0ff }
+.dark .codehilite .mf { color: #79c0ff }
+.dark .codehilite .mh { color: #79c0ff }
+.dark .codehilite .mi { color: #79c0ff }
+.dark .codehilite .mo { color: #79c0ff }
+.dark .codehilite .sa { color: #a5d6ff }
+.dark .codehilite .sb { color: #a5d6ff }
+.dark .codehilite .sc { color: #a5d6ff }
+.dark .codehilite .dl { color: #79c0ff }
+.dark .codehilite .sd { color: #8b949e }
+.dark .codehilite .s2 { color: #a5d6ff }
+.dark .codehilite .se { color: #79c0ff }
+.dark .codehilite .sh { color: #a5d6ff }
+.dark .codehilite .si { color: #a5d6ff }
+.dark .codehilite .sx { color: #a5d6ff }
+.dark .codehilite .sr { color: #7ee787 }
+.dark .codehilite .s1 { color: #a5d6ff }
+.dark .codehilite .ss { color: #79c0ff }
+.dark .codehilite .bp { color: #c9d1d9 }
+.dark .codehilite .fm { color: #d2a8ff }
+.dark .codehilite .vc { color: #79c0ff }
+.dark .codehilite .vg { color: #79c0ff }
+.dark .codehilite .vi { color: #c9d1d9 }
+.dark .codehilite .vm { color: #79c0ff }
+.dark .codehilite .il { color: #79c0ff }

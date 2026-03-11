@@ -1,0 +1,20 @@
+/* Code block overflow fix */
+pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+code {
+  white-space: pre;
+  word-wrap: normal;
+}
+
+/* Ensure code blocks don't break layout */
+.highlight {
+  overflow-x: auto;
+}
+
+.highlight pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
