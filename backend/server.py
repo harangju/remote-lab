@@ -472,8 +472,8 @@ async def index(request: Request):
     return HTMLResponse(_layout("Documents", body))
 
 
-@app.get("/chat/{rest:path}", response_class=HTMLResponse)
-@app.get("/chat", response_class=HTMLResponse)
+@app.get("/p/{rest:path}", response_class=HTMLResponse)
+@app.get("/p", response_class=HTMLResponse)
 async def chat_page(rest: str = ""):
     if not WS_TOKEN:
         return Response("Chat not configured", status_code=503)

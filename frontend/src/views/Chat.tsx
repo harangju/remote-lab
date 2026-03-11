@@ -447,7 +447,7 @@ export function Chat() {
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", maxWidth: "48rem", margin: "0 auto" }}>
       {/* Header */}
       <div style={{ padding: "12px 1.5rem", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-        <Link to={`/p/${projectId}`} style={backLink}>&larr; Conversations</Link>
+        <Link to={`/${projectId}`} style={backLink}>&larr; Conversations</Link>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           {editing ? (
             <input

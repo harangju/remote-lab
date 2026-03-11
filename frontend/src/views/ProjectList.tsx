@@ -128,7 +128,7 @@ export function ProjectList() {
                   />
                 ) : (
                   <>
-                    <Link to={`/p/${p.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</Link>
+                    <Link to={`/${p.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</Link>
                     <button
                       onClick={(e) => { e.stopPropagation(); startRename(p); }}
                       data-tooltip="Rename"

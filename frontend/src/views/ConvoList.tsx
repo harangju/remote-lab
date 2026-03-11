@@ -60,7 +60,7 @@ export function ConvoList() {
     if (!projectId) return;
     try {
       const c = await createConvo(projectId);
-      navigate(`/p/${projectId}/c/${c.id}`);
+      navigate(`/${projectId}/${c.id}`);
     } catch (err: any) {
       setError(err.message);
     }
@@ -187,7 +187,7 @@ export function ConvoList() {
                   />
                 ) : (
                   <>
-                    <Link to={`/p/${projectId}/c/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <Link to={`/${projectId}/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {c.title || "Untitled"}
                     </Link>
                     <button

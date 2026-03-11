@@ -21,7 +21,7 @@ const scriptName = jsFile ? jsFile.path.split("/").pop()! : "main.js";
 const html = await Bun.file(resolve(import.meta.dir, "../public/index.html")).text();
 await Bun.write(
   resolve(outDir, "index.html"),
-  html.replace("/main.js", `/chat/${scriptName}`),
+  html.replace("/main.js", `/p/${scriptName}`),
 );
 
 console.log(`Built ${result.outputs.length} files to dist/`);
