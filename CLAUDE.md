@@ -66,6 +66,14 @@ data/
   conversations/{id}.agent.json       — serialized PydanticAI message history
 ```
 
+## Git Clone Setup
+
+Project creation supports cloning from GitHub URLs. The service runs as `www-data` and uses SSH for cloning. To set this up:
+
+1. Copy a GitHub-authorized SSH key to `/var/www/.ssh/id_ed25519_github`
+2. Ensure ownership and permissions: `chown www-data:www-data`, `chmod 600`
+3. The server auto-converts HTTPS GitHub URLs to SSH and uses this key via `GIT_SSH_COMMAND`
+
 ## Conventions
 
 - Use `uv run` for Python, `bun` for frontend (never npm/npx)
