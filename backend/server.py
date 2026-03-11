@@ -34,7 +34,7 @@ from backend.agent_config import AgentConfig
 from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
-from backend.mentions import parse_mentions
+from backend.mentions import parse_mentions, extract_file_mentions
 from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, Error
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
@@ -767,6 +767,15 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             else:
                 target_agents = [None]  # None = use default global agent
                 cleaned_prompt = prompt
+
+            # Extract @file references and inject content
+            file_refs, cleaned_prompt = extract_file_mentions(cleaned_prompt, project_path)
+            if file_refs:
+                file_context = "\n\n".join(
+                    f"[File: {path}]\n```\n{content}\n```"
+                    for path, content in file_refs
+                )
+                cleaned_prompt = f"{file_context}\n\n{cleaned_prompt}"
 
             # Notify client that the run is starting
             await ws.send_text(Running().model_dump_json())

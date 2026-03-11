@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen } from "lucide-react";
-import { getConvo, updateConvo, connectWs, listProjectAgents, type WsEvent, type AgentConfig } from "../api";
+import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, type WsEvent, type AgentConfig } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
 import { FilePanel } from "../components/FilePanel";
@@ -313,6 +313,7 @@ export function Chat() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
+  const [projectFiles, setProjectFiles] = useState<string[]>([]);
   // Track active agent info during streaming (for multi-agent labeling)
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
   const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
@@ -446,6 +447,14 @@ export function Chat() {
       })
       .catch((e) => setError(e.message));
   }, [convId, projectId]);
+
+  // Load file list for @file autocomplete
+  useEffect(() => {
+    if (!projectId) return;
+    listFiles(projectId)
+      .then((res) => setProjectFiles(res.files))
+      .catch(() => setProjectFiles([]));
+  }, [projectId]);
 
   // Connect WebSocket
   useEffect(() => {
@@ -601,39 +610,66 @@ export function Chat() {
     setEditing(false);
   };
 
-  // @mention autocomplete filtering
-  const mentionMatches = useMemo(() => {
-    if (mentionQuery === null || agents.length === 0) return [];
+  // @mention autocomplete filtering (agents + files)
+  type MentionMatch =
+    | { type: "agent"; agent: AgentConfig }
+    | { type: "file"; path: string };
+
+  const mentionMatches = useMemo((): MentionMatch[] => {
+    if (mentionQuery === null) return [];
     const q = mentionQuery.toLowerCase();
-    return agents.filter((a) =>
-      a.id.toLowerCase().startsWith(q) || a.name.toLowerCase().startsWith(q)
-    );
-  }, [mentionQuery, agents]);
+    const results: MentionMatch[] = [];
+    // Match agents
+    for (const a of agents) {
+      if (a.id.toLowerCase().startsWith(q) || a.name.toLowerCase().startsWith(q)) {
+        results.push({ type: "agent", agent: a });
+      }
+    }
+    // Match files — match against filename and full path
+    if (projectFiles.length > 0) {
+      const fileMatches: string[] = [];
+      for (const f of projectFiles) {
+        const lower = f.toLowerCase();
+        const basename = lower.split("/").pop() || lower;
+        if (lower.startsWith(q) || basename.startsWith(q) || lower.includes(q)) {
+          fileMatches.push(f);
+        }
+        if (fileMatches.length >= 10) break;
+      }
+      for (const f of fileMatches) {
+        results.push({ type: "file", path: f });
+      }
+    }
+    // Show nothing when query is empty and no agents (files would be too many)
+    if (q === "" && results.length > 20) {
+      return results.slice(0, 20);
+    }
+    return results;
+  }, [mentionQuery, agents, projectFiles]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setInput(val);
 
-    // Detect @mention in progress
-    if (agents.length > 0) {
-      const pos = e.target.selectionStart ?? val.length;
-      const before = val.slice(0, pos);
-      const atMatch = before.match(/@(\w*)$/);
-      if (atMatch) {
-        setMentionQuery(atMatch[1]);
-        setMentionIdx(0);
-      } else {
-        setMentionQuery(null);
-      }
+    // Detect @mention in progress (supports agent IDs and file paths)
+    const pos = e.target.selectionStart ?? val.length;
+    const before = val.slice(0, pos);
+    const atMatch = before.match(/@([\w./\-]*)$/);
+    if (atMatch) {
+      setMentionQuery(atMatch[1]);
+      setMentionIdx(0);
+    } else {
+      setMentionQuery(null);
     }
   };
 
-  const insertMention = (agent: AgentConfig) => {
+  const insertMention = (match: MentionMatch) => {
     const pos = inputRef.current?.selectionStart ?? input.length;
     const before = input.slice(0, pos);
     const after = input.slice(pos);
     const atIdx = before.lastIndexOf("@");
-    const newVal = before.slice(0, atIdx) + `@${agent.id} ` + after;
+    const label = match.type === "agent" ? match.agent.id : match.path;
+    const newVal = before.slice(0, atIdx) + `@${label} ` + after;
     setInput(newVal);
     setMentionQuery(null);
     inputRef.current?.focus();
@@ -657,6 +693,7 @@ export function Chat() {
         return;
       }
       if (e.key === "Escape") {
+        e.preventDefault();
         setMentionQuery(null);
         return;
       }
@@ -939,46 +976,92 @@ export function Chat() {
         {/* Input */}
         <div style={{ flexShrink: 0, padding: "0 1.5rem 12px" }}>
         <div style={{ position: "relative", maxWidth: "48rem", width: "100%", margin: "0 auto" }}>
-          {/* @mention autocomplete dropdown */}
-          {mentionQuery !== null && mentionMatches.length > 0 && (
-            <div style={{
-              position: "absolute",
-              bottom: "100%",
-              left: 14,
-              marginBottom: 4,
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "8px",
-              padding: "4px 0",
-              minWidth: 180,
-              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-              zIndex: 100,
-            }}>
-              {mentionMatches.map((a, i) => (
-                <div
-                  key={a.id}
-                  onMouseDown={(e) => { e.preventDefault(); insertMention(a); }}
-                  style={{
-                    padding: "6px 12px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    fontSize: "0.85rem",
-                    background: i === mentionIdx ? "var(--bg-user)" : "transparent",
-                  }}
-                >
-                  <span style={{
-                    width: 8, height: 8, borderRadius: "50%",
-                    background: a.color || "var(--text-muted)",
-                    flexShrink: 0,
-                  }} />
-                  <span style={{ fontWeight: 600 }}>@{a.id}</span>
-                  <span style={{ color: "var(--text-muted)" }}>{a.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* @mention autocomplete dropdown (agents + files) */}
+          {mentionQuery !== null && mentionMatches.length > 0 && (() => {
+            const agentMatches = mentionMatches.filter((m): m is MentionMatch & { type: "agent" } => m.type === "agent");
+            const fileMatches = mentionMatches.filter((m): m is MentionMatch & { type: "file" } => m.type === "file");
+            let idx = 0;
+            return (
+              <div style={{
+                position: "absolute",
+                bottom: "100%",
+                left: 14,
+                marginBottom: 4,
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border)",
+                borderRadius: "8px",
+                padding: "4px 0",
+                minWidth: 220,
+                maxHeight: 300,
+                overflowY: "auto",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                zIndex: 100,
+              }}>
+                {agentMatches.length > 0 && fileMatches.length > 0 && (
+                  <div style={{ padding: "4px 12px 2px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Agents</div>
+                )}
+                {agentMatches.map((m) => {
+                  const i = idx++;
+                  return (
+                    <div
+                      key={`a-${m.agent.id}`}
+                      onMouseDown={(e) => { e.preventDefault(); insertMention(m); }}
+                      style={{
+                        padding: "6px 12px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        fontSize: "0.85rem",
+                        background: i === mentionIdx ? "var(--bg-user)" : "transparent",
+                      }}
+                    >
+                      <span style={{
+                        width: 8, height: 8, borderRadius: "50%",
+                        background: m.agent.color || "var(--text-muted)",
+                        flexShrink: 0,
+                      }} />
+                      <span style={{ fontWeight: 600 }}>@{m.agent.id}</span>
+                      <span style={{ color: "var(--text-muted)" }}>{m.agent.name}</span>
+                    </div>
+                  );
+                })}
+                {fileMatches.length > 0 && agentMatches.length > 0 && (
+                  <div style={{ padding: "4px 12px 2px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", borderTop: "1px solid var(--border)", marginTop: 2 }}>Files</div>
+                )}
+                {fileMatches.length > 0 && agentMatches.length === 0 && mentionQuery !== "" && (
+                  <div style={{ padding: "4px 12px 2px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Files</div>
+                )}
+                {fileMatches.map((m) => {
+                  const i = idx++;
+                  const parts = m.path.split("/");
+                  const filename = parts.pop() || m.path;
+                  const dir = parts.join("/");
+                  return (
+                    <div
+                      key={`f-${m.path}`}
+                      onMouseDown={(e) => { e.preventDefault(); insertMention(m); }}
+                      style={{
+                        padding: "6px 12px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        fontSize: "0.85rem",
+                        background: i === mentionIdx ? "var(--bg-user)" : "transparent",
+                      }}
+                    >
+                      <FileText size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                      <span style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                        {dir && <span style={{ color: "var(--text-muted)" }}>{dir}/</span>}
+                        {filename}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
           <form onSubmit={send} style={{
             display: "flex",
             gap: "8px",
@@ -994,7 +1077,7 @@ export function Chat() {
                 background: "transparent",
                 border: "none",
               }}
-              placeholder={busy ? "Waiting for response..." : agents.length > 0 ? "Type a message... (@agent to mention)" : "Type a message..."}
+              placeholder={busy ? "Waiting for response..." : "Type a message... (@ to mention agents or files)"}
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
