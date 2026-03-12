@@ -122,6 +122,7 @@ function ToolChip({ tool, live, onOpenFile }: {
   const summary = toolSummary(tool.name, tool.input);
   const filePath = extractFilePath(tool.name, tool.input);
   const isFileOp = !!filePath;
+  const showStatusSlot = live || !!tool.output || (isFileOp && !!onOpenFile);
 
   const handleOpenFile = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -142,11 +143,14 @@ function ToolChip({ tool, live, onOpenFile }: {
           fontSize: "0.78rem",
           display: "inline-flex",
           alignItems: "center",
-          gap: "5px",
+          gap: "6px",
           whiteSpace: "nowrap",
+          minHeight: "28px",
         }}
       >
-        <Icon size={13} />
+        <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon size={13} />
+        </span>
         <span style={{ fontFamily: "monospace" }}>{tool.name}</span>
         {summary && (
           <span style={{
@@ -157,26 +161,29 @@ function ToolChip({ tool, live, onOpenFile }: {
             textOverflow: "ellipsis",
           }}>{summary}</span>
         )}
-        {live && <span style={{
-          width: 6, height: 6, borderRadius: "50%",
-          background: "#d9a754",
-          display: "inline-block",
-          animation: "pulse 1.5s infinite",
-        }} />}
-        {tool.output && !live && <span style={{ opacity: 0.5 }}>&#10003;</span>}
-        {isFileOp && !live && onOpenFile && (
-          <span
-            onClick={handleOpenFile}
-            style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
-            data-tooltip="Open in panel"
-          >
-            <ExternalLink size={12} />
-          </span>
-        )}
-        {hasDetail && (open
-          ? <ChevronUp size={13} style={{ opacity: 0.5 }} />
-          : <ChevronDown size={13} style={{ opacity: 0.5 }} />
-        )}
+        <span style={{ width: 12, height: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          {live ? (
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "#d9a754",
+              display: "inline-block",
+              animation: "pulse 1.5s infinite",
+            }} />
+          ) : tool.output ? (
+            <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
+          ) : isFileOp && onOpenFile ? (
+            <span
+              onClick={handleOpenFile}
+              style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
+              data-tooltip="Open in panel"
+            >
+              <ExternalLink size={12} />
+            </span>
+          ) : showStatusSlot ? null : null}
+        </span>
+        <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: hasDetail ? 0.5 : 0 }}>
+          {hasDetail && (open ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
+        </span>
       </button>
       {open && hasDetail && (
         <pre style={{
@@ -205,45 +212,41 @@ function ApprovalCard({ block, onRespond }: {
   block: Extract<StreamBlock, { type: "tool-confirm" }>;
   onRespond: (toolCallId: string, approved: boolean) => void;
 }) {
-  const Icon = toolIcons[block.name] || Settings;
-  const summary = toolSummary(block.name, block.args);
-  const isPending = block.status === "pending";
   const [expanded, setExpanded] = useState(false);
+  const isPending = block.status === "pending";
 
   return (
-    <div style={{
-      background: "var(--bg-surface)",
-      border: `1px solid ${isPending ? "var(--accent)" : "var(--border)"}`,
-      borderRadius: "8px",
-      padding: "8px 12px",
-      maxWidth: "85%",
-      opacity: isPending ? 1 : 0.6,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.82rem" }}>
-        <Icon size={14} />
-        <span style={{ fontFamily: "monospace", fontWeight: 500 }}>{block.name}</span>
-        {summary && (
+    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0, maxWidth: "85%", opacity: isPending ? 1 : 0.6 }}>
+      <div
+        style={{
+          background: "var(--bg-surface)",
+          border: `1px solid ${isPending ? "var(--accent)" : "var(--border)"}`,
+          borderRadius: "6px",
+          padding: "4px 8px",
+          color: "var(--text-muted)",
+          fontSize: "0.78rem",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "6px",
+          whiteSpace: "nowrap",
+          minHeight: "28px",
+          maxWidth: "100%",
+        }}
+      >
+        <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          {isPending ? <ShieldCheck size={13} /> : block.status === "approved" ? <ShieldCheck size={13} /> : <ShieldX size={13} />}
+        </span>
+        <span style={{ fontFamily: "monospace" }}>{block.name}</span>
+        {block.args && (
           <span style={{
             fontFamily: "monospace",
             opacity: 0.7,
-            maxWidth: "300px",
+            maxWidth: "200px",
             overflow: "hidden",
             textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}>{summary}</span>
+          }}>{toolSummary(block.name, block.args)}</span>
         )}
-        {block.args && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: "var(--text-muted)", padding: 0, display: "flex",
-            }}
-          >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-        )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", marginLeft: "auto", flexShrink: 0 }}>
           {isPending ? (
             <>
               <button
@@ -256,9 +259,13 @@ function ApprovalCard({ block, onRespond }: {
                   padding: "3px 10px",
                   fontSize: "0.75rem",
                   cursor: "pointer",
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
+                  justifyContent: "center",
                   gap: "4px",
+                  minHeight: "22px",
+                  boxSizing: "border-box",
+                  flexShrink: 0,
                 }}
               >
                 <ShieldCheck size={12} /> Allow
@@ -273,25 +280,38 @@ function ApprovalCard({ block, onRespond }: {
                   padding: "3px 10px",
                   fontSize: "0.75rem",
                   cursor: "pointer",
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
+                  justifyContent: "center",
                   gap: "4px",
+                  minHeight: "22px",
+                  boxSizing: "border-box",
+                  flexShrink: 0,
                 }}
               >
                 <ShieldX size={12} /> Deny
               </button>
             </>
-          ) : (
-            <span style={{
-              fontSize: "0.75rem",
-              color: block.status === "approved" ? "var(--accent)" : "var(--text-muted)",
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-            }}>
-              {block.status === "approved" ? <><ShieldCheck size={12} /> Allowed</> : <><ShieldX size={12} /> Denied</>}
-            </span>
-          )}
+          ) : null}
+          <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: block.args ? 0.5 : 0 }}>
+            {block.args && (
+              <button
+                onClick={() => setExpanded(!expanded)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--text-muted)",
+                  padding: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              </button>
+            )}
+          </span>
         </div>
       </div>
       {expanded && block.args && (
