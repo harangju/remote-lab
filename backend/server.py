@@ -880,6 +880,11 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 if active_runs.get(convo_id) is completed_run:
                     del active_runs[convo_id]
             elif completed_run and completed_run.status == "running":
+                # If this socket is the subscriber for the in-flight run, don't reject
+                # the next loop iteration after a reconnect/navigation. Just ignore any
+                # non-control input while the run continues streaming.
+                if ws in completed_run.subscribers:
+                    continue
                 await ws.send_text(
                     Error(message="Agent is still running", recoverable=True).model_dump_json()
                 )
@@ -1128,8 +1133,12 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 # Wait for all runs to complete, but also listen for stop commands
                 agent_tasks = {r.task for r in runs if r.task}
                 stopped = False
+                ws_recv: asyncio.Task | None = None
                 while agent_tasks:
-                    ws_recv = asyncio.ensure_future(ws.receive_text())
+                    # Reuse the ws_recv future across iterations to avoid
+                    # concurrent recv() calls on the same websocket
+                    if ws_recv is None or ws_recv.done():
+                        ws_recv = asyncio.ensure_future(ws.receive_text())
                     done_set, _ = await asyncio.wait(
                         agent_tasks | {ws_recv},
                         return_when=asyncio.FIRST_COMPLETED,
@@ -1165,8 +1174,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                 raise
                         else:
                             agent_tasks.discard(t)
-                    if not stopped and ws_recv not in done_set:
-                        ws_recv.cancel()
+                # Clean up pending ws_recv when exiting the loop
+                if ws_recv and not ws_recv.done():
+                    ws_recv.cancel()
 
                 if stopped:
                     # Sync whatever history we have from cancelled runs
