@@ -16,7 +16,7 @@ A self-hosted AI assistant that runs on your own VPS. Chat UI, file editor, mult
 - **Multi-agent system** — define custom agents per project with their own models, system prompts, and tools
 - **@mentions** — route messages to specific agents, or let agents @mention each other for autonomous workflows
 - **Agent tools** — bash, read/write/edit files, glob, grep, web search
-- **Multi-provider LLM** — Claude (primary), OpenAI and Google as fallback
+- **Multi-provider LLM** — Claude Sonnet 4.6, Opus 4.6, GPT-5.4, GPT-5-nano, Gemini 2.5 Flash — switchable per conversation or per agent
 - **Project scoping** — each project is sandboxed to a directory on disk
 - **Context compaction** — automatically summarizes older messages when the context window fills up
 - **Persistent agent runs** — agents keep running even if you close the browser; reconnect to pick up where you left off
