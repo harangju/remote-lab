@@ -67,23 +67,19 @@ data/
   conversations/{id}.agent.json       — serialized PydanticAI message history
 ```
 
-## Git Clone Setup
-
-Project creation supports cloning from GitHub URLs. The service runs as `www-data` and uses SSH for cloning. To set this up:
-
-1. Copy a GitHub-authorized SSH key to `/var/www/.ssh/id_ed25519_github`
-2. Ensure ownership and permissions: `chown www-data:www-data`, `chmod 600`
-3. The server auto-converts HTTPS GitHub URLs to SSH and uses this key via `GIT_SSH_COMMAND`
-
 ## Agent Environment
 
-The service runs as `www-data` under systemd. The agent's bash tool inherits the service's environment, so CLI tools and config must be explicitly provided:
+The service runs as `www-data` under systemd. The agent's bash tool inherits the service's environment via `dict(os.environ)`. The `www-data` user's home is `/var/www/`, so standard dotfiles go there:
 
-- **PATH**: Extended in the systemd unit to include `/root/.bun/bin` (for `bun`) alongside standard system paths.
-- **Git identity**: `agent.gitconfig` in the repo root defines the agent's git `user.name` and `user.email`. The systemd unit sets `GIT_CONFIG_GLOBAL` to point at this file.
-- **SSH for git clone**: See "Git Clone Setup" below.
+- **Git identity**: `/var/www/.gitconfig` — standard `~/.gitconfig` for the `www-data` user.
+- **SSH**: `/var/www/.ssh/id_ed25519` — default SSH key, used for `git push`, `git clone`, etc. The server also auto-converts HTTPS GitHub URLs to SSH for project cloning.
+- **PATH**: Extended in the systemd unit (`/etc/systemd/system/remote-lab.service`) to include `/root/.bun/bin` since bun is not installed system-wide.
 
-To add new CLI tools or environment for the agent, update the `Environment=` lines in `/etc/systemd/system/remote-lab.service` and run `sudo systemctl daemon-reload && sudo systemctl restart remote-lab`.
+To provision a new server:
+
+1. Set up `/var/www/.gitconfig` with agent's git identity
+2. Copy a GitHub-authorized SSH key to `/var/www/.ssh/id_ed25519` (owner `www-data`, mode `600`)
+3. Ensure the systemd unit's `Environment=PATH=...` includes paths for any user-installed CLI tools
 
 ## File Permissions
 

@@ -406,12 +406,11 @@ async def api_create_project(body: ProjectCreate):
             clone_url = f"git@github.com:{m.group(1)}"
             if not clone_url.endswith(".git"):
                 clone_url += ".git"
-        clone_env = {**os.environ, "GIT_SSH_COMMAND": "ssh -i /var/www/.ssh/id_ed25519_github -o StrictHostKeyChecking=accept-new"}
         proc = await asyncio.create_subprocess_exec(
             "git", "clone", "--depth", "1", clone_url, str(target),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=clone_env,
+            env=dict(os.environ),
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
