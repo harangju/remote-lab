@@ -76,6 +76,7 @@ ALLOWED_ORIGIN=https://lab.harangju.com
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=AI...
+GH_TOKEN=ghp_...        # optional, gives agent gh CLI access
 ```
 
 At least one LLM API key is required. The agent uses dynamic fallback based on available API keys.
@@ -245,7 +246,7 @@ The agent has access to server-side tools, scoped to the project's directory:
 - Server validates with constant-time comparison (`hmac.compare_digest`)
 - Invalid token closes the connection with code 4401
 - `ALLOWED_ORIGIN` rejects cross-origin WebSocket upgrades (prevents CSWSH)
-- Only one WebSocket connection at a time (429 if already active)
+- Multi-tab chat is not supported yet: only one active WebSocket client is supported at a time, so opening the same lab session in another tab may disconnect the first tab or show only one tab as connected
 - Usage limits cap the number of LLM requests per conversation turn
 - System prompt guardrails prevent the agent from reading env vars, system configs, or making external network requests
 - Symlinks in `docs/` are validated — resolved path must stay inside the docs directory

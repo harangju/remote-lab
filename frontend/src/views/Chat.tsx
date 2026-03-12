@@ -10,6 +10,11 @@ import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
 import { usePanel } from "../hooks/usePanel";
 
+const NEAR_BOTTOM_PX = 80;
+const STREAM_FOLLOW_THROTTLE_MS = 180;
+const STREAM_FOLLOW_START_OFFSET_PX = 120;
+const USER_MESSAGE_TOP_OFFSET_PX = 24;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -439,18 +444,89 @@ export function Chat() {
   const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef<StreamBlock[]>([]);
   const reconnectTimer = useRef<number | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const autoFollowRef = useRef(true);
+  const userPausedFollowRef = useRef(false);
+  const shouldRepositionOnStreamStartRef = useRef(false);
+  const lastUserMessageRef = useRef<HTMLDivElement | null>(null);
+  const lastStreamFollowAtRef = useRef(0);
 
   // Panel hook
   const panel = usePanel(projectId);
 
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  const isNearBottom = useCallback((el: HTMLDivElement) => {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
   }, []);
 
-  useEffect(scrollToBottom, [messages, streamBlocks, thinking, scrollToBottom]);
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    bottomRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  const scrollUserMessageNearTop = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = messageListRef.current;
+    const userMessage = lastUserMessageRef.current;
+    if (!container || !userMessage) return;
+    const targetTop = userMessage.offsetTop - USER_MESSAGE_TOP_OFFSET_PX;
+    container.scrollTo({ top: Math.max(0, targetTop), behavior });
+  }, []);
+
+  const maybeFollowStream = useCallback(() => {
+    const container = messageListRef.current;
+    if (!container || !autoFollowRef.current) return;
+    const now = Date.now();
+    if (now - lastStreamFollowAtRef.current < STREAM_FOLLOW_THROTTLE_MS) return;
+    lastStreamFollowAtRef.current = now;
+    scrollToBottom("auto");
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const nearBottom = isNearBottom(el);
+      autoFollowRef.current = nearBottom;
+      if (busy) {
+        userPausedFollowRef.current = !nearBottom;
+      }
+    };
+    onScroll();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [busy, isNearBottom]);
+
+  useEffect(() => {
+    if (shouldRepositionOnStreamStartRef.current && streamBlocks.length > 0) {
+      scrollUserMessageNearTop("smooth");
+      shouldRepositionOnStreamStartRef.current = false;
+      autoFollowRef.current = false;
+      lastStreamFollowAtRef.current = 0;
+    }
+  }, [streamBlocks.length, scrollUserMessageNearTop]);
+
+  useEffect(() => {
+    const container = messageListRef.current;
+    if (!container || !busy || streamBlocks.length === 0 || autoFollowRef.current || userPausedFollowRef.current) return;
+    const bottomDistance = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (bottomDistance > container.clientHeight + STREAM_FOLLOW_START_OFFSET_PX) {
+      autoFollowRef.current = true;
+      maybeFollowStream();
+    }
+  }, [busy, streamBlocks, maybeFollowStream]);
+
+  useEffect(() => {
+    if (busy && streamBlocks.length > 0) {
+      maybeFollowStream();
+    }
+  }, [busy, streamBlocks, maybeFollowStream]);
+
+  useEffect(() => {
+    if (!busy && autoFollowRef.current) {
+      scrollToBottom("auto");
+    }
+  }, [busy, messages, thinking, scrollToBottom]);
 
   // Auto-resize textarea to fit content
   useLayoutEffect(() => {
@@ -954,6 +1030,10 @@ export function Chat() {
       setError("Not connected — try refreshing");
       return;
     }
+    shouldRepositionOnStreamStartRef.current = true;
+    autoFollowRef.current = true;
+    userPausedFollowRef.current = false;
+    lastStreamFollowAtRef.current = 0;
     const isCommand = text.startsWith("/");
     if (isCommand) {
       const cmdName = text.split(/\s/)[0].slice(1);
@@ -1135,7 +1215,7 @@ export function Chat() {
         </div>
 
         {/* Messages */}
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        <div ref={messageListRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px", maxWidth: "48rem", width: "100%", margin: "0 auto", flex: 1 }}>
           {messages.map((m, i) => (
             <React.Fragment key={i}>
@@ -1169,7 +1249,11 @@ export function Chat() {
                     <ToolChip tool={b} onOpenFile={handleOpenFile} />
                   </div>
                 ) : b.type === "text" && b.content ? (
-                  <div key={j} style={msgBubble(m.role, m.agent_color)}>
+                  <div
+                    key={j}
+                    ref={m.role === "user" && j === m.blocks.length - 1 ? (el) => { lastUserMessageRef.current = el; } : undefined}
+                    style={msgBubble(m.role, m.agent_color)}
+                  >
                     {m.role === "user" && editingMsgIdx === i ? (
                       <form onSubmit={(e) => {
                         e.preventDefault();

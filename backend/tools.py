@@ -80,7 +80,7 @@ async def _bash(ctx: RunContext, command: str) -> str:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         cwd=str(workdir),
-        env={**os.environ, "HOME": str(workdir)},
+        env=dict(os.environ),
     )
     stdout, _ = await proc.communicate()
     output = stdout.decode(errors="replace")

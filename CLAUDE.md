@@ -75,8 +75,20 @@ Project creation supports cloning from GitHub URLs. The service runs as `www-dat
 2. Ensure ownership and permissions: `chown www-data:www-data`, `chmod 600`
 3. The server auto-converts HTTPS GitHub URLs to SSH and uses this key via `GIT_SSH_COMMAND`
 
+## File Permissions
+
+The service runs as `www-data`, but files may be created/edited by other users (e.g. `root` via Claude Code). To prevent `EACCES` errors, POSIX ACLs grant `www-data` read/write on everything under `/srv/remote-lab/`:
+
+```bash
+# Applied once — default ACLs auto-propagate to new files/directories:
+sudo setfacl -R -m u:www-data:rwX /srv/remote-lab
+sudo setfacl -R -d -m u:www-data:rwX /srv/remote-lab
+```
+
 ## Conventions
 
+- **Align before acting** — understand the problem and agree on the approach before making changes. Ask questions, don't assume.
+- **When the goal and best option are clear, just do it** — don't ask the user to choose between options when one is obviously better. Only ask when there's genuine ambiguity or tradeoffs that depend on user preference.
 - Use `uv run` for Python, `bun` for frontend (never npm/npx)
 - Frontend uses inline styles (React.CSSProperties), no CSS framework
 - CSS variables for theming: `--bg`, `--bg-surface`, `--border`, `--text`, `--text-muted`, `--accent`
