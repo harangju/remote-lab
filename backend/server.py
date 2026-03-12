@@ -37,7 +37,7 @@ from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, Error
+from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, Error
 from backend.skills import get_skills, get_skill, SkillType
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
@@ -95,6 +95,7 @@ class RunState:
 
 # convo_id → RunState for in-flight or recently completed runs
 active_runs: dict[str, RunState] = {}
+processed_message_ids: dict[str, set[str]] = {}
 
 
 async def _auto_title(convo_id: str, user_message: str, run: RunState):
@@ -839,13 +840,26 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
         # ----- Chat loop -----
         while True:
-            prompt = await ws.receive_text()
+            raw_message = await ws.receive_text()
+            prompt = raw_message
+            message_id: str | None = None
 
-            # Handle JSON control messages (e.g. stop when no agent is running)
+            # Handle JSON control messages and structured user messages
             try:
-                ctrl = json.loads(prompt)
-                if isinstance(ctrl, dict) and ctrl.get("type") == "stop":
-                    continue  # nothing to stop
+                ctrl = json.loads(raw_message)
+                if isinstance(ctrl, dict):
+                    if ctrl.get("type") == "stop":
+                        continue  # nothing to stop
+                    if ctrl.get("type") == "user-message":
+                        prompt = str(ctrl.get("text", "")).strip()
+                        message_id = str(ctrl.get("message_id", "")).strip() or None
+                        if not prompt:
+                            await ws.send_text(Error(message="Empty message", recoverable=True).model_dump_json())
+                            continue
+                        seen_ids = processed_message_ids.setdefault(convo_id, set())
+                        if message_id and message_id in seen_ids:
+                            await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                            continue
             except (json.JSONDecodeError, TypeError):
                 pass  # Not JSON — treat as a regular text prompt
 
@@ -971,7 +985,11 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 "role": "user",
                 "content": prompt,
                 "timestamp": _iso_now(),
+                **({"message_id": message_id} if message_id else {}),
             })
+            if message_id:
+                processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
 
             # Mark conversation as running
             storage.update_conversation_status(convo_id, ConvoStatus.running)

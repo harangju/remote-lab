@@ -31,6 +31,13 @@ interface DisplayMessage {
   agent_id?: string;
   agent_name?: string;
   agent_color?: string;
+  message_id?: string;
+  pending?: boolean;
+}
+
+interface PendingMessage {
+  message_id: string;
+  text: string;
 }
 
 interface MetaInfo {
@@ -436,8 +443,11 @@ export function Chat() {
   const [slashIdx, setSlashIdx] = useState(0);
   // Track active agent info during streaming (for multi-agent labeling)
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
   const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingMessagesRef = useRef<PendingMessage[]>([]);
+  const flushingQueueRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef<StreamBlock[]>([]);
   const reconnectTimer = useRef<number | undefined>(undefined);
@@ -449,6 +459,50 @@ export function Chat() {
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
+
+  const syncPendingMessages = useCallback((updater: PendingMessage[] | ((prev: PendingMessage[]) => PendingMessage[])) => {
+    setPendingMessages((prev) => {
+      const next = typeof updater === "function" ? (updater as (prev: PendingMessage[]) => PendingMessage[])(prev) : updater;
+      pendingMessagesRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const markMessagePending = useCallback((messageId: string, pending: boolean) => {
+    setMessages((prev) => prev.map((msg) =>
+      msg.message_id === messageId ? { ...msg, pending } : msg
+    ));
+  }, []);
+
+  const flushPendingQueue = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || flushingQueueRef.current) return;
+    if (pendingMessagesRef.current.length === 0) return;
+    flushingQueueRef.current = true;
+    try {
+      for (const pending of pendingMessagesRef.current) {
+        ws.send(JSON.stringify({ type: "user-message", message_id: pending.message_id, text: pending.text }));
+      }
+    } finally {
+      flushingQueueRef.current = false;
+    }
+  }, []);
+
+  const queueMessage = useCallback((text: string) => {
+    const message_id = crypto.randomUUID();
+    const entry = { message_id, text };
+    syncPendingMessages((prev) => [...prev, entry]);
+    setMessages((prev) => [...prev, {
+      role: "user",
+      blocks: [{ type: "text", content: text }],
+      message_id,
+      pending: true,
+    }]);
+    setBusy(true);
+    setWaitingForModel(true);
+    setError(null);
+    return message_id;
+  }, [syncPendingMessages]);
 
   useEffect(scrollToBottom, [messages, streamBlocks, thinking, scrollToBottom]);
 
@@ -539,7 +593,12 @@ export function Chat() {
               msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
               pendingBlocks = [];
             }
-            msgs.push({ role: "user", blocks: [{ type: "text", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }] });
+            msgs.push({
+              role: "user",
+              blocks: [{ type: "text", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+              message_id: typeof mAny.message_id === "string" ? mAny.message_id : undefined,
+              pending: false,
+            });
           } else if (m.role === "assistant") {
             const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
             const blocks: StreamBlock[] = [...pendingBlocks];
@@ -600,6 +659,12 @@ export function Chat() {
       switch (data.type) {
         case "auth-ok":
           setConnected(true);
+          flushPendingQueue();
+          break;
+        case "message-ack":
+          syncPendingMessages((prev) => prev.filter((msg) => msg.message_id !== data.message_id));
+          markMessagePending(data.message_id, false);
+          setError(null);
           break;
         case "running":
           setBusy(true);
@@ -860,8 +925,7 @@ export function Chat() {
       if (text) {
         setMentionQuery(null);
         setSlashQuery(null);
-        sendText(text);
-        setInput("");
+        if (sendText(text)) setInput("");
       }
       return;
     }
@@ -943,26 +1007,15 @@ export function Chat() {
 
   // Shared logic for sending a text message to the agent
   const sendText = (text: string) => {
-    if (!text || busy) return;
+    if (!text || busy) return false;
+    const message_id = queueMessage(text);
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      setError("Not connected — try refreshing");
-      return;
-    }
-    const isCommand = text.startsWith("/");
-    if (isCommand) {
-      const cmdName = text.split(/\s/)[0].slice(1);
-      const skill = skills.find((s) => s.name === cmdName);
-      if (skill?.type === "prompt") {
-        setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
-      }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "user-message", message_id, text }));
     } else {
-      setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }] }]);
+      setError("Reconnecting — message queued");
     }
-    setBusy(true);
-    setWaitingForModel(true);
-    setError(null);
-    ws.send(text);
+    return true;
   };
 
   const send = (e: React.FormEvent) => {
@@ -970,8 +1023,7 @@ export function Chat() {
     setMentionQuery(null);
     setSlashQuery(null);
     const text = input.trim();
-    sendText(text);
-    setInput("");
+    if (sendText(text)) setInput("");
   };
 
   const resend = (text: string) => {
@@ -1205,7 +1257,7 @@ export function Chat() {
                   ) : (
                     <div
                       key={j}
-                      style={msgBubble(m.role, m.agent_color)}
+                      style={{ ...msgBubble(m.role, m.agent_color), opacity: m.pending ? 0.7 : 1 }}
                     >
                       {editingMsgIdx === i ? (
                         <form onSubmit={(e) => {
@@ -1236,7 +1288,14 @@ export function Chat() {
                           </div>
                         </form>
                       ) : (
-                        <MdContent text={b.content} />
+                        <>
+                          <MdContent text={b.content} />
+                          {m.pending && (
+                            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 6 }}>
+                              Sending…
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   )

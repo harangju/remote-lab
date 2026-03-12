@@ -7,6 +7,11 @@ class AuthOk(BaseModel):
     type: Literal["auth-ok"] = "auth-ok"
 
 
+class MessageAck(BaseModel):
+    type: Literal["message-ack"] = "message-ack"
+    message_id: str
+
+
 class ThinkingDelta(BaseModel):
     type: Literal["thinking-delta"] = "thinking-delta"
     delta: str
