@@ -78,6 +78,11 @@ class ToolConfirm(BaseModel):
     agent_id: str | None = None
 
 
+class TitleUpdated(BaseModel):
+    type: Literal["title-updated"] = "title-updated"
+    title: str
+
+
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str

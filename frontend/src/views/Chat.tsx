@@ -705,6 +705,9 @@ export function Chat() {
           setWaitingForModel(false);
           setBusy(false);
           break;
+        case "title-updated":
+          setTitle(data.title);
+          break;
         case "error":
           setError(data.message);
           if (blocksRef.current.length > 0) {

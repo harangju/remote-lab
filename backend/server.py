@@ -37,7 +37,7 @@ from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, Error
+from backend.protocol import AuthOk, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, Error
 from backend.skills import get_skills, get_skill, SkillType
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
@@ -95,6 +95,36 @@ class RunState:
 
 # convo_id → RunState for in-flight or recently completed runs
 active_runs: dict[str, RunState] = {}
+
+
+async def _auto_title(convo_id: str, user_message: str, run: RunState):
+    """Generate a short title from the first user message using a lightweight model."""
+    from pydantic_ai import Agent as _Agent
+    from backend.agents import _available
+
+    # Pick the cheapest available model
+    title_model = None
+    for preferred in ("openai:gpt-5-nano", "google-gla:gemini-2.5-flash"):
+        if preferred in _available:
+            title_model = preferred
+            break
+    if not title_model:
+        title_model = _available[0]
+
+    try:
+        title_agent = _Agent(title_model)
+        result = await title_agent.run(
+            f"Generate a short title (max 6 words, no quotes) for a conversation that starts with this message:\n\n{user_message[:500]}",
+        )
+        title = str(result.output).strip().strip('"\'')
+        if title:
+            storage.update_conversation_title(convo_id, title)
+            event = TitleUpdated(title=title).model_dump_json()
+            run.events.append(event)
+            await run.broadcast(event)
+    except Exception as e:
+        import logging
+        logging.getLogger("remote-lab").warning("Auto-title failed: %s", e, exc_info=True)
 
 
 def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int = 50, cached_messages: list[dict] | None = None) -> str:
@@ -316,6 +346,11 @@ async def _run_agent_task(
         await _emit(done.model_dump_json())
 
         storage.update_conversation_status(convo_id, ConvoStatus.done)
+
+        # Auto-title: generate a title if still "Untitled"
+        meta = storage._read_meta(convo_id)
+        if meta and meta.title == "Untitled":
+            asyncio.create_task(_auto_title(convo_id, prompt, run))
 
     except Exception as e:
         run.error_msg = str(e)

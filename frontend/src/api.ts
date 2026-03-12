@@ -241,6 +241,7 @@ export type WsEvent =
   | { type: "done"; cost: number; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "skill-result"; skill: string; output: string }
+  | { type: "title-updated"; title: string }
   | { type: "error"; message: string };
 
 export function connectWs(convoId: string): WebSocket {
