@@ -37,7 +37,7 @@ Click a tool chip to see the full input and output.
 
 ### File panel
 
-Click any filename in the chat to open it in the side panel with a full CodeMirror editor. Press ++cmd+p++ (or ++ctrl+p++) to fuzzy-search for files in the project.
+Click any filename in the chat to open it in the side panel with a full CodeMirror editor. Press `Cmd+P` (or `Ctrl+P`) to fuzzy-search for files in the project.
 
 ### @mentions and multi-agent
 
