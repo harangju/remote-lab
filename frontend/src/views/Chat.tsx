@@ -34,7 +34,6 @@ interface DisplayMessage {
 }
 
 interface MetaInfo {
-  cost: number;
   turns: number;
   context_tokens: number;
   context_limit: number;
@@ -562,12 +561,8 @@ export function Chat() {
           msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
         }
         setMessages(msgs);
-        const totalCost = detail.messages
-          .filter((m) => m.role === "assistant" && typeof (m as any).cost === "number")
-          .reduce((sum, m) => sum + ((m as any).cost as number), 0);
-        if (detail.context_limit > 0 || totalCost > 0) {
+        if (detail.context_limit > 0) {
           setMeta({
-            cost: totalCost,
             turns: 0,
             context_tokens: detail.context_tokens,
             context_limit: detail.context_limit,
@@ -689,7 +684,6 @@ export function Chat() {
           activeAgentRef.current = null;
           setActiveAgent(null);
           setMeta((prev) => ({
-            cost: (prev?.cost ?? 0) + data.cost,
             turns: data.turns,
             context_tokens: data.context_tokens,
             context_limit: data.context_limit,
@@ -1137,11 +1131,6 @@ export function Chat() {
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
               {meta && meta.context_limit > 0 && (
                 <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
-              )}
-              {meta && meta.cost > 0 && (
-                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                  ${meta.cost.toFixed(4)}
-                </span>
               )}
               <button
                 onClick={panel.toggleFileFinder}

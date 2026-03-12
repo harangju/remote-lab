@@ -189,7 +189,6 @@ async def _run_agent_task(
         current_prompt: str | None = prompt
         current_history = message_history if message_history else None
         deferred_results: DeferredToolResults | None = None
-        total_cost = 0.0
         total_turns = 0
 
         while True:
@@ -268,7 +267,6 @@ async def _run_agent_task(
 
                 # Accumulate usage
                 usage = agent_run.usage()
-                total_cost += usage.total_tokens / 1000 * 0.003
                 total_turns += len([
                     m for m in agent_run.all_messages()
                     if isinstance(m, ModelResponse)
@@ -326,12 +324,11 @@ async def _run_agent_task(
             agent_id=agent_id,
         )
 
-        # Persist cost/context metadata (text segments already persisted above)
+        # Persist turn/context metadata (text segments already persisted above)
         meta_msg: dict = {
             "role": "assistant",
             "content": "",
             "timestamp": _iso_now(),
-            "cost": total_cost,
             "turns": total_turns,
             "context_tokens": context_tokens,
             "context_limit": context_limit,
@@ -340,7 +337,7 @@ async def _run_agent_task(
             meta_msg["agent_id"] = agent_id
         storage.append_message(convo_id, meta_msg)
 
-        done = Done(cost=total_cost, turns=total_turns, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
+        done = Done(turns=total_turns, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
         run.done_event = done.model_dump()
         run.status = "done"
         await _emit(done.model_dump_json())
@@ -1121,7 +1118,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                     agent_tasks = set()
                                     stopped = True
                                     storage.update_conversation_status(convo_id, ConvoStatus.idle)
-                                    done_ev = Done(cost=0, turns=0, context_tokens=0, context_limit=0)
+                                    done_ev = Done(turns=0, context_tokens=0, context_limit=0)
                                     await ws.send_text(done_ev.model_dump_json())
                                 elif isinstance(ctrl, dict) and ctrl.get("type") == "tool-confirm-response":
                                     # Route approval decision to the appropriate run

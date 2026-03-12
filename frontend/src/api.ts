@@ -238,7 +238,7 @@ export type WsEvent =
   | { type: "tool-use"; name: string; input?: string; agent_id?: string }
   | { type: "tool-result"; name: string; output: string; agent_id?: string }
   | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; agent_id?: string }
-  | { type: "done"; cost: number; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
+  | { type: "done"; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "skill-result"; skill: string; output: string }
   | { type: "title-updated"; title: string }

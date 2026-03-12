@@ -28,7 +28,6 @@ class ToolUse(BaseModel):
 
 class Done(BaseModel):
     type: Literal["done"] = "done"
-    cost: float
     turns: int
     context_tokens: int = 0
     context_limit: int = 0
