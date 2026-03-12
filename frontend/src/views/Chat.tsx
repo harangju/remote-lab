@@ -732,6 +732,9 @@ export function Chat() {
 
     ws.addEventListener("close", (event) => {
       setConnected(false);
+      setBusy(false);
+      setWaitingForModel(false);
+      setThinking(false);
       if (event.code !== 1000 && event.code !== 4409) {
         reconnectTimer.current = window.setTimeout(
           () => setWsAttempt((a) => a + 1),
@@ -741,6 +744,9 @@ export function Chat() {
     });
     ws.addEventListener("error", () => {
       setConnected(false);
+      setBusy(false);
+      setWaitingForModel(false);
+      setThinking(false);
     });
 
     return () => {
