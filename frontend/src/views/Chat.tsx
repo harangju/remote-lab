@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMe
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, type WsEvent, type AgentConfig, type Skill } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
@@ -407,6 +407,7 @@ function MdContent({ text, onOpenSnippet }: { text: string; onOpenSnippet?: (cod
     </div>
   );
 }
+
 
 // ---------------------------------------------------------------------------
 // Chat component
@@ -1000,7 +1001,10 @@ export function Chat() {
   }, [panel.toggleFileFinder]);
 
   // Styles
-  const msgBubble = (role: "user" | "assistant", agentColor?: string): React.CSSProperties => ({
+  const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
+
+  // Styles
+  const msgBubble = useCallback((role: "user" | "assistant", agentColor?: string): React.CSSProperties => ({
     maxWidth: "85%",
     padding: "10px 14px",
     borderRadius: "12px",
@@ -1012,7 +1016,32 @@ export function Chat() {
     color: "var(--text)",
     border: `1px solid ${role === "user" ? "var(--border-user)" : "var(--border)"}`,
     ...(agentColor ? { borderLeft: `3px solid ${agentColor}` } : {}),
-  });
+  }), []);
+
+  const copyAssistantMessage = useCallback((idx: number, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedMsgIdx(idx);
+    window.setTimeout(() => {
+      setCopiedMsgIdx((current) => current === idx ? null : current);
+    }, 1500);
+  }, []);
+
+  const assistantCopyBtnStyle: React.CSSProperties = {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    background: "var(--bg)",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    padding: "4px",
+    color: "var(--text-muted)",
+    cursor: "pointer",
+    opacity: 0.7,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
+  };
 
   // Resizable panel width
   const [panelWidth, setPanelWidth] = useState(500);
@@ -1169,42 +1198,59 @@ export function Chat() {
                     <ToolChip tool={b} onOpenFile={handleOpenFile} />
                   </div>
                 ) : b.type === "text" && b.content ? (
-                  <div
-                    key={j}
-                    style={msgBubble(m.role, m.agent_color)}
-                  >
-                    {m.role === "user" && editingMsgIdx === i ? (
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        const text = editingMsgValue.trim();
-                        if (text) {
-                          setEditingMsgIdx(null);
-                          resend(text);
-                        }
-                      }} style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
-                        <input
-                          autoFocus
-                          value={editingMsgValue}
-                          onChange={(e) => setEditingMsgValue(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Escape") setEditingMsgIdx(null); }}
-                          style={{
-                            ...inputStyle,
-                            background: "transparent",
-                            border: "1px solid var(--border)",
-                            borderRadius: "6px",
-                            color: "inherit",
-                            fontSize: "inherit",
-                          }}
-                        />
-                        <div style={{ display: "flex", gap: "4px", justifyContent: "flex-end" }}>
-                          <button type="button" onClick={() => setEditingMsgIdx(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "0.75rem", cursor: "pointer" }}>Cancel</button>
-                          <button type="submit" style={{ ...btnPrimary, fontSize: "0.75rem", padding: "2px 8px", borderRadius: "6px" }}>Send</button>
-                        </div>
-                      </form>
-                    ) : (
-                      <MdContent text={b.content} />
-                    )}
-                  </div>
+                  m.role === "assistant" ? (
+                    <div key={j} style={{ position: "relative", maxWidth: "85%", alignSelf: "flex-start" }}>
+                      <div style={{ ...msgBubble("assistant", m.agent_color), maxWidth: "100%", paddingRight: "42px" }}>
+                        <MdContent text={b.content} />
+                      </div>
+                      <button
+                        onClick={() => copyAssistantMessage(i, b.content)}
+                        data-tooltip={copiedMsgIdx === i ? "Copied!" : "Copy message"}
+                        style={assistantCopyBtnStyle}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
+                      >
+                        {copiedMsgIdx === i ? <Check size={12} /> : <Copy size={12} />}
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      key={j}
+                      style={msgBubble(m.role, m.agent_color)}
+                    >
+                      {editingMsgIdx === i ? (
+                        <form onSubmit={(e) => {
+                          e.preventDefault();
+                          const text = editingMsgValue.trim();
+                          if (text) {
+                            setEditingMsgIdx(null);
+                            resend(text);
+                          }
+                        }} style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
+                          <input
+                            autoFocus
+                            value={editingMsgValue}
+                            onChange={(e) => setEditingMsgValue(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Escape") setEditingMsgIdx(null); }}
+                            style={{
+                              ...inputStyle,
+                              background: "transparent",
+                              border: "1px solid var(--border)",
+                              borderRadius: "6px",
+                              color: "inherit",
+                              fontSize: "inherit",
+                            }}
+                          />
+                          <div style={{ display: "flex", gap: "4px", justifyContent: "flex-end" }}>
+                            <button type="button" onClick={() => setEditingMsgIdx(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "0.75rem", cursor: "pointer" }}>Cancel</button>
+                            <button type="submit" style={{ ...btnPrimary, fontSize: "0.75rem", padding: "2px 8px", borderRadius: "6px" }}>Send</button>
+                          </div>
+                        </form>
+                      ) : (
+                        <MdContent text={b.content} />
+                      )}
+                    </div>
+                  )
                 ) : null
               ))}
               {/* Edit / Rerun actions for user messages */}
@@ -1281,8 +1327,19 @@ export function Chat() {
                 <ToolChip tool={b} live={!b.output} onOpenFile={handleOpenFile} />
               </div>
             ) : b.type === "text" && b.content ? (
-              <div key={j} style={msgBubble("assistant", activeAgent?.color)}>
-                <MdContent text={b.content} />
+              <div key={j} style={{ position: "relative", maxWidth: "85%", alignSelf: "flex-start" }}>
+                <div style={{ ...msgBubble("assistant", activeAgent?.color), maxWidth: "100%", paddingRight: "42px" }}>
+                  <MdContent text={b.content} />
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(b.content)}
+                  data-tooltip="Copy message"
+                  style={assistantCopyBtnStyle}
+                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
+                >
+                  <Copy size={12} />
+                </button>
               </div>
             ) : null
           ))}
