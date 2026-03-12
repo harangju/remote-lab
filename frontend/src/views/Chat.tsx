@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -441,7 +441,7 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef<StreamBlock[]>([]);
   const reconnectTimer = useRef<number | undefined>(undefined);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Panel hook
   const panel = usePanel(projectId);
@@ -451,6 +451,14 @@ export function Chat() {
   }, []);
 
   useEffect(scrollToBottom, [messages, streamBlocks, thinking, scrollToBottom]);
+
+  // Auto-resize textarea to fit content
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
 
   // Collect touched files from conversation for FileFinder
   const touchedFiles = useMemo(() => {
@@ -800,7 +808,7 @@ export function Chat() {
     return skills.filter((s) => s.name.toLowerCase().startsWith(q));
   }, [slashQuery, skills]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInput(val);
 
@@ -843,7 +851,20 @@ export function Chat() {
     inputRef.current?.focus();
   };
 
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter to send (Shift+Enter for newline)
+    if (e.key === "Enter" && !e.shiftKey && slashQuery === null && mentionQuery === null) {
+      e.preventDefault();
+      const text = input.trim();
+      if (text) {
+        setMentionQuery(null);
+        setSlashQuery(null);
+        sendText(text);
+        setInput("");
+      }
+      return;
+    }
+
     // Slash command autocomplete
     if (slashQuery !== null && slashMatches.length > 0) {
       if (e.key === "ArrowDown") {
@@ -1422,12 +1443,18 @@ export function Chat() {
             border: "1px solid var(--border)",
             borderRadius: "12px",
           }}>
-            <input
+            <textarea
               ref={inputRef}
+              rows={1}
               style={{
                 ...inputStyle,
                 background: "transparent",
                 border: "none",
+                resize: "none",
+                overflowY: "hidden",
+                lineHeight: "1.5",
+                minHeight: "24px",
+                maxHeight: "200px",
               }}
               placeholder={busy ? "Waiting for response..." : "Type a message... (@ for agents/files, / for commands)"}
               value={input}
