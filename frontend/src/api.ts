@@ -7,6 +7,7 @@ export interface Project {
   name: string;
   path: string;
   created_at: string;
+  archived_at?: string | null;
 }
 
 export interface ConvoMeta {
@@ -16,6 +17,7 @@ export interface ConvoMeta {
   status: "idle" | "running" | "done" | "error";
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
 }
 
 export interface ConvoDetail extends ConvoMeta {
@@ -110,7 +112,7 @@ export function createProject(body: { name: string; path: string; github_url?: s
   });
 }
 
-export function updateProject(id: string, body: { name?: string; path?: string }): Promise<Project> {
+export function updateProject(id: string, body: { name?: string; path?: string; archived_at?: string | null }): Promise<Project> {
   return request(`/projects/${id}`, {
     method: "PUT",
     body: JSON.stringify(body),
@@ -140,7 +142,7 @@ export function getConvo(convoId: string): Promise<ConvoDetail> {
   return request(`/convos/${convoId}`);
 }
 
-export function updateConvo(convoId: string, body: { title?: string }): Promise<ConvoMeta> {
+export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null }): Promise<ConvoMeta> {
   return request(`/convos/${convoId}`, {
     method: "PATCH",
     body: JSON.stringify(body),

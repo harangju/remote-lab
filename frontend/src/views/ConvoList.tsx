@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Pencil, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Archive, Pencil, Plus, Trash2, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
 import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, listModels, type Project, type ConvoMeta, type AgentConfig } from "../api";
 import { container, card, btnPrimary, btnDanger, badge, input as inputStyle } from "../styles";
 
@@ -28,6 +28,7 @@ export function ConvoList() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [isCustomAgents, setIsCustomAgents] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const agentsLoaded = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -47,6 +48,9 @@ export function ConvoList() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  const activeConvos = useMemo(() => convos.filter((c) => !c.archived_at), [convos]);
+  const archivedConvos = useMemo(() => convos.filter((c) => c.archived_at), [convos]);
 
   const startProjectRename = () => {
     setEditingProject(true);
@@ -86,12 +90,21 @@ export function ConvoList() {
     if (trimmed) {
       try {
         const updated = await updateConvo(id, { title: trimmed });
-        setConvos((prev) => prev.map((c) => (c.id === id ? { ...c, title: updated.title } : c)));
+        setConvos((prev) => prev.map((c) => (c.id === id ? updated : c)));
       } catch (err: any) {
         setError(err.message);
       }
     }
     setEditingId(null);
+  };
+
+  const handleArchiveToggle = async (convo: ConvoMeta, archived: boolean) => {
+    try {
+      const updated = await updateConvo(convo.id, { archived_at: archived ? new Date().toISOString() : null });
+      setConvos((prev) => prev.map((c) => (c.id === convo.id ? updated : c)));
+    } catch (err: any) {
+      setError(err.message);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -104,7 +117,6 @@ export function ConvoList() {
     }
   };
 
-  // Agent CRUD
   const updateAgent = (idx: number, patch: Partial<AgentConfig>) => {
     setAgents((prev) => prev.map((a, i) => i === idx ? { ...a, ...patch } : a));
   };
@@ -118,7 +130,6 @@ export function ConvoList() {
     setAgents((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  // Auto-save agents after changes (debounced)
   useEffect(() => {
     if (!agentsLoaded.current) { agentsLoaded.current = true; return; }
     if (!projectId) return;
@@ -143,8 +154,82 @@ export function ConvoList() {
     }
   };
 
-  // Available tool names for the tool picker
   const ALL_TOOLS = ["bash", "read_file", "write_file", "edit_file", "glob", "grep", "web_search"];
+
+  const renderConvo = (c: ConvoMeta, archivedView = false) => (
+    <div key={c.id} style={card}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {editingId === c.id ? (
+            <input
+              autoFocus
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={() => saveRename(c.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveRename(c.id);
+                if (e.key === "Escape") setEditingId(null);
+              }}
+              style={{
+                fontWeight: 600,
+                fontSize: "0.875rem",
+                background: "var(--bg)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+                borderRadius: "4px",
+                padding: "1px 6px",
+                outline: "none",
+                minWidth: 0,
+                maxWidth: "16rem",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <>
+              <Link to={`/${projectId}/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {c.title || "Untitled"}
+              </Link>
+              <button
+                onClick={(e) => { e.stopPropagation(); startRename(c); }}
+                data-tooltip="Rename"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "2px",
+                  color: "var(--text-muted)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  opacity: 0.5,
+                  flexShrink: 0,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+              >
+                <Pencil size={13} />
+              </button>
+            </>
+          )}
+          <span style={badge(c.status)}>{c.status}</span>
+        </div>
+        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "2px" }}>
+          {timeAgo(c.updated_at)}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <button
+          style={btnDanger}
+          onClick={() => handleArchiveToggle(c, !archivedView)}
+          title={archivedView ? "Restore conversation" : "Archive conversation"}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+            {archivedView ? <RotateCcw size={13} /> : <Archive size={13} />}
+            {archivedView ? "Restore" : "Archive"}
+          </span>
+        </button>
+        {archivedView && <button style={btnDanger} onClick={() => handleDelete(c.id)}>Delete</button>}
+      </div>
+    </div>
+  );
 
   return (
     <div style={container}>
@@ -204,7 +289,6 @@ export function ConvoList() {
 
       {error && <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>Error: {error}</p>}
 
-      {/* Agents section */}
       <div style={{ marginBottom: "1.5rem" }}>
         <button
           onClick={() => setShowAgents(!showAgents)}
@@ -257,28 +341,24 @@ export function ConvoList() {
                 gap: "8px",
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  {/* Color picker */}
                   <input
                     type="color"
                     value={a.color || "#9b9a97"}
                     onChange={(e) => updateAgent(i, { color: e.target.value })}
                     style={{ width: 24, height: 24, border: "none", padding: 0, cursor: "pointer", background: "none" }}
                   />
-                  {/* ID */}
                   <input
                     value={a.id}
                     onChange={(e) => updateAgent(i, { id: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })}
                     placeholder="id"
                     style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: "0.8rem" }}
                   />
-                  {/* Name */}
                   <input
                     value={a.name}
                     onChange={(e) => updateAgent(i, { name: e.target.value })}
                     placeholder="Display name"
                     style={{ ...inputStyle, flex: 2 }}
                   />
-                  {/* Default toggle */}
                   <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "3px", whiteSpace: "nowrap" }}>
                     <input
                       type="checkbox"
@@ -287,7 +367,6 @@ export function ConvoList() {
                     />
                     default
                   </label>
-                  {/* Delete */}
                   <button
                     onClick={() => removeAgent(i)}
                     style={{ background: "none", border: "none", color: "var(--text-muted)", padding: "2px", display: "flex" }}
@@ -296,7 +375,6 @@ export function ConvoList() {
                   </button>
                 </div>
 
-                {/* Model override */}
                 <select
                   value={a.model || ""}
                   onChange={(e) => updateAgent(i, { model: e.target.value || undefined })}
@@ -308,7 +386,6 @@ export function ConvoList() {
                   ))}
                 </select>
 
-                {/* System prompt */}
                 <textarea
                   value={a.system_prompt || ""}
                   onChange={(e) => updateAgent(i, { system_prompt: e.target.value || undefined })}
@@ -322,7 +399,6 @@ export function ConvoList() {
                   }}
                 />
 
-                {/* Tools */}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
                   <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginRight: "4px" }}>Tools:</span>
                   {ALL_TOOLS.map((t) => {
@@ -332,7 +408,6 @@ export function ConvoList() {
                         key={t}
                         onClick={() => {
                           if (a.tools === null || a.tools === undefined) {
-                            // Currently all — remove this one
                             updateAgent(i, { tools: ALL_TOOLS.filter((x) => x !== t) });
                           } else if (enabled) {
                             const next = a.tools.filter((x) => x !== t);
@@ -385,71 +460,33 @@ export function ConvoList() {
 
       {loading ? (
         <p style={{ color: "var(--text-muted)" }}>Loading...</p>
-      ) : convos.length === 0 ? (
-        <p style={{ color: "var(--text-muted)" }}>No conversations yet.</p>
+      ) : activeConvos.length === 0 ? (
+        <p style={{ color: "var(--text-muted)" }}>No active conversations yet.</p>
       ) : (
-        convos.map((c) => (
-          <div key={c.id} style={card}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                {editingId === c.id ? (
-                  <input
-                    autoFocus
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => saveRename(c.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") saveRename(c.id);
-                      if (e.key === "Escape") setEditingId(null);
-                    }}
-                    style={{
-                      fontWeight: 600,
-                      fontSize: "0.875rem",
-                      background: "var(--bg)",
-                      color: "var(--text)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "4px",
-                      padding: "1px 6px",
-                      outline: "none",
-                      minWidth: 0,
-                      maxWidth: "16rem",
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <>
-                    <Link to={`/${projectId}/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {c.title || "Untitled"}
-                    </Link>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); startRename(c); }}
-                      data-tooltip="Rename"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        padding: "2px",
-                        color: "var(--text-muted)",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        opacity: 0.5,
-                        flexShrink: 0,
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-                      onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
-                    >
-                      <Pencil size={13} />
-                    </button>
-                  </>
-                )}
-                <span style={badge(c.status)}>{c.status}</span>
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "2px" }}>
-                {timeAgo(c.updated_at)}
-              </div>
-            </div>
-            <button style={btnDanger} onClick={() => handleDelete(c.id)}>Delete</button>
-          </div>
-        ))
+        activeConvos.map((c) => renderConvo(c))
+      )}
+
+      {archivedConvos.length > 0 && (
+        <div style={{ marginTop: "1rem" }}>
+          <button
+            onClick={() => setShowArchived(!showArchived)}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              color: "var(--text-muted)",
+              fontSize: "0.85rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              marginBottom: showArchived ? "8px" : 0,
+            }}
+          >
+            {showArchived ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            Archived Conversations ({archivedConvos.length})
+          </button>
+          {showArchived && archivedConvos.map((c) => renderConvo(c, true))}
+        </div>
       )}
     </div>
   );

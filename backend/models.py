@@ -34,6 +34,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     path: Optional[str] = None
+    archived_at: Optional[str] = None
 
 
 class Project(BaseModel):
@@ -41,6 +42,7 @@ class Project(BaseModel):
     name: str
     path: str
     created_at: str
+    archived_at: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +56,7 @@ class ConvoCreate(BaseModel):
 
 class ConvoUpdate(BaseModel):
     title: Optional[str] = None
+    archived_at: Optional[str] = None
 
 
 class ConvoMeta(BaseModel):
@@ -63,6 +66,7 @@ class ConvoMeta(BaseModel):
     status: ConvoStatus = ConvoStatus.idle
     created_at: str
     updated_at: str
+    archived_at: Optional[str] = None
 
 
 class ConvoDetail(ConvoMeta):

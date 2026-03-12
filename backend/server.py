@@ -425,7 +425,10 @@ async def api_get_project(project_id: str):
 
 
 @api.put("/projects/{project_id}", response_model=Project)
-async def api_update_project(project_id: str, body: ProjectUpdate):
+async def api_update_project(project_id: str, body: ProjectUpdate, request: Request):
+    payload = await request.json()
+    if not payload:
+        raise HTTPException(status_code=400, detail="No fields to update")
     proj = storage.update_project(project_id, body)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -465,13 +468,20 @@ async def api_get_convo(convo_id: str):
 
 
 @api.patch("/convos/{convo_id}", response_model=ConvoMeta)
-async def api_update_convo(convo_id: str, body: ConvoUpdate):
-    if body.title is not None:
-        meta = storage.update_conversation_title(convo_id, body.title)
-        if not meta:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        return meta
-    raise HTTPException(status_code=400, detail="No fields to update")
+async def api_update_convo(convo_id: str, body: ConvoUpdate, request: Request):
+    meta = storage._read_meta(convo_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    payload = await request.json()
+    if not payload:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if "title" in payload:
+        meta = storage.update_conversation_title(convo_id, body.title or "Untitled")
+    if "archived_at" in payload:
+        meta = storage.update_conversation_archive(convo_id, body.archived_at)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return meta
 
 
 @api.delete("/convos/{convo_id}", status_code=204)

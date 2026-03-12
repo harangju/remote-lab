@@ -85,6 +85,7 @@ def create_project(data: ProjectCreate) -> Project:
         name=data.name,
         path=data.path,
         created_at=_now(),
+        archived_at=None,
     )
     Path(data.path).mkdir(parents=True, exist_ok=True)
     projects.append(proj.model_dump())
@@ -100,6 +101,8 @@ def update_project(project_id: str, data: ProjectUpdate) -> Project | None:
                 p["name"] = data.name
             if data.path is not None:
                 p["path"] = data.path
+            if "archived_at" in data.model_fields_set:
+                p["archived_at"] = data.archived_at
             _write_projects(projects)
             return Project(**p)
     return None
@@ -263,6 +266,7 @@ def create_conversation(project_id: str, title: str | None = None) -> ConvoMeta:
         status=ConvoStatus.idle,
         created_at=now,
         updated_at=now,
+        archived_at=None,
     )
     _write_meta(meta)
     # Create empty JSONL file
@@ -315,6 +319,16 @@ def update_conversation_status(convo_id: str, status: ConvoStatus) -> ConvoMeta 
     if meta is None:
         return None
     meta.status = status
+    meta.updated_at = _now()
+    _write_meta(meta)
+    return meta
+
+
+def update_conversation_archive(convo_id: str, archived_at: str | None) -> ConvoMeta | None:
+    meta = _read_meta(convo_id)
+    if meta is None:
+        return None
+    meta.archived_at = archived_at
     meta.updated_at = _now()
     _write_meta(meta)
     return meta
