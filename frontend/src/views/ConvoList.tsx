@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Pencil, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
-import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, type Project, type ConvoMeta, type AgentConfig } from "../api";
+import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, listModels, type Project, type ConvoMeta, type AgentConfig } from "../api";
 import { container, card, btnPrimary, btnDanger, badge, input as inputStyle } from "../styles";
 
 function timeAgo(iso: string): string {
@@ -28,17 +28,21 @@ export function ConvoList() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [isCustomAgents, setIsCustomAgents] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
-  const [agentSaving, setAgentSaving] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const agentsLoaded = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
-    Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId)])
-      .then(([p, c, agentRes]) => {
+    Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId), listModels()])
+      .then(([p, c, agentRes, m]) => {
         setProject(p);
         setConvos(c);
+        agentsLoaded.current = false;
         setAgents(agentRes.agents);
         setIsCustomAgents(agentRes.custom);
+        setAvailableModels(m.models);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -114,19 +118,18 @@ export function ConvoList() {
     setAgents((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const persistAgents = async () => {
+  // Auto-save agents after changes (debounced)
+  useEffect(() => {
+    if (!agentsLoaded.current) { agentsLoaded.current = true; return; }
     if (!projectId) return;
-    setAgentSaving(true);
-    try {
-      const saved = await saveProjectAgents(projectId, agents);
-      setAgents(saved);
-      setIsCustomAgents(true);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setAgentSaving(false);
-    }
-  };
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveProjectAgents(projectId, agents)
+        .then(() => setIsCustomAgents(true))
+        .catch((err) => setError(err.message));
+    }, 500);
+    return () => clearTimeout(saveTimer.current);
+  }, [agents, projectId]);
 
   const revertToGlobal = async () => {
     if (!projectId) return;
@@ -266,14 +269,14 @@ export function ConvoList() {
                     value={a.id}
                     onChange={(e) => updateAgent(i, { id: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })}
                     placeholder="id"
-                    style={{ ...inputStyle, width: "80px", fontFamily: "monospace", fontSize: "0.8rem" }}
+                    style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: "0.8rem" }}
                   />
                   {/* Name */}
                   <input
                     value={a.name}
                     onChange={(e) => updateAgent(i, { name: e.target.value })}
                     placeholder="Display name"
-                    style={{ ...inputStyle, flex: 1 }}
+                    style={{ ...inputStyle, flex: 2 }}
                   />
                   {/* Default toggle */}
                   <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "3px", whiteSpace: "nowrap" }}>
@@ -292,6 +295,18 @@ export function ConvoList() {
                     <Trash2 size={14} />
                   </button>
                 </div>
+
+                {/* Model override */}
+                <select
+                  value={a.model || ""}
+                  onChange={(e) => updateAgent(i, { model: e.target.value || undefined })}
+                  style={{ ...inputStyle, fontSize: "0.8rem", cursor: "pointer", paddingRight: "28px", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}
+                >
+                  <option value="">Global model (default)</option>
+                  {availableModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
 
                 {/* System prompt */}
                 <textarea
@@ -362,18 +377,6 @@ export function ConvoList() {
                 }}
               >
                 <Plus size={14} /> Add Agent
-              </button>
-              <button
-                onClick={persistAgents}
-                disabled={agentSaving}
-                style={{
-                  ...btnPrimary,
-                  fontSize: "0.8rem",
-                  padding: "4px 10px",
-                  opacity: agentSaving ? 0.5 : 1,
-                }}
-              >
-                {agentSaving ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

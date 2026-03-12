@@ -6,7 +6,7 @@ A web-based AI coding assistant with a chat UI, file editor, and agentic tool us
 
 - **Backend**: Python, FastAPI, PydanticAI, uvicorn
 - **Frontend**: React + TypeScript, built with Bun
-- **LLM**: Claude Sonnet (primary), with OpenAI/Google fallback
+- **LLM**: Claude Sonnet 4.6 (default), Opus 4.6, GPT-5.4, GPT-5-nano, Gemini 2.5 Flash — switchable globally via `/model` or per-agent
 - **Storage**: JSON files in `data/` (no database)
 - **Reverse proxy**: Caddy (HTTPS + WebSocket)
 - **Process**: systemd (`remote-lab.service`)
@@ -55,6 +55,7 @@ frontend/
 - **Context compaction**: When context exceeds 80% of the model's limit, older messages are summarized and replaced.
 - **Code splitting**: Bun builds with `splitting: true` — CodeMirror is lazy-loaded as a separate chunk (~570KB).
 - **Project scoping**: Each project points to a directory on disk. The agent's working directory is set to the project path. Tools are sandboxed to that directory.
+- **Model selection**: Global model switchable via `/model` command in chat. Per-agent model override available in agent config (falls back to global model when unset). Available models determined by which API keys are set in the environment.
 
 ## Data Layout
 

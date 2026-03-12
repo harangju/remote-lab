@@ -448,6 +448,15 @@ async def api_delete_convo(convo_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
 
+# -- Models ------------------------------------------------------------------
+
+@api.get("/models")
+async def api_list_models():
+    """List available models."""
+    from backend.agents import _available, active_model
+    return {"models": _available, "active": active_model}
+
+
 # -- Agents ------------------------------------------------------------------
 
 @api.get("/agents")
