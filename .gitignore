@@ -11,3 +11,4 @@ frontend/bun.lock
 .remote-lab-tools.json
 public/*
 !public/example.md
+!public/.access.example.json
