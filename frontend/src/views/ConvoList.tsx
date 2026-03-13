@@ -159,57 +159,59 @@ export function ConvoList() {
   const renderConvo = (c: ConvoMeta, archivedView = false) => (
     <div key={c.id} style={{ ...card, gap: "12px", padding: "14px 16px", alignItems: "flex-start" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flexWrap: "wrap" }}>
-          {editingId === c.id ? (
-            <input
-              autoFocus
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={() => saveRename(c.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveRename(c.id);
-                if (e.key === "Escape") setEditingId(null);
-              }}
-              style={{
-                fontWeight: 600,
-                fontSize: "0.875rem",
-                background: "var(--bg)",
-                color: "var(--text)",
-                border: "1px solid var(--border)",
-                borderRadius: "4px",
-                padding: "1px 6px",
-                outline: "none",
-                minWidth: 0,
-                maxWidth: "16rem",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <>
-              <Link to={`/${projectId}/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", minWidth: 0, flex: 1 }}>
-                {c.title || "Untitled"}
-              </Link>
-              <button
-                onClick={(e) => { e.stopPropagation(); startRename(c); }}
-                data-tooltip="Rename"
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: "2px",
-                  color: "var(--text-muted)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  opacity: 0.5,
-                  flexShrink: 0,
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", minWidth: 0, maxWidth: "100%" }}>
+            {editingId === c.id ? (
+              <input
+                autoFocus
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={() => saveRename(c.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveRename(c.id);
+                  if (e.key === "Escape") setEditingId(null);
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
-              >
-                <Pencil size={13} />
-              </button>
-            </>
-          )}
-          <span style={badge(c.status)}>{c.status}</span>
+                style={{
+                  fontWeight: 600,
+                  fontSize: "0.875rem",
+                  background: "var(--bg)",
+                  color: "var(--text)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "4px",
+                  padding: "1px 6px",
+                  outline: "none",
+                  minWidth: 0,
+                  maxWidth: "16rem",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <>
+                <Link to={`/${projectId}/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", minWidth: 0, maxWidth: "100%" }}>
+                  {c.title || "Untitled"}
+                </Link>
+                <button
+                  onClick={(e) => { e.stopPropagation(); startRename(c); }}
+                  data-tooltip="Rename"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: "2px",
+                    color: "var(--text-muted)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    opacity: 0.5,
+                    flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+                >
+                  <Pencil size={13} />
+                </button>
+              </>
+            )}
+          </div>
+          <span style={{ ...badge(c.status), flexShrink: 0 }}>{c.status}</span>
         </div>
         <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "4px" }}>
           {timeAgo(c.updated_at)}
@@ -261,8 +263,8 @@ export function ConvoList() {
               }}
             />
           ) : (
-            <>
-              <h1 title={project?.name ?? "Project"} style={{ margin: 0, fontSize: "1.5rem", minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project?.name ?? "Project"}</h1>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", minWidth: 0, maxWidth: "100%", flex: 1 }}>
+              <h1 title={project?.name ?? "Project"} style={{ margin: 0, fontSize: "1.5rem", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project?.name ?? "Project"}</h1>
               <button
                 onClick={startProjectRename}
                 data-tooltip="Rename"
@@ -281,7 +283,7 @@ export function ConvoList() {
               >
                 <Pencil size={15} />
               </button>
-            </>
+            </div>
           )}
         </div>
         <button style={btnPrimary} onClick={handleNew}>New Conversation</button>
