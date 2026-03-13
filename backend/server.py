@@ -1077,6 +1077,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
             if session.run and session.run.run_id == run.run_id and session.run.status != "running":
                 session.controller = None
+                session.run = None
 
     except WebSocketDisconnect:
         run = session.run

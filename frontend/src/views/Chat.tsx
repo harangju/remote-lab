@@ -856,7 +856,6 @@ export function Chat() {
           }]);
           setWaitingForModel(false);
           setBusy(false);
-          setCurrentRunId(null);
           break;
         case "skill-result":
           setMessages((msgs) => [...msgs, {
@@ -880,6 +879,7 @@ export function Chat() {
           setThinking(false);
           setWaitingForModel(false);
           setBusy(false);
+          setCurrentRunId(null);
           break;
       }
     });
@@ -889,7 +889,6 @@ export function Chat() {
       setBusy(false);
       setWaitingForModel(false);
       setThinking(false);
-      setCurrentRunId(null);
       setCurrentRunId(null);
       if (event.code !== 1000 && event.code !== 4409) {
         reconnectTimer.current = window.setTimeout(
@@ -903,6 +902,7 @@ export function Chat() {
       setBusy(false);
       setWaitingForModel(false);
       setThinking(false);
+      setCurrentRunId(null);
     });
 
     return () => {
