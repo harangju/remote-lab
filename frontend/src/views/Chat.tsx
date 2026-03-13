@@ -452,12 +452,14 @@ function makeMdComponents(onOpenSnippet?: (code: string, language: string) => vo
       <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>{children}</a>
     ),
     table: ({ children }: any) => (
-      <table style={{
-        borderCollapse: "collapse",
-        width: "100%",
-        margin: "6px 0",
-        fontSize: "0.85rem",
-      }}>{children}</table>
+      <div style={{ overflowX: "auto", margin: "6px 0" }}>
+        <table style={{
+          borderCollapse: "collapse",
+          width: "100%",
+          minWidth: "max-content",
+          fontSize: "0.85rem",
+        }}>{children}</table>
+      </div>
     ),
     th: ({ children }: any) => (
       <th style={{
@@ -503,6 +505,10 @@ const MAX_USER_MESSAGE_TOP_OFFSET_PX = 72;
 const USER_MESSAGE_TOP_OFFSET_VH = 0.08;
 const MIN_BOTTOM_SLACK_PX = 80;
 const BOTTOM_SLACK_VH = 0.12;
+const CHAT_HEADER_MAX_WIDTH = "64rem";
+const CHAT_MESSAGES_MAX_WIDTH = "64rem";
+const CHAT_INPUT_MAX_WIDTH = "64rem";
+const MESSAGE_MAX_WIDTH = "92%";
 
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
@@ -1290,7 +1296,7 @@ export function Chat() {
 
   // Styles
   const msgBubble = useCallback((role: "user" | "assistant", agentColor?: string): React.CSSProperties => ({
-    maxWidth: "85%",
+    maxWidth: MESSAGE_MAX_WIDTH,
     padding: "10px 14px",
     borderRadius: "12px",
     marginBottom: "2px",
@@ -1372,7 +1378,7 @@ export function Chat() {
       }}>
         {/* Header */}
         <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-        <div style={{ padding: "12px 1.5rem", maxWidth: "48rem", margin: "0 auto" }}>
+        <div style={{ padding: "12px 1.5rem", maxWidth: CHAT_HEADER_MAX_WIDTH, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
             <Link to={`/${projectId}`} style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.1rem" }} title="Conversations">&larr;</Link>
             <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0, flexShrink: 1 }}>
@@ -1474,7 +1480,7 @@ export function Chat() {
 
         {/* Messages */}
         <div ref={messageListRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px", maxWidth: "48rem", width: "100%", margin: "0 auto", flex: 1 }}>
+        <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px", maxWidth: CHAT_MESSAGES_MAX_WIDTH, width: "100%", margin: "0 auto", flex: 1 }}>
           {messages.map((m, i) => (
             <React.Fragment key={i}>
               {m.role === "assistant" && m.agent_name && (
@@ -1503,12 +1509,12 @@ export function Chat() {
                     <ApprovalCard block={b} onRespond={handleToolApproval} />
                   </div>
                 ) : b.type === "tool" ? (
-                  <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+                  <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
                     <ToolChip tool={b} onOpenFile={handleOpenFile} />
                   </div>
                 ) : b.type === "text" && b.content ? (
                   m.role === "assistant" ? (
-                    <div key={j} style={{ position: "relative", maxWidth: "85%", alignSelf: "flex-start" }}>
+                    <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
                       <div style={{ ...msgBubble("assistant", m.agent_color), maxWidth: "100%", paddingRight: "42px" }}>
                         <MdContent text={b.content} />
                       </div>
@@ -1668,11 +1674,11 @@ export function Chat() {
                 <ApprovalCard block={b} onRespond={handleToolApproval} />
               </div>
             ) : b.type === "tool" ? (
-              <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: "85%" }}>
+              <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
                 <ToolChip tool={b} live={!b.output} onOpenFile={handleOpenFile} />
               </div>
             ) : b.type === "text" && b.content ? (
-              <div key={j} style={{ position: "relative", maxWidth: "85%", alignSelf: "flex-start" }}>
+              <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
                 <div style={{ ...msgBubble("assistant", activeAgent?.color), maxWidth: "100%", paddingRight: "42px" }}>
                   <MdContent text={b.content} />
                 </div>
@@ -1719,7 +1725,7 @@ export function Chat() {
 
         {/* Input */}
         <div style={{ flexShrink: 0, padding: "0 1.5rem 12px" }}>
-        <div style={{ position: "relative", maxWidth: "48rem", width: "100%", margin: "0 auto" }}>
+        <div style={{ position: "relative", maxWidth: CHAT_INPUT_MAX_WIDTH, width: "100%", margin: "0 auto" }}>
           {/* /slash command autocomplete dropdown */}
           {slashQuery !== null && slashMatches.length > 0 && (
             <div style={{
