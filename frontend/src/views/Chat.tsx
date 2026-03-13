@@ -494,10 +494,8 @@ function MdContent({ text, onOpenSnippet }: { text: string; onOpenSnippet?: (cod
 const MIN_USER_MESSAGE_TOP_OFFSET_PX = 24;
 const MAX_USER_MESSAGE_TOP_OFFSET_PX = 72;
 const USER_MESSAGE_TOP_OFFSET_VH = 0.08;
-const MIN_IDLE_BOTTOM_SLACK_PX = 80;
-const IDLE_BOTTOM_SLACK_VH = 0.12;
-const MIN_ACTIVE_BOTTOM_SLACK_PX = 160;
-const ACTIVE_BOTTOM_SLACK_VH = 0.28;
+const MIN_BOTTOM_SLACK_PX = 80;
+const BOTTOM_SLACK_VH = 0.12;
 
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
@@ -552,11 +550,8 @@ export function Chat() {
 
   const bottomSlackPx = useMemo(() => {
     const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
-    if (busy || waitingForModel || thinking || streamBlocks.length > 0) {
-      return Math.max(MIN_ACTIVE_BOTTOM_SLACK_PX, viewportHeight * ACTIVE_BOTTOM_SLACK_VH);
-    }
-    return Math.max(MIN_IDLE_BOTTOM_SLACK_PX, viewportHeight * IDLE_BOTTOM_SLACK_VH);
-  }, [busy, waitingForModel, thinking, streamBlocks.length]);
+    return Math.max(MIN_BOTTOM_SLACK_PX, viewportHeight * BOTTOM_SLACK_VH);
+  }, []);
 
   const scrollUserMessageNearTop = useCallback((messageEl: HTMLDivElement | null, behavior: ScrollBehavior = "smooth") => {
     const container = messageListRef.current;
