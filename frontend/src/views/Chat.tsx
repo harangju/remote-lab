@@ -1598,18 +1598,15 @@ export function Chat() {
             <div style={{
               alignSelf: "flex-start",
               padding: "10px 14px",
-              fontSize: "0.85rem",
               color: "var(--text-muted)",
               display: "flex",
               alignItems: "center",
-              gap: "6px",
             }}>
-              <span style={{ display: "inline-flex", gap: "3px" }}>
-                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0s" }}>.</span>
-                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.2s" }}>.</span>
-                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.4s" }}>.</span>
+              <span style={{ display: "inline-flex", gap: "5px", fontSize: "1.05rem", fontWeight: 600, lineHeight: 1, opacity: 0.9 }}>
+                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0s" }}>•</span>
+                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.2s" }}>•</span>
+                <span style={{ animation: "pulse 1.2s infinite", animationDelay: "0.4s" }}>•</span>
               </span>
-              <span>{thinking ? "Thinking" : "Working..."}</span>
             </div>
           )}
 
