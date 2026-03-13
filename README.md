@@ -1,279 +1,109 @@
 # remote-lab
 
-A personal remote development lab. Two services on one VPS:
+**Remote Lab — a self-hosted, self-hackable, agentic chat+file workspace.**
 
-- **`lab.harangju.com`** — AI coding assistant with chat UI, file editor, and agentic tool use
-- **`docs.harangju.com`** — Markdown and HTML document server with access control
+Remote Lab is for people who want AI to work in a **real environment**, not in a disposable chat or a job queue.
 
-## How it works
+It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, and even improve Remote Lab from inside Remote Lab.
 
-```
-browser → Caddy (HTTPS, port 443) → lab (port 3000) or docs (port 3001)
-```
+The detailed setup and usage docs live in [`docs/`](docs/docs/).
 
-### Lab (`backend/server.py`)
+## Why this exists
 
-- **`backend/server.py`** — FastAPI app. REST API, WebSocket chat, React frontend serving.
-- **`backend/agents.py`** — PydanticAI agent with multi-provider fallback. System prompt sandboxing and usage limits.
-- **`backend/tools.py`** — Server-side tools: bash, read/write/edit files, glob, grep.
-- **`backend/protocol.py`** — Pydantic models for WebSocket chat events.
-- **`backend/models.py`** — Pydantic models for REST API (projects, conversations).
-- **`backend/storage.py`** — Flat-file storage for projects and conversations.
-- **`frontend/`** — React + TypeScript chat UI, built with Bun.
+Most AI tools split into a few camps:
 
-### Docs (`backend/docs_server.py`)
+- **chat apps** — conversational, but disconnected from your files and machine
+- **local coding tools** — powerful, but tied to one session on one computer
+- **agent runners** — persistent, but often feel like job queues or message-bot wrappers
 
-- **`backend/docs_server.py`** — Standalone FastAPI app. Renders markdown as HTML, serves `.html` files as-is, serves static assets.
-- **`docs/`** — Drop `.md` or `.html` files here. They show up on the index page sorted by last modified.
+Remote Lab tries to combine the best parts:
 
-### Shared
+- **conversational like Claude/ChatGPT**
+- **acts on real files like Claude Code**
+- **persistent and remote like self-hosted agent systems**
 
-- **`Caddyfile`** — Reference copy. The live one is at `/etc/caddy/Caddyfile`.
+## What makes it useful
 
-## Routes
+### 1. It’s a real workspace, not just a chat
 
-### Lab (`lab.harangju.com`)
+You don’t just send prompts. You chat, inspect files, edit files, and watch work happen in one place.
 
-| Route | What it does |
-|-------|-------------|
-| `/` | React chat UI (requires `WS_TOKEN` env var) |
-| `/api/projects` | REST API for project management |
-| `/api/ws/{convo_id}` | WebSocket endpoint for agent chat (requires auth) |
+That makes it useful for more than coding:
+- writing
+- research
+- docs
+- repo maintenance
+- debugging
+- ops work
+- any other file-based work
 
-### Docs (`docs.harangju.com`)
+### 2. It keeps running after you leave
 
-| Route | What it does |
-|-------|-------------|
-| `/` | Lists all `.md` and `.html` files in `docs/`, sorted by last modified |
-| `/:slug` | Renders `docs/{slug}.md` as HTML, or serves `docs/{slug}.html` as-is |
+Remote Lab is built for **asynchronous work**.
 
-## What's in the docs HTML template
+Give an agent something to do, close the browser, come back later, and continue from the same conversation. You can review what happened, redirect it, or send it off again.
 
-- **MathJax v3** — renders LaTeX math. Inline `$...$` and display `$$...$$`.
-- **Hypothesis** — adds inline annotation/commenting sidebar (via hypothes.is embed script).
-- **Responsive CSS** — mobile-friendly, dark mode via `prefers-color-scheme`.
+### 3. It works on your actual machine
 
-## Setup
+Agents can operate on your real project directory with real shell tools.
 
-### 1. Install dependencies
+That means:
+- real files
+- real git repos
+- real bash
+- real outputs you can keep, diff, commit, or publish
 
-```bash
-uv sync
-cd frontend && bun install && bun run build
-```
+### 4. It’s conversational, but not chat-only
 
-### 2. Configure environment
+The interface is a hybrid: chat for direction, files for inspection and editing.
 
-```bash
-cp .env.example .env
-```
+That’s the sweet spot between:
+- a pure chat box with no access to the work
+- a traditional app UI with no flexible conversation layer
 
-Fill in your API keys and token:
+### 5. It’s self-hosted and minimal
 
-```
-WS_TOKEN=<generate with: openssl rand -hex 32>
-ALLOWED_ORIGIN=https://lab.harangju.com
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=AI...
-GH_TOKEN=ghp_...        # optional, gives agent gh CLI access
-```
+Remote Lab is meant to be personal infrastructure.
 
-At least one LLM API key is required. The agent uses dynamic fallback based on available API keys.
+- runs on a cheap VPS
+- no database
+- flat-file storage
+- small dependency footprint
+- simple enough to understand and modify
 
-### 3. Run locally
+### 6. It’s self-hackable
 
-```bash
-uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000       # lab
-uv run uvicorn backend.docs_server:app --host 0.0.0.0 --port 3001  # docs
-```
+One of the coolest parts is that you can improve Remote Lab **from inside itself**.
 
-## Adding documents
+You can use Remote Lab to edit Remote Lab, test changes, and iterate on the system while working in it.
 
-Drop a markdown or HTML file in `docs/`:
+## The sharp positioning
 
-```bash
-cp ~/notes.md /srv/remote-lab/docs/
-cp ~/page.html /srv/remote-lab/docs/
-```
+Remote Lab is for people who want:
 
-Or symlink from another repo:
+- the **conversational feel** of a chat app
+- the **real file/shell access** of local agent tools
+- the **persistence** of a remote self-hosted system
+- without being forced into Slack/Telegram-style control loops or heavy orchestration
 
-```bash
-ln -s /path/to/other-repo/paper.md /srv/remote-lab/docs/paper.md
-```
+## What’s included
 
-## Services
+- persistent agent conversations
+- chat UI with streaming responses
+- file panel/editor
+- project-scoped bash and file tools
+- multi-agent workflows with @mentions
+- mobile-friendly remote access
+- built-in docs publishing
+- flat-file storage, no database
+- self-hosted deployment on your own VPS
 
-Three systemd services run this:
+## Start here
 
-### remote-lab (the chat/agent app)
+- **Docs home:** [`docs/docs/index.md`](docs/docs/index.md)
+- **Setup:** [`docs/docs/setup.md`](docs/docs/setup.md)
+- **Usage:** [`docs/docs/usage.md`](docs/docs/usage.md)
 
-```
-/etc/systemd/system/remote-lab.service
-```
+## The short version
 
-```ini
-[Unit]
-Description=remote-lab
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/srv/remote-lab
-EnvironmentFile=/srv/remote-lab/.env
-ExecStart=/usr/local/bin/uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl status remote-lab     # check status
-systemctl restart remote-lab    # restart after code changes
-journalctl -u remote-lab -f     # tail logs
-```
-
-### remote-lab-docs (the document server)
-
-```
-/etc/systemd/system/remote-lab-docs.service
-```
-
-```ini
-[Unit]
-Description=remote-lab-docs
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/srv/remote-lab
-EnvironmentFile=/srv/remote-lab/.env
-ExecStart=/usr/local/bin/uv run uvicorn backend.docs_server:app --host 0.0.0.0 --port 3001
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl status remote-lab-docs
-systemctl restart remote-lab-docs
-journalctl -u remote-lab-docs -f
-```
-
-### Caddy (reverse proxy + HTTPS)
-
-```
-/etc/caddy/Caddyfile
-```
-
-Caddy routes each subdomain to its backend and auto-provisions Let's Encrypt TLS certs.
-
-```bash
-systemctl status caddy
-systemctl reload caddy           # reload after Caddyfile changes
-journalctl -u caddy -f
-```
-
-## Domain setup
-
-Point two A records at your server IP — Caddy handles HTTPS automatically.
-
-1. Add A records: `lab.yourdomain.com` and `docs.yourdomain.com` → `<your-server-ip>`
-2. Update the `Caddyfile` with your domains
-3. Reload Caddy: `systemctl reload caddy`
-
-## Access control
-
-Restrict access to individual documents using `docs/.access.json`. Documents not listed are public.
-
-```json
-{
-  "my-private-doc": ["tok_abc123", "tok_def456"],
-  "another-doc": ["tok_abc123"]
-}
-```
-
-Each key is a document slug, and the value is a list of tokens that grant access. Share the secret link:
-
-```
-https://docs.harangju.com/my-private-doc?t=tok_abc123
-```
-
-Tokens also work via `Authorization: Bearer tok_abc123` header.
-
-Generate a token:
-
-```bash
-openssl rand -hex 16
-```
-
-Restricted documents are hidden from the index unless the viewer has a valid token.
-
-## Chat
-
-Visit `https://lab.harangju.com` and enter the token when prompted. It's saved in `localStorage` for subsequent visits.
-
-### Projects and conversations
-
-Create projects to scope agent work to specific directories. Each project can have multiple conversations with persistent history stored as JSONL.
-
-### Multi-provider fallback
-
-The agent dynamically selects providers based on available API keys in `.env`. Configure which providers are available by setting their API keys.
-
-### Agent tools
-
-The agent has access to server-side tools, scoped to the project's directory:
-
-| Tool | What it does |
-|------|-------------|
-| `bash` | Run shell commands |
-| `read_file` | Read file contents |
-| `write_file` | Create or overwrite files |
-| `edit_file` | Find-and-replace in files |
-| `glob` | Find files by pattern |
-| `grep` | Search file contents with ripgrep |
-
-### How auth works
-
-- REST API uses `Authorization: Bearer` header
-- On WebSocket connect, the client sends `{"type":"auth","token":"..."}` as the first message
-- Server validates with constant-time comparison (`hmac.compare_digest`)
-- Invalid token closes the connection with code 4401
-- `ALLOWED_ORIGIN` rejects cross-origin WebSocket upgrades (prevents CSWSH)
-- Multi-tab chat is not supported yet: only one active WebSocket client is supported at a time, so opening the same lab session in another tab may disconnect the first tab or show only one tab as connected
-- Usage limits cap the number of LLM requests per conversation turn
-- System prompt guardrails prevent the agent from reading env vars, system configs, or making external network requests
-- Symlinks in `docs/` are validated — resolved path must stay inside the docs directory
-
-## Security
-
-Lock down the server to only what's needed — SSH for access and HTTPS for traffic.
-
-```bash
-ufw default deny incoming    # block ALL incoming traffic by default
-ufw allow 22                 # then poke a hole for SSH
-ufw allow 443                # and a hole for HTTPS
-ufw enable                   # turn on the firewall
-apt install fail2ban         # auto-bans IPs after repeated failed SSH attempts
-```
-
-## Dependencies
-
-- **Runtime:** Python 3.11+, [uv](https://docs.astral.sh/uv/), [Bun](https://bun.sh/) (for frontend)
-- **Python:** `pydantic-ai` (agent framework), `fastapi` (web server), `uvicorn` (ASGI server), `markdown` (rendering), `python-dotenv` (env config)
-- **Frontend:** React, React Router, react-markdown
-- **System:** `caddy` (reverse proxy), `ripgrep` (for grep tool)
-
-### Install system dependencies
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-curl -fsSL https://bun.sh/install | bash
-apt install ripgrep caddy
-```
+Remote Lab is a **self-hosted, self-hackable, agentic chat+file workspace** for real work on a real machine.
