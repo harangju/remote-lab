@@ -267,6 +267,7 @@ def create_conversation(project_id: str, title: str | None = None) -> ConvoMeta:
         created_at=now,
         updated_at=now,
         archived_at=None,
+        autonomous_tools_enabled=False,
     )
     _write_meta(meta)
     # Create empty JSONL file
@@ -329,6 +330,16 @@ def update_conversation_archive(convo_id: str, archived_at: str | None) -> Convo
     if meta is None:
         return None
     meta.archived_at = archived_at
+    meta.updated_at = _now()
+    _write_meta(meta)
+    return meta
+
+
+def update_conversation_autonomy(convo_id: str, enabled: bool) -> ConvoMeta | None:
+    meta = _read_meta(convo_id)
+    if meta is None:
+        return None
+    meta.autonomous_tools_enabled = enabled
     meta.updated_at = _now()
     _write_meta(meta)
     return meta

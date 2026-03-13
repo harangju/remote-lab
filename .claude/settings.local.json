@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(systemctl restart:*)",
+      "Bash(journalctl:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(systemctl status:*)",
+      "Bash(python3:*)",
+      "Bash(apt list:*)",
+      "WebSearch",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:ai-sdk.dev)",
+      "WebFetch(domain:github.com)",
+      "Bash(git remote get-url:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(bun add:*)",
+      "Bash(bun -e:*)",
+      "Bash(bun build:*)",
+      "Bash(gh issue view:*)",
+      "Bash(# Test 6: Restart with ALLOWED_ORIGIN set, test bad origin gets 403 lsof -ti:3000)",
+      "Bash(git mv:*)",
+      "Bash(bun create:*)",
+      "Bash(bun run:*)",
+      "WebFetch(domain:www.shadcn.io)",
+      "Bash(ls -t /srv/remote-lab/data/conversations/*.jsonl | head -3)",
+      "Read(//root/.claude/**)",
+      "Bash(sudo systemctl:*)",
+      "Bash(gh issue:*)",
+      "Bash(uv run:*)",
+      "Bash(bun x)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Read(//etc/systemd/system/**)",
+      "WebFetch(domain:harangju.github.io)",
+      "Bash(sudo journalctl:*)"
+    ]
+  }
+}

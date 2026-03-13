@@ -18,6 +18,7 @@ export interface ConvoMeta {
   created_at: string;
   updated_at: string;
   archived_at?: string | null;
+  autonomous_tools_enabled?: boolean;
 }
 
 export interface ConvoDetail extends ConvoMeta {
@@ -142,7 +143,7 @@ export function getConvo(convoId: string): Promise<ConvoDetail> {
   return request(`/convos/${convoId}`);
 }
 
-export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null }): Promise<ConvoMeta> {
+export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null; autonomous_tools_enabled?: boolean }): Promise<ConvoMeta> {
   return request(`/convos/${convoId}`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -240,7 +241,7 @@ export type WsEvent =
   | { type: "text-delta"; delta: string; agent_id?: string }
   | { type: "tool-use"; name: string; input?: string; agent_id?: string }
   | { type: "tool-result"; name: string; output: string; agent_id?: string }
-  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; agent_id?: string }
+  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; agent_id?: string; can_allow_conversation?: boolean; can_allow_project?: boolean }
   | { type: "done"; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "skill-result"; skill: string; output: string }
