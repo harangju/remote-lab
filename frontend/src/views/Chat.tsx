@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMe
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Bot } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, type WsEvent, type AgentConfig, type Skill } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
@@ -20,10 +20,12 @@ interface ToolCall {
   output?: string;
 }
 
+type ApprovalScope = "once" | "conversation" | "project";
+
 type StreamBlock =
   | { type: "text"; content: string }
   | { type: "tool"; name: string; input?: string; output?: string }
-  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied" };
+  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied"; canAllowConversation?: boolean; canAllowProject?: boolean; approvedScope?: ApprovalScope };
 
 interface DisplayMessage {
   role: "user" | "assistant";
@@ -210,7 +212,7 @@ function ToolChip({ tool, live, onOpenFile }: {
 
 function ApprovalCard({ block, onRespond }: {
   block: Extract<StreamBlock, { type: "tool-confirm" }>;
-  onRespond: (toolCallId: string, approved: boolean) => void;
+  onRespond: (toolCallId: string, approved: boolean, scope?: ApprovalScope) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isPending = block.status === "pending";
@@ -250,7 +252,7 @@ function ApprovalCard({ block, onRespond }: {
           {isPending ? (
             <>
               <button
-                onClick={() => onRespond(block.tool_call_id, true)}
+                onClick={() => onRespond(block.tool_call_id, true, "once")}
                 style={{
                   background: "var(--accent)",
                   color: "#fff",
@@ -268,10 +270,56 @@ function ApprovalCard({ block, onRespond }: {
                   flexShrink: 0,
                 }}
               >
-                <ShieldCheck size={12} /> Allow
+                <ShieldCheck size={12} /> Allow once
               </button>
+              {block.canAllowConversation && (
+                <button
+                  onClick={() => onRespond(block.tool_call_id, true, "conversation")}
+                  style={{
+                    background: "transparent",
+                    color: "var(--text-muted)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "5px",
+                    padding: "3px 10px",
+                    fontSize: "0.75rem",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "4px",
+                    minHeight: "22px",
+                    boxSizing: "border-box",
+                    flexShrink: 0,
+                  }}
+                >
+                  <ShieldCheck size={12} /> Allow in convo
+                </button>
+              )}
+              {block.canAllowProject && (
+                <button
+                  onClick={() => onRespond(block.tool_call_id, true, "project")}
+                  style={{
+                    background: "transparent",
+                    color: "var(--text-muted)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "5px",
+                    padding: "3px 10px",
+                    fontSize: "0.75rem",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "4px",
+                    minHeight: "22px",
+                    boxSizing: "border-box",
+                    flexShrink: 0,
+                  }}
+                >
+                  <ShieldCheck size={12} /> Allow in project
+                </button>
+              )}
               <button
-                onClick={() => onRespond(block.tool_call_id, false)}
+                onClick={() => onRespond(block.tool_call_id, false, "once")}
                 style={{
                   background: "transparent",
                   color: "var(--text-muted)",
@@ -448,6 +496,8 @@ export function Chat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState<MetaInfo | null>(null);
+  const [autonomousToolsEnabled, setAutonomousToolsEnabled] = useState(false);
+  const [savingAutonomy, setSavingAutonomy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [title, setTitle] = useState("Untitled");
@@ -601,6 +651,7 @@ export function Chat() {
         const agentList = agentRes.agents;
         setAgents(agentList);
         setTitle(detail.title || "Untitled");
+        setAutonomousToolsEnabled(!!detail.autonomous_tools_enabled);
         const msgs: DisplayMessage[] = [];
         let pendingBlocks: StreamBlock[] = [];
 
@@ -746,6 +797,8 @@ export function Chat() {
             name: data.name,
             args: data.args,
             status: "pending" as const,
+            canAllowConversation: data.can_allow_conversation !== false,
+            canAllowProject: data.can_allow_project !== false,
           }];
           setStreamBlocks(blocksRef.current);
           break;
@@ -850,6 +903,20 @@ export function Chat() {
     }
     setEditing(false);
   };
+
+  const toggleAutonomy = useCallback(async () => {
+    if (!convId || savingAutonomy) return;
+    const next = !autonomousToolsEnabled;
+    setSavingAutonomy(true);
+    try {
+      const updated = await updateConvo(convId, { autonomous_tools_enabled: next });
+      setAutonomousToolsEnabled(!!updated.autonomous_tools_enabled);
+    } catch (e: any) {
+      setError(e.message || "Failed to update autonomous mode");
+    } finally {
+      setSavingAutonomy(false);
+    }
+  }, [convId, autonomousToolsEnabled, savingAutonomy]);
 
   // @mention autocomplete filtering (agents + files)
   type MentionMatch =
@@ -1010,15 +1077,18 @@ export function Chat() {
     setWaitingForModel(false);
   };
 
-  const handleToolApproval = useCallback((toolCallId: string, approved: boolean) => {
+  const handleToolApproval = useCallback((toolCallId: string, approved: boolean, scope: ApprovalScope = "once") => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "tool-confirm-response", tool_call_id: toolCallId, approved }));
+      ws.send(JSON.stringify({ type: "tool-confirm-response", tool_call_id: toolCallId, approved, scope }));
+    }
+    if (approved && scope === "conversation") {
+      setAutonomousToolsEnabled(true);
     }
     // Update the block status
     const blocks = blocksRef.current.map((b) =>
       b.type === "tool-confirm" && b.tool_call_id === toolCallId
-        ? { ...b, status: approved ? "approved" as const : "denied" as const }
+        ? { ...b, status: approved ? "approved" as const : "denied" as const, approvedScope: approved ? scope : undefined }
         : b
     );
     blocksRef.current = blocks;
@@ -1112,6 +1182,12 @@ export function Chat() {
   // Resizable panel width
   const [panelWidth, setPanelWidth] = useState(500);
   const dragging = useRef(false);
+  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
+  const inputPlaceholder = busy
+    ? "Waiting for response..."
+    : isMobile
+      ? "Message..."
+      : "Type a message... (@ for agents/files, / for commands)";
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1201,6 +1277,50 @@ export function Chat() {
               }}
             />
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+              {autonomousToolsEnabled && (
+                <button
+                  onClick={toggleAutonomy}
+                  disabled={savingAutonomy}
+                  data-tooltip="Disable autonomous tool mode for this conversation"
+                  style={{
+                    background: "rgba(77, 147, 117, 0.12)",
+                    color: "var(--accent)",
+                    border: "1px solid rgba(77, 147, 117, 0.35)",
+                    borderRadius: "999px",
+                    padding: "4px 10px",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    cursor: savingAutonomy ? "default" : "pointer",
+                  }}
+                >
+                  <Bot size={13} /> Auto on
+                </button>
+              )}
+              {!autonomousToolsEnabled && (
+                <button
+                  onClick={toggleAutonomy}
+                  disabled={savingAutonomy}
+                  data-tooltip="Enable autonomous tool mode for this conversation"
+                  style={{
+                    background: "none",
+                    color: "var(--text-muted)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "999px",
+                    padding: "4px 10px",
+                    fontSize: "0.75rem",
+                    fontWeight: 500,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    cursor: savingAutonomy ? "default" : "pointer",
+                  }}
+                >
+                  <Bot size={13} /> Auto off
+                </button>
+              )}
               {meta && meta.context_limit > 0 && (
                 <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
               )}
@@ -1590,7 +1710,7 @@ export function Chat() {
                 minHeight: "24px",
                 maxHeight: "200px",
               }}
-              placeholder={busy ? "Waiting for response..." : "Type a message... (@ for agents/files, / for commands)"}
+              placeholder={inputPlaceholder}
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
