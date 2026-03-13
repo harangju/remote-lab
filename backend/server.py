@@ -988,96 +988,104 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             is_handoff = False
             run_context = run
 
-            while current_targets and handoff_count <= MAX_HANDOFFS:
-                _invalidate_message_cache()
-                runs: list[RunState] = []
-                for ac in current_targets:
-                    aid = ac.id if ac else None
-                    hist, ctx_tokens = _load_history(aid)
+            async def _run_with_handoffs():
+                nonlocal agent_histories
+                _current_targets = current_targets
+                _current_prompt = current_prompt
+                _is_handoff = is_handoff
+                _handoff_count = handoff_count
 
-                    if hist and needs_compaction(ctx_tokens):
-                        old_tokens = ctx_tokens
-                        hist, summary = await compact(hist)
-                        if summary:
-                            est_tokens = sum(len(str(m)) for m in hist) // 4
-                            agent_histories[aid] = (hist, est_tokens)
-                            await _append_message(convo_id, {
-                                "role": "tool",
-                                "name": "compact",
-                                "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
-                                "timestamp": _iso_now(),
-                                "run_id": run_context.run_id,
-                            })
-                            await _save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
-                            await ws.send_text(Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json())
-
-                    is_first_turn = len(hist) == 0
-                    instructions = _cached_instructions if is_first_turn else _cached_instructions_subsequent
-                    agent_prompt = current_prompt
-                    if ac:
-                        _invalidate_message_cache()
-                        shared_ctx = _build_shared_context(convo_id, aid, cached_messages=_get_cached_messages())
-                        if shared_ctx:
-                            if is_handoff:
-                                agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[Handoff from another agent]\n{current_prompt}"
-                            else:
-                                agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[New message from user]\n{current_prompt}"
-                        await ws.send_text(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color).model_dump_json())
-
-                    agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
-                    _agent_cache[ac.id if ac else None] = agent_instance
-
-                    agent_run = RunState(convo_id=convo_id, run_id=run_context.run_id, message_history=list(hist))
-                    agent_run.subscribers.update(session.subscribers)
-                    session.run = agent_run
-                    agent_run.task = asyncio.create_task(
-                        _run_agent_task(
-                            agent_run, agent_prompt, hist, convo_id,
-                            instructions=instructions,
-                            agent_instance=agent_instance,
-                            agent_id=aid,
-                        )
-                    )
-                    runs.append(agent_run)
-
-                agent_tasks = {r.task for r in runs if r.task}
-                try:
-                    if agent_tasks:
-                        await asyncio.gather(*agent_tasks)
-                except asyncio.CancelledError:
-                    for r in runs:
-                        if r.task and not r.task.done():
-                            r.task.cancel()
-                    raise
-
-                next_targets: list[AgentConfig] = []
-                next_prompt_parts: list[str] = []
-                for r in runs:
-                    if r.status == "done":
-                        aid = r.done_event.get("agent_id") if r.done_event else None
-                        agent_histories[aid] = (r.message_history, r.last_context_tokens)
-                        if r.full_text and project_agents:
-                            mentioned, remaining_text = parse_mentions(r.full_text, project_agents)
-                            explicit_mentions = [a for a in mentioned if f"@{a.id}" in r.full_text.lower() or f"@{a.name.lower()}" in r.full_text.lower()]
-                            if explicit_mentions:
-                                for a in explicit_mentions:
-                                    if a.id not in {t.id for t in next_targets}:
-                                        next_targets.append(a)
-                                next_prompt_parts.append(remaining_text)
-
-                if next_targets and handoff_count < MAX_HANDOFFS:
-                    handoff_count += 1
-                    current_targets = next_targets
-                    current_prompt = "\n".join(next_prompt_parts) if next_prompt_parts else "Continue."
-                    is_handoff = True
+                while _current_targets and _handoff_count <= MAX_HANDOFFS:
                     _invalidate_message_cache()
-                    print(f"ws[{convo_id[:8]}]: agent handoff #{handoff_count} → {[a.id for a in next_targets]}")
-                else:
-                    break
+                    runs: list[RunState] = []
+                    for ac in _current_targets:
+                        aid = ac.id if ac else None
+                        hist, ctx_tokens = _load_history(aid)
 
-            if session.run and session.run.run_id == run.run_id and session.run.status != "running":
-                session.controller = None
-                session.run = None
+                        if hist and needs_compaction(ctx_tokens):
+                            old_tokens = ctx_tokens
+                            hist, summary = await compact(hist)
+                            if summary:
+                                est_tokens = sum(len(str(m)) for m in hist) // 4
+                                agent_histories[aid] = (hist, est_tokens)
+                                await _append_message(convo_id, {
+                                    "role": "tool",
+                                    "name": "compact",
+                                    "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
+                                    "timestamp": _iso_now(),
+                                    "run_id": run_context.run_id,
+                                })
+                                await _save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
+                                await run_context.broadcast(Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json())
+
+                        is_first_turn = len(hist) == 0
+                        instructions = _cached_instructions if is_first_turn else _cached_instructions_subsequent
+                        agent_prompt = _current_prompt
+                        if ac:
+                            _invalidate_message_cache()
+                            shared_ctx = _build_shared_context(convo_id, aid, cached_messages=_get_cached_messages())
+                            if shared_ctx:
+                                if _is_handoff:
+                                    agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[Handoff from another agent]\n{_current_prompt}"
+                                else:
+                                    agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[New message from user]\n{_current_prompt}"
+                            await run_context.broadcast(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color).model_dump_json())
+
+                        agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
+                        _agent_cache[ac.id if ac else None] = agent_instance
+
+                        agent_run = RunState(convo_id=convo_id, run_id=run_context.run_id, message_history=list(hist))
+                        agent_run.subscribers.update(session.subscribers)
+                        session.run = agent_run
+                        agent_run.task = asyncio.create_task(
+                            _run_agent_task(
+                                agent_run, agent_prompt, hist, convo_id,
+                                instructions=instructions,
+                                agent_instance=agent_instance,
+                                agent_id=aid,
+                            )
+                        )
+                        runs.append(agent_run)
+
+                    agent_tasks = {r.task for r in runs if r.task}
+                    try:
+                        if agent_tasks:
+                            await asyncio.gather(*agent_tasks)
+                    except asyncio.CancelledError:
+                        for r in runs:
+                            if r.task and not r.task.done():
+                                r.task.cancel()
+                        return
+
+                    next_targets: list[AgentConfig] = []
+                    next_prompt_parts: list[str] = []
+                    for r in runs:
+                        if r.status == "done":
+                            aid = r.done_event.get("agent_id") if r.done_event else None
+                            agent_histories[aid] = (r.message_history, r.last_context_tokens)
+                            if r.full_text and project_agents:
+                                mentioned, remaining_text = parse_mentions(r.full_text, project_agents)
+                                explicit_mentions = [a for a in mentioned if f"@{a.id}" in r.full_text.lower() or f"@{a.name.lower()}" in r.full_text.lower()]
+                                if explicit_mentions:
+                                    for a in explicit_mentions:
+                                        if a.id not in {t.id for t in next_targets}:
+                                            next_targets.append(a)
+                                    next_prompt_parts.append(remaining_text)
+
+                    if next_targets and _handoff_count < MAX_HANDOFFS:
+                        _handoff_count += 1
+                        _current_targets = next_targets
+                        _current_prompt = "\n".join(next_prompt_parts) if next_prompt_parts else "Continue."
+                        _is_handoff = True
+                        _invalidate_message_cache()
+                        print(f"ws[{convo_id[:8]}]: agent handoff #{_handoff_count} → {[a.id for a in next_targets]}")
+                    else:
+                        break
+
+                if session.run and session.run.run_id == run.run_id and session.run.status != "running":
+                    session.controller = None
+
+            run.task = asyncio.create_task(_run_with_handoffs())
 
     except WebSocketDisconnect:
         run = session.run
