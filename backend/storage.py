@@ -67,24 +67,32 @@ def _write_projects(projects: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _project_sort_key(project: Project) -> tuple[str, str]:
+    return (project.updated_at, project.created_at)
+
+
 def list_projects() -> list[Project]:
-    return [Project(**p) for p in _read_projects()]
+    projects = [Project(**{**p, "updated_at": p.get("updated_at", p.get("created_at"))}) for p in _read_projects()]
+    projects.sort(key=_project_sort_key, reverse=True)
+    return projects
 
 
 def get_project(project_id: str) -> Project | None:
     for p in _read_projects():
         if p["id"] == project_id:
-            return Project(**p)
+            return Project(**{**p, "updated_at": p.get("updated_at", p.get("created_at"))})
     return None
 
 
 def create_project(data: ProjectCreate) -> Project:
     projects = _read_projects()
+    now = _now()
     proj = Project(
         id=_new_id(),
         name=data.name,
         path=data.path,
-        created_at=_now(),
+        created_at=now,
+        updated_at=now,
         archived_at=None,
     )
     Path(data.path).mkdir(parents=True, exist_ok=True)
@@ -97,14 +105,22 @@ def update_project(project_id: str, data: ProjectUpdate) -> Project | None:
     projects = _read_projects()
     for p in projects:
         if p["id"] == project_id:
-            if data.name is not None:
+            changed = False
+            if data.name is not None and p.get("name") != data.name:
                 p["name"] = data.name
-            if data.path is not None:
+                changed = True
+            if data.path is not None and p.get("path") != data.path:
                 p["path"] = data.path
-            if "archived_at" in data.model_fields_set:
+                changed = True
+            if "archived_at" in data.model_fields_set and p.get("archived_at") != data.archived_at:
                 p["archived_at"] = data.archived_at
+                changed = True
+            if changed:
+                p["updated_at"] = _now()
+            else:
+                p.setdefault("updated_at", p.get("created_at"))
             _write_projects(projects)
-            return Project(**p)
+            return Project(**{**p, "updated_at": p.get("updated_at", p.get("created_at"))})
     return None
 
 
@@ -255,6 +271,17 @@ def list_conversations(project_id: str) -> list[ConvoMeta]:
     return results
 
 
+def touch_project(project_id: str) -> Project | None:
+    projects = _read_projects()
+    now = _now()
+    for p in projects:
+        if p["id"] == project_id:
+            p["updated_at"] = now
+            _write_projects(projects)
+            return Project(**{**p, "updated_at": p.get("updated_at", p.get("created_at"))})
+    return None
+
+
 def create_conversation(project_id: str, title: str | None = None) -> ConvoMeta:
     _ensure_dirs()
     convo_id = _new_id()
@@ -270,6 +297,7 @@ def create_conversation(project_id: str, title: str | None = None) -> ConvoMeta:
         autonomous_tools_enabled=False,
     )
     _write_meta(meta)
+    touch_project(project_id)
     # Create empty JSONL file
     _messages_path(convo_id).write_text("")
     return meta
@@ -312,6 +340,7 @@ def update_conversation_title(convo_id: str, title: str) -> ConvoMeta | None:
     meta.title = title
     meta.updated_at = _now()
     _write_meta(meta)
+    touch_project(meta.project_id)
     return meta
 
 
@@ -322,6 +351,7 @@ def update_conversation_status(convo_id: str, status: ConvoStatus) -> ConvoMeta 
     meta.status = status
     meta.updated_at = _now()
     _write_meta(meta)
+    touch_project(meta.project_id)
     return meta
 
 
@@ -332,6 +362,7 @@ def update_conversation_archive(convo_id: str, archived_at: str | None) -> Convo
     meta.archived_at = archived_at
     meta.updated_at = _now()
     _write_meta(meta)
+    touch_project(meta.project_id)
     return meta
 
 
@@ -342,6 +373,7 @@ def update_conversation_autonomy(convo_id: str, enabled: bool) -> ConvoMeta | No
     meta.autonomous_tools_enabled = enabled
     meta.updated_at = _now()
     _write_meta(meta)
+    touch_project(meta.project_id)
     return meta
 
 
@@ -356,6 +388,9 @@ def append_message(convo_id: str, event: dict) -> None:
     p = _messages_path(convo_id)
     with p.open("a") as f:
         f.write(json.dumps(event) + "\n")
+    meta = _read_meta(convo_id)
+    if meta is not None:
+        touch_project(meta.project_id)
 
 
 def _agent_history_path(convo_id: str, agent_id: str | None = None) -> Path:

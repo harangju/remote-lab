@@ -42,6 +42,7 @@ class Project(BaseModel):
     name: str
     path: str
     created_at: str
+    updated_at: str
     archived_at: Optional[str] = None
 
 

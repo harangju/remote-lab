@@ -7,6 +7,7 @@ export interface Project {
   name: string;
   path: string;
   created_at: string;
+  updated_at: string;
   archived_at?: string | null;
 }
 
