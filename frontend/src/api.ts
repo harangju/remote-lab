@@ -28,10 +28,19 @@ export interface ConvoDetail extends ConvoMeta {
   context_limit: number;
 }
 
+export interface Attachment {
+  path: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  kind: "image" | "file";
+}
+
 export interface Message {
   role: "user" | "assistant";
   content: string;
   agent_id?: string;
+  attachments?: Attachment[];
   [key: string]: unknown;
 }
 
@@ -152,6 +161,27 @@ export function writeFile(projectId: string, path: string, content: string): Pro
 
 export function listFiles(projectId: string): Promise<{ root: string; files: string[] }> {
   return request(`/projects/${projectId}/files`);
+}
+
+export async function uploadFiles(projectId: string, files: File[]): Promise<Attachment[]> {
+  const token = getToken();
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  const res = await fetch(`${BASE}/projects/${projectId}/uploads`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  if (res.status === 401) {
+    clearToken();
+    window.location.href = "/chat";
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `${res.status} ${res.statusText}`);
+  }
+  return res.json();
 }
 
 export function listModels(): Promise<{ models: string[]; active: string }> {

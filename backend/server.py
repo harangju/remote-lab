@@ -15,8 +15,9 @@ from uuid import uuid4
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, Response
+import mimetypes
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic_ai.messages import (
     ModelResponse,
@@ -43,7 +44,7 @@ from backend.permissions import is_tool_auto_allowed, add_project_rule, tool_is_
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoUpdate, ConvoDetail,
-    ConvoStatus,
+    ConvoStatus, UploadResult,
 )
 from backend import storage
 from backend import tools as agent_tools
@@ -602,6 +603,23 @@ async def api_list_skills(project_id: str):
     return [s.model_dump() for s in skills]
 
 
+@api.get("/projects/{project_id}/file/raw")
+async def api_read_file_raw(project_id: str, path: str):
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_path = Path(proj.path)
+    if not project_path.exists() or not project_path.is_dir():
+        raise HTTPException(status_code=400, detail="Project path does not exist")
+    target = (project_path / path).resolve()
+    if not str(target).startswith(str(project_path.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type, _ = mimetypes.guess_type(str(target))
+    return Response(target.read_bytes(), media_type=media_type or "application/octet-stream")
+
+
 @api.get("/projects/{project_id}/file")
 async def api_read_file(project_id: str, path: str):
     proj = storage.get_project(project_id)
@@ -632,6 +650,20 @@ class FileWrite(_BaseModel):
     content: str
 
 
+def _sanitize_upload_name(name: str) -> str:
+    cleaned = Path(name).name.strip().replace("\x00", "")
+    if not cleaned:
+        return "upload"
+    return "".join(ch if ch.isalnum() or ch in {".", "-", "_"} else "-" for ch in cleaned)
+
+
+def _upload_kind(mime_type: str, filename: str) -> str:
+    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+    if mime_type.startswith("image/") or Path(filename).suffix.lower() in image_exts:
+        return "image"
+    return "file"
+
+
 @api.post("/projects/{project_id}/file")
 async def api_write_file(project_id: str, body: FileWrite):
     proj = storage.get_project(project_id)
@@ -652,6 +684,45 @@ async def api_write_file(project_id: str, body: FileWrite):
 
 
 _EXCLUDED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".next", "dist", "build", ".cache", ".mypy_cache", ".ruff_cache"}
+
+
+@api.post("/projects/{project_id}/uploads", response_model=list[UploadResult])
+async def api_upload_files(project_id: str, files: list[UploadFile] = File(...)):
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_path = Path(proj.path).resolve()
+    if not project_path.exists() or not project_path.is_dir():
+        raise HTTPException(status_code=400, detail="Project path does not exist")
+    now = datetime.now(timezone.utc)
+    upload_dir = project_path / ".remote-lab" / "uploads" / now.strftime("%Y") / now.strftime("%m")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    results: list[UploadResult] = []
+    total_size = 0
+    for upload in files:
+        content = await upload.read()
+        size = len(content)
+        total_size += size
+        if size > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail=f"File too large: {upload.filename}")
+        if total_size > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Total upload size exceeds 20 MB")
+        safe_name = _sanitize_upload_name(upload.filename or "upload")
+        stored_name = f"{uuid4().hex[:12]}-{safe_name}"
+        target = (upload_dir / stored_name).resolve()
+        if not str(target).startswith(str(project_path)):
+            raise HTTPException(status_code=403, detail="Invalid upload path")
+        target.write_bytes(content)
+        rel_path = str(target.relative_to(project_path))
+        mime_type = upload.content_type or "application/octet-stream"
+        results.append(UploadResult(
+            path=rel_path,
+            name=upload.filename or safe_name,
+            mime_type=mime_type,
+            size=size,
+            kind=_upload_kind(mime_type, safe_name),
+        ))
+    return results
 
 
 @api.get("/projects/{project_id}/files")
@@ -820,6 +891,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             raw_message = await ws.receive_text()
             prompt = raw_message
             message_id: str | None = None
+            attachments: list[dict[str, Any]] = []
 
             try:
                 ctrl = json.loads(raw_message)
@@ -853,6 +925,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     if ctrl.get("type") == "user-message":
                         prompt = str(ctrl.get("text", "")).strip()
                         message_id = str(ctrl.get("message_id", "")).strip() or None
+                        raw_attachments = ctrl.get("attachments") or []
+                        if isinstance(raw_attachments, list):
+                            attachments = [a for a in raw_attachments if isinstance(a, dict) and a.get("path")]
                         if not prompt:
                             await ws.send_text(Error(message="Empty message", recoverable=True).model_dump_json())
                             continue
@@ -953,6 +1028,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 "content": prompt,
                 "timestamp": _iso_now(),
                 **({"message_id": message_id} if message_id else {}),
+                **({"attachments": attachments} if attachments else {}),
             })
             if message_id:
                 processed_message_ids.setdefault(convo_id, set()).add(message_id)
@@ -967,9 +1043,23 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 cleaned_prompt = prompt
 
             file_refs, cleaned_prompt = extract_file_mentions(cleaned_prompt, project_path)
-            if file_refs:
-                file_context = "\n\n".join(f"[File: {path}]\n```\n{content}\n```" for path, content in file_refs)
-                cleaned_prompt = f"{file_context}\n\n{cleaned_prompt}"
+            attachment_lines: list[str] = []
+            for attachment in attachments:
+                rel_path = str(attachment.get("path", "")).strip()
+                if not rel_path:
+                    continue
+                target = (project_path / rel_path).resolve()
+                if not str(target).startswith(str(project_path.resolve())) or not target.is_file():
+                    continue
+                kind = attachment.get("kind", "file")
+                attachment_lines.append(f"[Attached {kind}: {rel_path}]")
+            if file_refs or attachment_lines:
+                file_context_parts: list[str] = []
+                if attachment_lines:
+                    file_context_parts.append("\n".join(attachment_lines))
+                if file_refs:
+                    file_context_parts.append("\n\n".join(f"[File: {path}]\n```\n{content}\n```" for path, content in file_refs))
+                cleaned_prompt = f"{'\n\n'.join(file_context_parts)}\n\n{cleaned_prompt}"
 
             run = RunState(convo_id=convo_id, run_id=_new_run_id())
             run.subscribers.update(session.subscribers)

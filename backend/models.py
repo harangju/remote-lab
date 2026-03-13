@@ -8,6 +8,14 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class Attachment(BaseModel):
+    path: str
+    name: str
+    mime_type: str
+    size: int
+    kind: str
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -77,3 +85,7 @@ class ConvoDetail(ConvoMeta):
     messages: list[dict] = Field(default_factory=list)
     context_tokens: int = 0
     context_limit: int = 0
+
+
+class UploadResult(Attachment):
+    pass

@@ -2,8 +2,8 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMe
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles } from "lucide-react";
-import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, type WsEvent, type AgentConfig, type Skill } from "../api";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X } from "lucide-react";
+import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
 import { FilePanel } from "../components/FilePanel";
@@ -35,11 +35,18 @@ interface DisplayMessage {
   agent_color?: string;
   message_id?: string;
   pending?: boolean;
+  attachments?: Attachment[];
 }
 
 interface PendingMessage {
   message_id: string;
   text: string;
+  attachments?: Attachment[];
+}
+
+interface ComposerAttachment {
+  file: File;
+  previewUrl?: string;
 }
 
 interface MetaInfo {
@@ -524,6 +531,10 @@ export function Chat() {
   // Track active agent info during streaming (for multi-agent labeling)
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [dragDepth, setDragDepth] = useState(0);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
@@ -536,6 +547,7 @@ export function Chat() {
   const blocksRef = useRef<StreamBlock[]>([]);
   const reconnectTimer = useRef<number | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Panel hook
   const panel = usePanel(projectId);
@@ -581,7 +593,7 @@ export function Chat() {
     flushingQueueRef.current = true;
     try {
       for (const pending of pendingMessagesRef.current) {
-        ws.send(JSON.stringify({ type: "user-message", message_id: pending.message_id, text: pending.text }));
+        ws.send(JSON.stringify({ type: "user-message", message_id: pending.message_id, text: pending.text, attachments: pending.attachments || [] }));
       }
     } finally {
       flushingQueueRef.current = false;
@@ -593,21 +605,38 @@ export function Chat() {
     setActiveRunId(runId);
   }, []);
 
-  const queueMessage = useCallback((text: string) => {
+  const queueMessage = useCallback((text: string, attachments: Attachment[] = []) => {
     const message_id = crypto.randomUUID();
-    const entry = { message_id, text };
+    const entry = { message_id, text, attachments };
     syncPendingMessages((prev) => [...prev, entry]);
     setMessages((prev) => [...prev, {
       role: "user",
       blocks: [{ type: "text", content: text }],
       message_id,
       pending: true,
+      attachments,
     }]);
     setBusy(true);
     setWaitingForModel(true);
     setError(null);
     return message_id;
   }, [syncPendingMessages]);
+
+  const addComposerFiles = useCallback((files: FileList | File[]) => {
+    const next = Array.from(files).map((file) => ({
+      file,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+    }));
+    setComposerAttachments((prev) => [...prev, ...next]);
+  }, []);
+
+  const removeComposerAttachment = useCallback((idx: number) => {
+    setComposerAttachments((prev) => {
+      const item = prev[idx];
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
 
   useLayoutEffect(() => {
     if (!pendingScrollMessageIdRef.current) return;
@@ -724,6 +753,7 @@ export function Chat() {
               blocks: [{ type: "text", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
               message_id: typeof mAny.message_id === "string" ? mAny.message_id : undefined,
               pending: false,
+              attachments: Array.isArray(mAny.attachments) ? mAny.attachments : undefined,
             });
           } else if (m.role === "assistant") {
             const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
@@ -1076,10 +1106,10 @@ export function Chat() {
     if (e.key === "Enter" && !e.shiftKey && slashQuery === null && mentionQuery === null) {
       e.preventDefault();
       const text = input.trim();
-      if (text) {
+      if (text || composerAttachments.length > 0) {
         setMentionQuery(null);
         setSlashQuery(null);
-        if (sendText(text)) setInput("");
+        sendText(text).then((ok) => { if (ok) setInput(""); });
       }
       return;
     }
@@ -1162,15 +1192,31 @@ export function Chat() {
   }, []);
 
   // Shared logic for sending a text message to the agent
-  const sendText = (text: string) => {
+  const sendText = async (text: string) => {
     const ws = wsRef.current;
-    if (!text || busy || !connected || !ws || ws.readyState !== WebSocket.OPEN) {
+    if ((!text && composerAttachments.length === 0) || busy || uploadingAttachments || !connected || !ws || ws.readyState !== WebSocket.OPEN || !projectId) {
       setError("Disconnected — reconnecting");
       return false;
     }
-    const message_id = queueMessage(text);
+    let uploaded: Attachment[] = [];
+    if (composerAttachments.length > 0) {
+      setUploadingAttachments(true);
+      try {
+        uploaded = await uploadFiles(projectId, composerAttachments.map((a) => a.file));
+      } catch (e: any) {
+        setError(e.message || "Upload failed");
+        setUploadingAttachments(false);
+        return false;
+      }
+      setUploadingAttachments(false);
+    }
+    const message_id = queueMessage(text, uploaded);
     pendingScrollMessageIdRef.current = message_id;
-    ws.send(JSON.stringify({ type: "user-message", message_id, text }));
+    ws.send(JSON.stringify({ type: "user-message", message_id, text, attachments: uploaded }));
+    setComposerAttachments((prev) => {
+      for (const item of prev) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return [];
+    });
     return true;
   };
 
@@ -1179,11 +1225,11 @@ export function Chat() {
     setMentionQuery(null);
     setSlashQuery(null);
     const text = input.trim();
-    if (sendText(text)) setInput("");
+    sendText(text).then((ok) => { if (ok) setInput(""); });
   };
 
   const resend = (text: string) => {
-    sendText(text);
+    void sendText(text);
   };
 
   // Inline edit state for user messages
@@ -1201,6 +1247,43 @@ export function Chat() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [panel.toggleFileFinder]);
+
+  // Global drag indicator for file drops anywhere in the window
+  useEffect(() => {
+    const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes("Files");
+    const onDragEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      setDragDepth((depth) => depth + 1);
+      setDragActive(true);
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      setDragActive(true);
+    };
+    const onDragLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      setDragDepth((depth) => {
+        const next = Math.max(0, depth - 1);
+        if (next === 0) setDragActive(false);
+        return next;
+      });
+    };
+    const onDrop = () => {
+      setDragDepth(0);
+      setDragActive(false);
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   // Styles
   const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
@@ -1249,8 +1332,8 @@ export function Chat() {
   const [panelWidth, setPanelWidth] = useState(500);
   const dragging = useRef(false);
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
-  const inputPlaceholder = busy
-    ? "Waiting for response..."
+  const inputPlaceholder = busy || uploadingAttachments
+    ? uploadingAttachments ? "Uploading attachments..." : "Waiting for response..."
     : isMobile
       ? "Message..."
       : "Type a message... (@ for agents/files, / for commands)";
@@ -1449,6 +1532,19 @@ export function Chat() {
                       data-message-id={m.message_id}
                       style={{ ...msgBubble(m.role, m.agent_color), opacity: m.pending ? 0.7 : 1 }}
                     >
+                      {m.attachments && m.attachments.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: b.content ? "8px" : 0 }}>
+                          {m.attachments.map((attachment) => attachment.kind === "image" ? (
+                            <button key={attachment.path} onClick={() => handleOpenFile(attachment.path)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                              <img src={`/api/projects/${projectId}/file/raw?path=${encodeURIComponent(attachment.path)}`} alt={attachment.name} style={{ maxWidth: 180, maxHeight: 140, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover", display: "block" }} />
+                            </button>
+                          ) : (
+                            <button key={attachment.path} onClick={() => handleOpenFile(attachment.path)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 8px", cursor: "pointer", color: "var(--text)", fontSize: "0.78rem" }}>
+                              <FileText size={14} /> {attachment.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {editingMsgIdx === i ? (
                         <form onSubmit={(e) => {
                           e.preventDefault();
@@ -1747,14 +1843,55 @@ export function Chat() {
               </div>
             );
           })()}
-          <form onSubmit={send} style={{
+          <form onSubmit={send} onDrop={(e) => { e.preventDefault(); setDragDepth(0); setDragActive(false); if (e.dataTransfer.files?.length) addComposerFiles(e.dataTransfer.files); }} onDragOver={(e) => { e.preventDefault(); setDragActive(true); }} onDragLeave={(e) => { if (e.currentTarget.contains(e.relatedTarget as Node | null)) return; if (dragDepth === 0) setDragActive(false); }} style={{
             display: "flex",
             gap: "8px",
             padding: "10px 14px",
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border)",
+            background: dragActive ? "color-mix(in srgb, var(--bg-surface) 82%, var(--accent) 18%)" : "var(--bg-surface)",
+            border: `1px solid ${dragActive ? "var(--accent)" : "var(--border)"}`,
             borderRadius: "12px",
+            flexDirection: "column",
+            boxShadow: dragActive ? "0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent)" : "none",
+            transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
+            position: "relative",
           }}>
+            {dragActive && (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                minHeight: "44px",
+                border: "1px dashed var(--accent)",
+                borderRadius: "10px",
+                background: "color-mix(in srgb, var(--accent) 8%, transparent)",
+                color: "var(--accent)",
+                fontSize: "0.85rem",
+                fontWeight: 500,
+              }}>
+                <Paperclip size={16} /> Drop files here
+              </div>
+            )}
+            {composerAttachments.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {composerAttachments.map((attachment, idx) => (
+                  <div key={`${attachment.file.name}-${idx}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--bg)", borderRadius: 8, padding: attachment.previewUrl ? 4 : "6px 8px" }}>
+                    {attachment.previewUrl ? (
+                      <img src={attachment.previewUrl} alt={attachment.file.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} />
+                    ) : (
+                      <FileText size={14} />
+                    )}
+                    <span style={{ fontSize: "0.78rem", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.file.name}</span>
+                    <button type="button" onClick={() => removeComposerAttachment(idx)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "inline-flex", padding: 0 }}><X size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "8px" }}>
+            <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: "none", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", cursor: "pointer", padding: "4px 2px" }} data-tooltip="Attach files">
+              <Paperclip size={16} />
+            </button>
+            <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { if (e.target.files?.length) addComposerFiles(e.target.files); e.currentTarget.value = ""; }} />
             <textarea
               ref={inputRef}
               rows={1}
@@ -1772,6 +1909,10 @@ export function Chat() {
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData.files || []);
+                if (files.length > 0) addComposerFiles(files);
+              }}
               autoFocus
             />
             {busy ? (
@@ -1779,10 +1920,11 @@ export function Chat() {
                 <Square size={14} fill="currentColor" /> Stop
               </button>
             ) : (
-              <button type="submit" style={{ ...btnPrimary, opacity: !connected ? 0.5 : 1, borderRadius: "8px" }} disabled={!connected || !input.trim()}>
+              <button type="submit" style={{ ...btnPrimary, opacity: !connected ? 0.5 : 1, borderRadius: "8px" }} disabled={!connected || (!input.trim() && composerAttachments.length === 0) || uploadingAttachments}>
                 Send
               </button>
             )}
+            </div>
           </form>
         </div>
         </div>
