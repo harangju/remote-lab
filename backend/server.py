@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 from dataclasses import dataclass, field
+from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
 from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, Error
 from backend.skills import get_skills, get_skill, SkillType
+from backend.permissions import is_tool_auto_allowed, add_project_rule, tool_is_always_confirmed
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoUpdate, ConvoDetail,
@@ -46,6 +48,10 @@ from backend.models import (
 )
 from backend import storage
 from backend import tools as agent_tools
+
+
+def get_workdir() -> Path:
+    return agent_tools.get_workdir()
 
 app = FastAPI()
 
@@ -79,6 +85,7 @@ class RunState:
     last_context_tokens: int = 0
     # Tool approval
     pending_approvals: set = field(default_factory=set)  # tool_call_ids awaiting decision
+    pending_approval_details: dict[str, dict[str, Any]] = field(default_factory=dict)  # tool_call_id → tool metadata
     approval_decisions: dict = field(default_factory=dict)  # tool_call_id → True/False
     approval_event: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -279,20 +286,34 @@ async def _run_agent_task(
                     approvals_needed = result.output.approvals
                     # Broadcast tool-confirm events for each pending approval
                     run.pending_approvals = set()
+                    run.pending_approval_details = {}
                     run.approval_decisions = {}
                     run.approval_event = asyncio.Event()
 
+                    convo_meta = storage._read_meta(convo_id)
+                    convo_autonomous = bool(convo_meta.autonomous_tools_enabled) if convo_meta else False
                     for tool_call in approvals_needed:
+                        if is_tool_auto_allowed(get_workdir(), convo_autonomous, tool_call.tool_name, tool_call.args):
+                            run.approval_decisions[tool_call.tool_call_id] = True
+                            continue
                         run.pending_approvals.add(tool_call.tool_call_id)
+                        run.pending_approval_details[tool_call.tool_call_id] = {
+                            "name": tool_call.tool_name,
+                            "args": tool_call.args,
+                        }
+                        always_confirm = tool_is_always_confirmed(tool_call.tool_name, tool_call.args)
                         await _emit(ToolConfirm(
                             tool_call_id=tool_call.tool_call_id,
                             name=tool_call.tool_name,
                             args=str(tool_call.args)[:500] if tool_call.args else None,
                             agent_id=agent_id,
+                            can_allow_conversation=not always_confirm,
+                            can_allow_project=not always_confirm,
                         ).model_dump_json())
 
                     # Wait for all approval decisions
-                    await run.approval_event.wait()
+                    if run.pending_approvals:
+                        await run.approval_event.wait()
 
                     # Build DeferredToolResults from decisions
                     approval_map: dict = {}
@@ -479,6 +500,8 @@ async def api_update_convo(convo_id: str, body: ConvoUpdate, request: Request):
         meta = storage.update_conversation_title(convo_id, body.title or "Untitled")
     if "archived_at" in payload:
         meta = storage.update_conversation_archive(convo_id, body.archived_at)
+    if "autonomous_tools_enabled" in payload:
+        meta = storage.update_conversation_autonomy(convo_id, bool(body.autonomous_tools_enabled))
     if not meta:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return meta
@@ -1161,10 +1184,20 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                     # Route approval decision to the appropriate run
                                     tc_id = ctrl.get("tool_call_id", "")
                                     approved = ctrl.get("approved", False)
+                                    scope = ctrl.get("scope", "once")
                                     for r in runs:
                                         if tc_id in r.pending_approvals:
+                                            details = r.pending_approval_details.get(tc_id, {})
+                                            if approved and scope == "project":
+                                                tool_name = details.get("name")
+                                                tool_args = details.get("args")
+                                                if tool_name:
+                                                    add_project_rule(project_path, tool_name, tool_args)
+                                            elif approved and scope == "conversation":
+                                                storage.update_conversation_autonomy(convo_id, True)
                                             r.approval_decisions[tc_id] = approved
                                             r.pending_approvals.discard(tc_id)
+                                            r.pending_approval_details.pop(tc_id, None)
                                             if not r.pending_approvals:
                                                 r.approval_event.set()
                                             break
@@ -1174,9 +1207,15 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                 raise
                         else:
                             agent_tasks.discard(t)
-                # Clean up pending ws_recv when exiting the loop
+                # Clean up pending ws_recv when exiting the loop — must await
+                # cancellation so the underlying websocket recv is fully released
+                # before the outer chat loop calls receive_text() again
                 if ws_recv and not ws_recv.done():
                     ws_recv.cancel()
+                    try:
+                        await ws_recv
+                    except (asyncio.CancelledError, Exception):
+                        pass
 
                 if stopped:
                     # Sync whatever history we have from cancelled runs
