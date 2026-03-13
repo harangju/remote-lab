@@ -1119,14 +1119,13 @@ export function Chat() {
 
   // Shared logic for sending a text message to the agent
   const sendText = (text: string) => {
-    if (!text || busy) return false;
-    const message_id = queueMessage(text);
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "user-message", message_id, text }));
-    } else {
-      setError("Reconnecting — message queued");
+    if (!text || busy || !connected || !ws || ws.readyState !== WebSocket.OPEN) {
+      setError("Disconnected — reconnecting");
+      return false;
     }
+    const message_id = queueMessage(text);
+    ws.send(JSON.stringify({ type: "user-message", message_id, text }));
     return true;
   };
 
