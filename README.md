@@ -4,9 +4,9 @@
 
 Remote Lab is for people who want AI to work in a **real environment**, not in a disposable chat or a job queue.
 
-It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, and even improve Remote Lab from inside Remote Lab.
+It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, coordinate multi-agent workflows with `@` mentions, and even improve Remote Lab from inside Remote Lab.
 
-The detailed setup and usage docs live in [`docs/`](docs/docs/).
+The detailed setup and usage docs live at [harangju.github.io/remote-lab](https://harangju.github.io/remote-lab/).
 
 ## Why this exists
 
@@ -60,6 +60,9 @@ The interface is a hybrid: chat for direction, files for inspection and editing.
 That’s the sweet spot between:
 - a pure chat box with no access to the work
 - a traditional app UI with no flexible conversation layer
+- Slack/Telegram-style control loops that are fine for notifications but awkward for real work
+
+Remote Lab also supports multi-agent workflows via `@` mentions, so you can route work between specialized agents inside the same workspace.
 
 ### 5. It’s self-hosted and minimal
 
@@ -77,33 +80,15 @@ One of the coolest parts is that you can improve Remote Lab **from inside itself
 
 You can use Remote Lab to edit Remote Lab, test changes, and iterate on the system while working in it.
 
-## The sharp positioning
-
-Remote Lab is for people who want:
-
-- the **conversational feel** of a chat app
-- the **real file/shell access** of local agent tools
-- the **persistence** of a remote self-hosted system
-- without being forced into Slack/Telegram-style control loops or heavy orchestration
-
 ## What’s included
 
 - persistent agent conversations
 - chat UI with streaming responses
 - file panel/editor
 - project-scoped bash and file tools
-- multi-agent workflows with @mentions
+- multi-agent workflows with `@mentions`
 - mobile-friendly remote access
 - built-in docs publishing
 - flat-file storage, no database
 - self-hosted deployment on your own VPS
 
-## Start here
-
-- **Docs home:** [`docs/docs/index.md`](docs/docs/index.md)
-- **Setup:** [`docs/docs/setup.md`](docs/docs/setup.md)
-- **Usage:** [`docs/docs/usage.md`](docs/docs/usage.md)
-
-## The short version
-
-Remote Lab is a **self-hosted, self-hackable, agentic chat+file workspace** for real work on a real machine.
