@@ -12,6 +12,7 @@ nav:
       - Files and Tools: guides/files-and-tools.md
       - Agents and Mentions: guides/agents-and-mentions.md
       - Self-Hacking: guides/self-hacking.md
+      - Slides: guides/slides.md
   - Reference:
       - Deployment: reference/deployment.md
       - Architecture: reference/architecture.md

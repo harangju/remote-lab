@@ -91,6 +91,16 @@ sudo setfacl -R -m u:www-data:rwX /srv/remote-lab
 sudo setfacl -R -d -m u:www-data:rwX /srv/remote-lab
 ```
 
+## Slides (Marp)
+
+[Marp CLI](https://marp.app/) is installed globally (`bun install -g`). Use it to compile Markdown slide decks to self-contained HTML presentations served from `public/`.
+
+```bash
+marp --html slides.md -o /srv/remote-lab/public/slides.html
+```
+
+Source files use standard Markdown with `marp: true` front matter. Slides are separated by `---`. Built HTML files in `public/` are served at the site root (e.g. `/week1.html`).
+
 ## Conventions
 
 - **Align before acting** — understand the problem and agree on the approach before making changes. Ask questions, don't assume.

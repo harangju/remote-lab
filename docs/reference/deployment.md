@@ -54,6 +54,12 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 curl -fsSL https://bun.sh/install | bash
 apt install -y caddy ripgrep
 source ~/.bashrc
+
+# Symlink bun as node (needed for global bun packages whose shims use #!/usr/bin/env node)
+ln -s /root/.bun/bin/bun /usr/local/bin/node
+
+# Marp CLI for building slide decks
+bun install -g @marp-team/marp-cli
 ```
 
 ## 5. Clone and install
