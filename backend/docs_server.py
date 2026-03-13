@@ -20,7 +20,7 @@ app = FastAPI()
 # Config
 # ---------------------------------------------------------------------------
 
-DOCS_DIR = Path(__file__).parent.parent / "docs"
+DOCS_DIR = Path(__file__).parent.parent / "public"
 
 ASSET_TYPES = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
