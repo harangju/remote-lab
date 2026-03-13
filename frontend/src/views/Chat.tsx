@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMe
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Bot } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, type WsEvent, type AgentConfig, type Skill } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
@@ -1343,68 +1343,44 @@ export function Chat() {
               }}
             />
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-              {autonomousToolsEnabled && (
-                <button
-                  onClick={toggleAutonomy}
-                  disabled={savingAutonomy}
-                  data-tooltip="Disable autonomous tool mode for this conversation"
-                  style={{
-                    background: "rgba(77, 147, 117, 0.12)",
-                    color: "var(--accent)",
-                    border: "1px solid rgba(77, 147, 117, 0.35)",
-                    borderRadius: "999px",
-                    padding: "4px 10px",
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    cursor: savingAutonomy ? "default" : "pointer",
-                  }}
-                >
-                  <Bot size={13} /> Auto on
-                </button>
-              )}
-              {!autonomousToolsEnabled && (
-                <button
-                  onClick={toggleAutonomy}
-                  disabled={savingAutonomy}
-                  data-tooltip="Enable autonomous tool mode for this conversation"
-                  style={{
-                    background: "none",
-                    color: "var(--text-muted)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "999px",
-                    padding: "4px 10px",
-                    fontSize: "0.75rem",
-                    fontWeight: 500,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    cursor: savingAutonomy ? "default" : "pointer",
-                  }}
-                >
-                  <Bot size={13} /> Auto off
-                </button>
-              )}
               {meta && meta.context_limit > 0 && (
                 <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
               )}
-              <button
-                onClick={panel.toggleFileFinder}
-                data-tooltip="Find file (⌘P)"
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: "2px",
-                  color: "var(--text-muted)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <FolderOpen size={15} />
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  onClick={toggleAutonomy}
+                  disabled={savingAutonomy}
+                  data-tooltip={autonomousToolsEnabled ? "Disable autonomous tool mode for this conversation" : "Enable autonomous tool mode for this conversation"}
+                  style={{
+                    background: autonomousToolsEnabled ? "rgba(77, 147, 117, 0.12)" : "none",
+                    border: autonomousToolsEnabled ? "1px solid rgba(77, 147, 117, 0.35)" : "1px solid transparent",
+                    borderRadius: "999px",
+                    padding: "2px",
+                    color: autonomousToolsEnabled ? "var(--accent)" : "var(--text-muted)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    cursor: savingAutonomy ? "default" : "pointer",
+                    opacity: savingAutonomy ? 0.6 : 1,
+                  }}
+                >
+                  <Sparkles size={15} />
+                </button>
+                <button
+                  onClick={panel.toggleFileFinder}
+                  data-tooltip="Find file (⌘P)"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: "2px",
+                    color: "var(--text-muted)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <FolderOpen size={15} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
