@@ -1292,48 +1292,51 @@ export function Chat() {
         <div style={{ padding: "12px 1.5rem", maxWidth: "48rem", margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
             <Link to={`/${projectId}`} style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.1rem" }} title="Conversations">&larr;</Link>
-            {editing ? (
-              <input
-                autoFocus
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={saveTitle}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") saveTitle();
-                  if (e.key === "Escape") setEditing(false);
-                }}
-                style={{
-                  fontWeight: 600,
-                  fontSize: "1rem",
-                  background: "var(--bg-surface)",
-                  color: "var(--text)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "4px",
-                  padding: "1px 6px",
-                  outline: "none",
-                  minWidth: 0,
-                  maxWidth: "20rem",
-                }}
-              />
-            ) : (
-              <>
-                <span title={title} style={{ fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-                <button
-                  onClick={startEdit}
-                  data-tooltip="Rename"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: "2px",
-                    color: "var(--text-muted)",
-                    display: "inline-flex",
-                    alignItems: "center",
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0, flexShrink: 1 }}>
+              {editing ? (
+                <input
+                  autoFocus
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={saveTitle}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveTitle();
+                    if (e.key === "Escape") setEditing(false);
                   }}
-                >
-                  <Pencil size={14} />
-                </button>
-              </>
-            )}
+                  style={{
+                    fontWeight: 600,
+                    fontSize: "1rem",
+                    background: "var(--bg-surface)",
+                    color: "var(--text)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "4px",
+                    padding: "1px 6px",
+                    outline: "none",
+                    minWidth: 0,
+                    maxWidth: "20rem",
+                  }}
+                />
+              ) : (
+                <>
+                  <span title={title} style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+                  <button
+                    onClick={startEdit}
+                    data-tooltip="Rename"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: "2px",
+                      color: "var(--text-muted)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </>
+              )}
+            </div>
             <span
               data-tooltip={connected ? "Connected" : "Disconnected"}
               style={{
