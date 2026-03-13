@@ -59,6 +59,20 @@ def _new_run_id() -> str:
 
 app = FastAPI()
 
+
+@app.on_event("shutdown")
+async def _cancel_running_tasks():
+    """Cancel in-flight agent tasks so they clean up conversation status via CancelledError handler."""
+    for session in list(sessions.values()):
+        run = session.run
+        if run and run.task and not run.task.done():
+            run.task.cancel()
+            try:
+                await run.task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
