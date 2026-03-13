@@ -93,11 +93,14 @@ cd frontend && bun install && bun run build && cd ..
 
 ## 6. Set permissions
 
-The service runs as `www-data`. Give it ownership of the project directory:
+The service runs as `www-data`. Give it ownership of the app and project directories:
 
 ```bash
 sudo chown -R www-data:www-data /srv/remote-lab
+sudo chown -R www-data:www-data /srv/projects
 ```
+
+Projects live under `/srv/projects/`. If you create or copy files there as `root` (or another user), the agent won't be able to write to them. Re-run the `chown` command above whenever you add project files outside of the app.
 
 ## 7. Allow the agent to restart itself
 
