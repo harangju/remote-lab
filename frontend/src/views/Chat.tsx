@@ -1224,7 +1224,7 @@ export function Chat() {
         {/* Header */}
         <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         <div style={{ padding: "12px 1.5rem", maxWidth: "48rem", margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
             <Link to={`/${projectId}`} style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.1rem" }} title="Conversations">&larr;</Link>
             {editing ? (
               <input
@@ -1251,7 +1251,7 @@ export function Chat() {
               />
             ) : (
               <>
-                <span style={{ fontWeight: 600 }}>{title}</span>
+                <span title={title} style={{ fontWeight: 600, minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
                 <button
                   onClick={startEdit}
                   data-tooltip="Rename"

@@ -128,9 +128,9 @@ export function ProjectList() {
   }, [agents]);
 
   const renderProject = (p: Project, archivedView = false) => (
-    <div key={p.id} style={card}>
+    <div key={p.id} style={{ ...card, gap: "12px" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
           {editingId === p.id ? (
             <input
               autoFocus
@@ -157,7 +157,7 @@ export function ProjectList() {
             />
           ) : (
             <>
-              <Link to={`/${p.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</Link>
+              <Link to={`/${p.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", minWidth: 0, flex: 1 }}>{p.name}</Link>
               <button
                 onClick={(e) => { e.stopPropagation(); startRename(p); }}
                 data-tooltip="Rename"

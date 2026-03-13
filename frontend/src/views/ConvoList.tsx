@@ -157,9 +157,9 @@ export function ConvoList() {
   const ALL_TOOLS = ["bash", "read_file", "write_file", "edit_file", "glob", "grep", "web_search"];
 
   const renderConvo = (c: ConvoMeta, archivedView = false) => (
-    <div key={c.id} style={card}>
+    <div key={c.id} style={{ ...card, gap: "12px", padding: "14px 16px", alignItems: "flex-start" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flexWrap: "wrap" }}>
           {editingId === c.id ? (
             <input
               autoFocus
@@ -186,7 +186,7 @@ export function ConvoList() {
             />
           ) : (
             <>
-              <Link to={`/${projectId}/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <Link to={`/${projectId}/${c.id}`} style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", minWidth: 0, flex: 1 }}>
                 {c.title || "Untitled"}
               </Link>
               <button
@@ -211,11 +211,11 @@ export function ConvoList() {
           )}
           <span style={badge(c.status)}>{c.status}</span>
         </div>
-        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "2px" }}>
+        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "4px" }}>
           {timeAgo(c.updated_at)}
         </div>
       </div>
-      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0 }}>
         <button
           style={btnDanger}
           onClick={() => handleArchiveToggle(c, !archivedView)}
@@ -233,8 +233,8 @@ export function ConvoList() {
 
   return (
     <div style={container}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
           <Link to="/" style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.3rem" }} title="Projects">&larr;</Link>
           {editingProject ? (
             <input
@@ -262,7 +262,7 @@ export function ConvoList() {
             />
           ) : (
             <>
-              <h1 style={{ margin: 0, fontSize: "1.5rem" }}>{project?.name ?? "Project"}</h1>
+              <h1 title={project?.name ?? "Project"} style={{ margin: 0, fontSize: "1.5rem", minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project?.name ?? "Project"}</h1>
               <button
                 onClick={startProjectRename}
                 data-tooltip="Rename"
