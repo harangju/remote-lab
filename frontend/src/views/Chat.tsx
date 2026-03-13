@@ -132,7 +132,7 @@ function ToolChip({ tool, live, onOpenFile }: {
   };
 
   return (
-    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0 }}>
+    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0, maxWidth: "100%" }}>
       <button
         onClick={() => hasDetail && setOpen(!open)}
         style={{
@@ -146,19 +146,25 @@ function ToolChip({ tool, live, onOpenFile }: {
           display: "inline-flex",
           alignItems: "center",
           gap: "6px",
-          whiteSpace: "nowrap",
+          flexWrap: "nowrap",
+          maxWidth: "100%",
+          minWidth: 0,
+          overflow: "hidden",
+          textAlign: "left",
           minHeight: "28px",
         }}
       >
         <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Icon size={13} />
         </span>
-        <span style={{ fontFamily: "monospace" }}>{tool.name}</span>
+        <span style={{ fontFamily: "monospace", flexShrink: 0 }}>{tool.name}</span>
         {summary && (
           <span style={{
             fontFamily: "monospace",
             opacity: 0.7,
-            maxWidth: "200px",
+            flex: "1 1 auto",
+            minWidth: 0,
+            whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
           }}>{summary}</span>
@@ -196,8 +202,11 @@ function ToolChip({ tool, live, onOpenFile }: {
           marginTop: "4px",
           fontSize: "0.75rem",
           whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+          maxWidth: "100%",
           maxHeight: "200px",
+          overflowX: "hidden",
           overflowY: "auto",
           color: "var(--text)",
         }}>{tool.input}{tool.input && tool.output ? "\n---\n" : ""}{tool.output}</pre>
