@@ -491,6 +491,14 @@ function MdContent({ text, onOpenSnippet }: { text: string; onOpenSnippet?: (cod
 // Chat component
 // ---------------------------------------------------------------------------
 
+const MIN_USER_MESSAGE_TOP_OFFSET_PX = 24;
+const MAX_USER_MESSAGE_TOP_OFFSET_PX = 72;
+const USER_MESSAGE_TOP_OFFSET_VH = 0.08;
+const MIN_IDLE_BOTTOM_SLACK_PX = 80;
+const IDLE_BOTTOM_SLACK_VH = 0.12;
+const MIN_ACTIVE_BOTTOM_SLACK_PX = 160;
+const ACTIVE_BOTTOM_SLACK_VH = 0.28;
+
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -524,7 +532,9 @@ export function Chat() {
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessagesRef = useRef<PendingMessage[]>([]);
   const flushingQueueRef = useRef(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const lastSentMessageRef = useRef<HTMLDivElement | null>(null);
+  const latestUserMessageRef = useRef<HTMLDivElement | null>(null);
   const blocksRef = useRef<StreamBlock[]>([]);
   const reconnectTimer = useRef<number | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -532,9 +542,28 @@ export function Chat() {
   // Panel hook
   const panel = usePanel(projectId);
 
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  const pendingScrollMessageIdRef = useRef<string | null>(null);
+  const initialScrollDoneRef = useRef(false);
+
+  const getUserMessageTopOffsetPx = useCallback(() => {
+    const viewportOffset = window.innerHeight * USER_MESSAGE_TOP_OFFSET_VH;
+    return Math.max(MIN_USER_MESSAGE_TOP_OFFSET_PX, Math.min(MAX_USER_MESSAGE_TOP_OFFSET_PX, viewportOffset));
   }, []);
+
+  const bottomSlackPx = useMemo(() => {
+    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+    if (busy || waitingForModel || thinking || streamBlocks.length > 0) {
+      return Math.max(MIN_ACTIVE_BOTTOM_SLACK_PX, viewportHeight * ACTIVE_BOTTOM_SLACK_VH);
+    }
+    return Math.max(MIN_IDLE_BOTTOM_SLACK_PX, viewportHeight * IDLE_BOTTOM_SLACK_VH);
+  }, [busy, waitingForModel, thinking, streamBlocks.length]);
+
+  const scrollUserMessageNearTop = useCallback((messageEl: HTMLDivElement | null, behavior: ScrollBehavior = "smooth") => {
+    const container = messageListRef.current;
+    if (!container || !messageEl) return;
+    const targetTop = messageEl.offsetTop - getUserMessageTopOffsetPx();
+    container.scrollTo({ top: Math.max(0, targetTop), behavior });
+  }, [getUserMessageTopOffsetPx]);
 
   const syncPendingMessages = useCallback((updater: PendingMessage[] | ((prev: PendingMessage[]) => PendingMessage[])) => {
     setPendingMessages((prev) => {
@@ -585,7 +614,13 @@ export function Chat() {
     return message_id;
   }, [syncPendingMessages]);
 
-  useEffect(scrollToBottom, [messages, streamBlocks, thinking, scrollToBottom]);
+  useLayoutEffect(() => {
+    if (!pendingScrollMessageIdRef.current) return;
+    const messageEl = lastSentMessageRef.current;
+    if (!messageEl || messageEl.dataset.messageId !== pendingScrollMessageIdRef.current) return;
+    scrollUserMessageNearTop(messageEl);
+    pendingScrollMessageIdRef.current = null;
+  }, [messages, scrollUserMessageNearTop]);
 
   // Auto-resize textarea to fit content
   useLayoutEffect(() => {
@@ -651,6 +686,20 @@ export function Chat() {
       panel.setEditMode(!panel.editMode);
     }
   }, [panel]);
+
+  useLayoutEffect(() => {
+    if (initialScrollDoneRef.current || messages.length === 0 || messageListRef.current == null) return;
+    requestAnimationFrame(() => {
+      const container = messageListRef.current;
+      if (!container) return;
+      if (latestUserMessageRef.current) {
+        scrollUserMessageNearTop(latestUserMessageRef.current, "auto");
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+      initialScrollDoneRef.current = true;
+    });
+  }, [messages.length, scrollUserMessageNearTop]);
 
   // Load agent configs + existing messages together so agent labels resolve
   useEffect(() => {
@@ -1125,6 +1174,7 @@ export function Chat() {
       return false;
     }
     const message_id = queueMessage(text);
+    pendingScrollMessageIdRef.current = message_id;
     ws.send(JSON.stringify({ type: "user-message", message_id, text }));
     return true;
   };
@@ -1366,7 +1416,7 @@ export function Chat() {
         </div>
 
         {/* Messages */}
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        <div ref={messageListRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px", maxWidth: "48rem", width: "100%", margin: "0 auto", flex: 1 }}>
           {messages.map((m, i) => (
             <React.Fragment key={i}>
@@ -1418,6 +1468,11 @@ export function Chat() {
                   ) : (
                     <div
                       key={j}
+                      ref={(el) => {
+                        if (m.message_id === pendingScrollMessageIdRef.current) lastSentMessageRef.current = el;
+                        if (m.role === "user" && i === messages.length - 1) latestUserMessageRef.current = el;
+                      }}
+                      data-message-id={m.message_id}
                       style={{ ...msgBubble(m.role, m.agent_color), opacity: m.pending ? 0.7 : 1 }}
                     >
                       {editingMsgIdx === i ? (
@@ -1463,8 +1518,19 @@ export function Chat() {
                 ) : null
               ))}
               {/* Edit / Rerun actions for user messages */}
-              {m.role === "user" && editingMsgIdx !== i && !busy && (
-                <div style={{ alignSelf: "flex-end", display: "flex", gap: "2px", marginTop: "-2px", marginBottom: "2px" }}>
+              {m.role === "user" && editingMsgIdx !== i && (
+                <div
+                  style={{
+                    alignSelf: "flex-end",
+                    display: "flex",
+                    gap: "2px",
+                    marginTop: "-2px",
+                    marginBottom: "2px",
+                    minHeight: "20px",
+                    visibility: busy ? "hidden" : "visible",
+                    pointerEvents: busy ? "none" : "auto",
+                  }}
+                >
                   <button
                     onClick={() => {
                       const text = m.blocks.find((b) => b.type === "text")?.content || "";
@@ -1580,7 +1646,7 @@ export function Chat() {
             </div>
           )}
 
-          <div ref={bottomRef} />
+          <div style={{ flexShrink: 0, height: `${bottomSlackPx}px`, pointerEvents: "none" }} />
         </div>
         </div>
 
