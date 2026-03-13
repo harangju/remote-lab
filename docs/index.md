@@ -1,38 +1,109 @@
 # Remote Lab
 
-A self-hosted AI assistant that runs on your own VPS. Chat UI, file editor, multi-agent collaboration, and agentic tool use — all under your control.
+**Remote Lab — a self-hosted, self-hackable, agentic chat+file workspace.**
 
-## Why self-host?
+Remote Lab is for people who want AI to work in a **real environment**, not in a disposable chat or a job queue.
 
-- **Privacy** — your conversations and files stay on your machine
-- **No rate limits** — use your own API keys directly
-- **Full control** — agents have real shell access, file I/O, and tools, scoped to your project directories
-- **Always on** — runs 24/7 on a cheap VPS, accessible from anywhere
+It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, coordinate multi-agent workflows with `@mentions`, and even improve Remote Lab from inside Remote Lab.
 
-## What's included
+## Why this exists
 
-- **Chat UI** with streaming responses, markdown rendering, and inline tool use visualization
-- **File editor** with syntax highlighting (CodeMirror, lazy-loaded)
-- **Multi-agent system** — define custom agents per project with their own models, system prompts, and tools
-- **@mentions** — route messages to specific agents, or let agents @mention each other for autonomous workflows
-- **Agent tools** — bash, read/write/edit files, glob, grep, web search
-- **Multi-provider LLM** — Claude Sonnet 4.6, Opus 4.6, GPT-5.4, GPT-5-nano, Gemini 2.5 Flash — switchable per conversation or per agent
-- **Project scoping** — each project is sandboxed to a directory on disk
-- **Context compaction** — automatically summarizes older messages when the context window fills up
-- **Persistent agent runs** — agents keep running even if you close the browser; reconnect to pick up where you left off
+Most AI tools split into a few camps:
 
-## Architecture
+- **chat apps** — conversational, but disconnected from your files and machine
+- **local coding tools** — powerful, but tied to one session on one computer
+- **agent runners** — persistent, but often feel like job queues or message-bot wrappers
 
-```
-Browser → Caddy (HTTPS) → FastAPI (uvicorn)
-                             ├── REST API (projects, conversations)
-                             ├── WebSocket (streaming agent chat)
-                             └── Static files (React frontend)
-```
+Remote Lab tries to combine the best parts:
 
-| Layer | Tech |
-|-------|------|
-| Backend | Python, FastAPI, PydanticAI |
-| Frontend | React + TypeScript, built with Bun |
-| Reverse proxy | Caddy (automatic HTTPS via Let's Encrypt) |
-| Storage | JSON files on disk (no database) |
+- **conversational like Claude/ChatGPT**
+- **acts on real files like Claude Code**
+- **persistent and remote like self-hosted agent systems**
+
+## What makes it useful
+
+### 1. It’s a real workspace, not just a chat
+
+You don’t just send prompts. You chat, inspect files, edit files, and watch work happen in one place.
+
+That makes it useful for more than coding:
+
+- writing
+- research
+- docs
+- repo maintenance
+- debugging
+- ops work
+- any other file-based work
+
+### 2. It keeps running after you leave
+
+Remote Lab is built for **asynchronous work**.
+
+Give an agent something to do, close the browser, come back later, and continue from the same conversation. You can review what happened, redirect it, or send it off again.
+
+### 3. It works on your actual machine
+
+Agents can operate on your real project directory with real shell tools.
+
+That means:
+
+- real files
+- real git repos
+- real bash
+- real outputs you can keep, diff, commit, or publish
+
+### 4. It’s conversational, but not chat-only
+
+The interface is a hybrid: chat for direction, files for inspection and editing.
+
+That’s the sweet spot between:
+
+- a pure chat box with no access to the work
+- a traditional app UI with no flexible conversation layer
+- Slack/Telegram-style control loops that are fine for notifications but awkward for real work
+
+Remote Lab also supports multi-agent workflows via `@mentions`, so you can route work between specialized agents inside the same workspace.
+
+### 5. It’s self-hosted and minimal
+
+Remote Lab is meant to be personal infrastructure.
+
+- runs on a cheap VPS
+- no database
+- flat-file storage
+- small dependency footprint
+- simple enough to understand and modify
+
+### 6. It’s self-hackable
+
+One of the coolest parts is that you can improve Remote Lab **from inside itself**.
+
+You can use Remote Lab to edit Remote Lab, test changes, and iterate on the system while working in it.
+
+## What’s included
+
+- persistent agent conversations
+- chat UI with streaming responses
+- file panel/editor
+- project-scoped bash and file tools
+- multi-agent workflows with `@mentions`
+- mobile-friendly remote access
+- built-in docs publishing
+- flat-file storage, no database
+- self-hosted deployment on your own VPS
+
+## Core ideas
+
+- **Projects are the unit of scope** — each project points at a real directory on disk, and agent tools are sandboxed there.
+- **Conversations are persistent** — close the browser, come back later, and continue where you left off.
+- **Agent runs are decoupled from your browser session** — reconnecting lets you catch up on work that kept running.
+- **Agents can collaborate** — route work explicitly with `@mentions` or let agents delegate to each other.
+- **The system stays simple** — flat files instead of a database, minimal infrastructure, easy to inspect and modify.
+
+## Where to go next
+
+- Start with [Getting Started](getting-started.md) for the fastest path to a working install.
+- Read [Projects and Chat](guides/projects-and-chat.md) for the basic interaction model.
+- Read [Files and Tools](guides/files-and-tools.md) and [Agents and Mentions](guides/agents-and-mentions.md) for advanced workflows.
+- Use [Deployment](reference/deployment.md), [Architecture](reference/architecture.md), and [Operations](reference/operations.md) as reference docs.

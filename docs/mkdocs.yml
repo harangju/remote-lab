@@ -6,8 +6,16 @@ docs_dir: .
 
 nav:
   - Overview: index.md
-  - Setup: setup.md
-  - Usage: usage.md
+  - Getting Started: getting-started.md
+  - Guides:
+      - Projects and Chat: guides/projects-and-chat.md
+      - Files and Tools: guides/files-and-tools.md
+      - Agents and Mentions: guides/agents-and-mentions.md
+      - Self-Hacking: guides/self-hacking.md
+  - Reference:
+      - Deployment: reference/deployment.md
+      - Architecture: reference/architecture.md
+      - Operations: reference/operations.md
 
 theme:
   name: shadcn

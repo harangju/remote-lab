@@ -4,9 +4,9 @@
 
 Remote Lab is for people who want AI to work in a **real environment**, not in a disposable chat or a job queue.
 
-It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, coordinate multi-agent workflows with `@` mentions, and even improve Remote Lab from inside Remote Lab.
+It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, coordinate multi-agent workflows with `@mentions`, and even improve Remote Lab from inside Remote Lab.
 
-The detailed setup and usage docs live at [harangju.github.io/remote-lab](https://harangju.github.io/remote-lab/).
+The detailed docs live at [harangju.github.io/remote-lab](https://harangju.github.io/remote-lab/).
 
 ## Why this exists
 
@@ -29,6 +29,7 @@ Remote Lab tries to combine the best parts:
 You don’t just send prompts. You chat, inspect files, edit files, and watch work happen in one place.
 
 That makes it useful for more than coding:
+
 - writing
 - research
 - docs
@@ -48,6 +49,7 @@ Give an agent something to do, close the browser, come back later, and continue 
 Agents can operate on your real project directory with real shell tools.
 
 That means:
+
 - real files
 - real git repos
 - real bash
@@ -58,11 +60,12 @@ That means:
 The interface is a hybrid: chat for direction, files for inspection and editing.
 
 That’s the sweet spot between:
+
 - a pure chat box with no access to the work
 - a traditional app UI with no flexible conversation layer
 - Slack/Telegram-style control loops that are fine for notifications but awkward for real work
 
-Remote Lab also supports multi-agent workflows via `@` mentions, so you can route work between specialized agents inside the same workspace.
+Remote Lab also supports multi-agent workflows via `@mentions`, so you can route work between specialized agents inside the same workspace.
 
 ### 5. It’s self-hosted and minimal
 
@@ -80,6 +83,18 @@ One of the coolest parts is that you can improve Remote Lab **from inside itself
 
 You can use Remote Lab to edit Remote Lab, test changes, and iterate on the system while working in it.
 
+## Docs map
+
+- [Overview](https://harangju.github.io/remote-lab/)
+- [Getting Started](https://harangju.github.io/remote-lab/getting-started/)
+- [Projects and Chat](https://harangju.github.io/remote-lab/guides/projects-and-chat/)
+- [Files and Tools](https://harangju.github.io/remote-lab/guides/files-and-tools/)
+- [Agents and Mentions](https://harangju.github.io/remote-lab/guides/agents-and-mentions/)
+- [Self-Hacking](https://harangju.github.io/remote-lab/guides/self-hacking/)
+- [Deployment](https://harangju.github.io/remote-lab/reference/deployment/)
+- [Architecture](https://harangju.github.io/remote-lab/reference/architecture/)
+- [Operations](https://harangju.github.io/remote-lab/reference/operations/)
+
 ## What’s included
 
 - persistent agent conversations
@@ -91,4 +106,3 @@ You can use Remote Lab to edit Remote Lab, test changes, and iterate on the syst
 - built-in docs publishing
 - flat-file storage, no database
 - self-hosted deployment on your own VPS
-

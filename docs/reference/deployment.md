@@ -1,20 +1,18 @@
-# Setup
+# Deployment
 
-Step-by-step guide to set up Remote Lab on a VPS.
+This page covers the full production-style setup for Remote Lab on a VPS.
 
 ## 1. Get a VPS
 
-We recommend [Hetzner Cloud](https://www.hetzner.com/cloud/). It's affordable, reliable, and has good global coverage.
-
-**Recommended specs:**
+We recommend [Hetzner Cloud](https://www.hetzner.com/cloud/).
 
 | | |
 |---|---|
 | **Plan** | CX22 (2 vCPU, 4 GB RAM) |
 | **OS** | Ubuntu 24.04 |
-| **Location** | Closest to you (see below) |
+| **Location** | Closest to you |
 
-**Pick the closest datacenter for lowest latency:**
+Suggested regions:
 
 | You're in | Choose |
 |-----------|--------|
@@ -23,19 +21,11 @@ We recommend [Hetzner Cloud](https://www.hetzner.com/cloud/). It's affordable, r
 | Europe | Falkenstein, Nuremberg, or Helsinki |
 | Asia | Singapore |
 
-**Steps:**
-
-1. Sign up at [hetzner.com](https://www.hetzner.com/cloud/)
-2. Create a project, then add a server
-3. Choose Ubuntu 24.04, your plan, and location
-4. Add your SSH key (generate one with `ssh-keygen -t ed25519` if needed)
-5. Create the server and note the IP address
-
 ## 2. Point your domain
 
-Add two DNS A records pointing to your server IP:
+Add DNS A records pointing to your server IP:
 
-```
+```text
 lab.yourdomain.com  →  <server-ip>
 docs.yourdomain.com →  <server-ip>
 ```
@@ -50,30 +40,19 @@ dig +short lab.yourdomain.com
 
 ```bash
 ssh root@<server-ip>
-
-# Firewall — only allow SSH and HTTPS
 ufw default deny incoming
 ufw allow 22
 ufw allow 443
 ufw enable
-
-# Block brute-force SSH
 apt update && apt install -y fail2ban
 ```
 
 ## 4. Install dependencies
 
 ```bash
-# uv (Python package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Bun (JS runtime + bundler)
 curl -fsSL https://bun.sh/install | bash
-
-# System packages
 apt install -y caddy ripgrep
-
-# Reload shell
 source ~/.bashrc
 ```
 
@@ -83,24 +62,20 @@ source ~/.bashrc
 cd /srv
 git clone https://github.com/harangju/remote-lab.git
 cd remote-lab
-
-# Python deps
 uv sync
-
-# Frontend
 cd frontend && bun install && bun run build && cd ..
 ```
 
 ## 6. Set permissions
 
-The service runs as `www-data`. Give it ownership of the app and project directories:
+The service runs as `www-data`.
 
 ```bash
 sudo chown -R www-data:www-data /srv/remote-lab
 sudo chown -R www-data:www-data /srv/projects
 ```
 
-Projects live under `/srv/projects/`. If you create or copy files there as `root` (or another user), the agent won't be able to write to them. Re-run the `chown` command above whenever you add project files outside of the app.
+Projects typically live under `/srv/projects/`. If files are later created by `root` or another user, the agent may lose write access.
 
 ## 7. Allow the agent to restart itself
 
@@ -108,31 +83,29 @@ Projects live under `/srv/projects/`. If you create or copy files there as `root
 echo 'www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart remote-lab' | sudo tee /etc/sudoers.d/remote-lab
 ```
 
-This lets the agent restart its own service via the bash tool (e.g. after backend changes). The WebSocket connection will drop on restart, but the frontend reconnects automatically and conversation history is already persisted to disk.
+This allows the bash tool to restart the app after backend changes.
 
-## 8. Configure
+## 8. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Set at least:
 
 ```bash
 WS_TOKEN=<generate with: openssl rand -hex 32>
 ALLOWED_ORIGIN=https://lab.yourdomain.com
-
-# At least one LLM key required
 ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...        # optional
-GOOGLE_API_KEY=AI...          # optional
+OPENAI_API_KEY=sk-...   # optional
+GOOGLE_API_KEY=AI...    # optional
 ```
 
 ## 9. Set up Caddy
 
 Edit `/etc/caddy/Caddyfile`:
 
-```
+```caddy
 lab.yourdomain.com {
     reverse_proxy localhost:3000
 }
@@ -142,11 +115,11 @@ docs.yourdomain.com {
 }
 ```
 
+Then reload:
+
 ```bash
 systemctl reload caddy
 ```
-
-Caddy auto-provisions HTTPS certificates from Let's Encrypt.
 
 ## 10. Create systemd services
 
@@ -188,7 +161,7 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-Start everything:
+Start them:
 
 ```bash
 systemctl daemon-reload
@@ -202,15 +175,5 @@ Open `https://lab.yourdomain.com` and enter your token.
 
 ```bash
 systemctl status remote-lab
-journalctl -u remote-lab -f   # tail logs
-```
-
-## Updating
-
-```bash
-cd /srv/remote-lab
-git pull
-uv sync
-cd frontend && bun install && bun run build && cd ..
-sudo systemctl restart remote-lab
+journalctl -u remote-lab -f
 ```
