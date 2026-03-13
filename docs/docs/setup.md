@@ -99,7 +99,15 @@ The service runs as `www-data`. Give it ownership of the project directory:
 sudo chown -R www-data:www-data /srv/remote-lab
 ```
 
-## 7. Configure
+## 7. Allow the agent to restart itself
+
+```bash
+echo 'www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart remote-lab' | sudo tee /etc/sudoers.d/remote-lab
+```
+
+This lets the agent restart its own service via the bash tool (e.g. after backend changes). The WebSocket connection will drop on restart, but the frontend reconnects automatically and conversation history is already persisted to disk.
+
+## 8. Configure
 
 ```bash
 cp .env.example .env
@@ -117,7 +125,7 @@ OPENAI_API_KEY=sk-...        # optional
 GOOGLE_API_KEY=AI...          # optional
 ```
 
-## 8. Set up Caddy
+## 9. Set up Caddy
 
 Edit `/etc/caddy/Caddyfile`:
 
@@ -137,7 +145,7 @@ systemctl reload caddy
 
 Caddy auto-provisions HTTPS certificates from Let's Encrypt.
 
-## 9. Create systemd services
+## 10. Create systemd services
 
 `/etc/systemd/system/remote-lab.service`:
 
@@ -185,7 +193,7 @@ systemctl enable --now remote-lab
 systemctl enable --now remote-lab-docs
 ```
 
-## 10. Verify
+## 11. Verify
 
 Open `https://lab.yourdomain.com` and enter your token.
 
