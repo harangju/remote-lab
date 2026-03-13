@@ -32,21 +32,71 @@ export function ConvoList() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const agentsLoaded = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const convoPollInFlight = useRef(false);
 
   useEffect(() => {
     if (!projectId) return;
-    setLoading(true);
-    Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId), listModels()])
-      .then(([p, c, agentRes, m]) => {
+    let cancelled = false;
+
+    const loadInitial = async () => {
+      setLoading(true);
+      try {
+        const [p, c, agentRes, m] = await Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId), listModels()]);
+        if (cancelled) return;
         setProject(p);
         setConvos(c);
         agentsLoaded.current = false;
         setAgents(agentRes.agents);
         setIsCustomAgents(agentRes.custom);
         setAvailableModels(m.models);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+        setError(null);
+      } catch (e: any) {
+        if (!cancelled) setError(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadInitial();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+
+    const pollConvos = async () => {
+      if (document.hidden || convoPollInFlight.current) return;
+      convoPollInFlight.current = true;
+      try {
+        const next = await listConvos(projectId);
+        if (!cancelled) {
+          setConvos(next);
+          setError(null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e.message);
+      } finally {
+        convoPollInFlight.current = false;
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void pollConvos();
+    }, 2000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) void pollConvos();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void pollConvos();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [projectId]);
 
   const activeConvos = useMemo(() => convos.filter((c) => !c.archived_at), [convos]);
