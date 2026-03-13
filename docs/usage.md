@@ -49,6 +49,48 @@ Agents can also @mention each other, enabling autonomous multi-step workflows â€
 
 When the conversation approaches the model's context limit, older messages are automatically summarized. You'll see a compaction indicator when this happens. The full history is always saved on disk.
 
+## Self-hacking / local development
+
+When you change Remote Lab itself, whether you need to rebuild or restart depends on what you changed.
+
+### Frontend changes
+
+For changes under `frontend/`, rebuild the frontend bundle:
+
+```bash
+cd frontend && bun run build
+```
+
+Then refresh the browser page to load the new assets.
+
+Typical examples:
+
+- UI changes in `frontend/src/views/`
+- Component edits in `frontend/src/components/`
+- Styling changes in `frontend/src/styles.ts`
+
+### Backend changes
+
+For changes under `backend/`, restart the server process so FastAPI loads the new code:
+
+```bash
+sudo systemctl restart remote-lab
+```
+
+Typical examples:
+
+- API or WebSocket changes in `backend/server.py`
+- Agent/tool logic in `backend/agents.py` or `backend/tools.py`
+- Storage, protocol, or model changes in `backend/`
+
+### Full-stack changes
+
+If you changed both frontend and backend, do both:
+
+1. Rebuild the frontend with `cd frontend && bun run build`
+2. Restart the server with `sudo systemctl restart remote-lab`
+3. Refresh the page in your browser
+
 ## Tips
 
 - **Be specific** â€” "Add input validation to `src/components/Signup.tsx`" beats "fix the form"
