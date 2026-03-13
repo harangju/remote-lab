@@ -15,12 +15,14 @@ class MessageAck(BaseModel):
 class ThinkingDelta(BaseModel):
     type: Literal["thinking-delta"] = "thinking-delta"
     delta: str
+    run_id: str
     agent_id: str | None = None
 
 
 class TextDelta(BaseModel):
     type: Literal["text-delta"] = "text-delta"
     delta: str
+    run_id: str
     agent_id: str | None = None
 
 
@@ -28,12 +30,14 @@ class ToolUse(BaseModel):
     type: Literal["tool-use"] = "tool-use"
     name: str
     input: dict | str | None = None
+    run_id: str
     agent_id: str | None = None
 
 
 class Done(BaseModel):
     type: Literal["done"] = "done"
     turns: int
+    run_id: str
     context_tokens: int = 0
     context_limit: int = 0
     agent_id: str | None = None
@@ -48,11 +52,13 @@ class Compacted(BaseModel):
 class Running(BaseModel):
     """Sent when a client connects to a conversation with an in-flight agent run."""
     type: Literal["running"] = "running"
+    run_id: str
 
 
 class AgentStart(BaseModel):
     """Signals a specific agent has started processing."""
     type: Literal["agent-start"] = "agent-start"
+    run_id: str
     agent_id: str
     agent_name: str
     agent_color: str | None = None
@@ -63,6 +69,7 @@ class ToolResult(BaseModel):
     type: Literal["tool-result"] = "tool-result"
     name: str
     output: str
+    run_id: str
     agent_id: str | None = None
 
 
@@ -78,6 +85,7 @@ class ToolConfirm(BaseModel):
     type: Literal["tool-confirm"] = "tool-confirm"
     tool_call_id: str
     name: str
+    run_id: str
     args: dict | str | None = None
     agent_id: str | None = None
     can_allow_project: bool = True
@@ -91,5 +99,5 @@ class TitleUpdated(BaseModel):
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str
+    run_id: str | None = None
     recoverable: bool = False
-

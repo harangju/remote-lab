@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -18,11 +19,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter,
 from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic_ai.messages import (
-    ModelRequest,
     ModelResponse,
     ModelMessagesTypeAdapter,
     TextPart,
-    ToolCallPart,
     PartStartEvent,
     PartDeltaEvent,
     TextPartDelta,
@@ -53,6 +52,11 @@ from backend import tools as agent_tools
 def get_workdir() -> Path:
     return agent_tools.get_workdir()
 
+
+def _new_run_id() -> str:
+    return uuid4().hex[:12]
+
+
 app = FastAPI()
 
 # ---------------------------------------------------------------------------
@@ -62,10 +66,8 @@ app = FastAPI()
 WS_TOKEN = os.getenv("WS_TOKEN", "")
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "")
 
-active_ws: dict[str, WebSocket] = {}  # convo_id → WebSocket
-
 # ---------------------------------------------------------------------------
-# Run state — decouples agent runs from WebSocket lifecycle
+# Run/session state — decouples agent runs from WebSocket lifecycle
 # ---------------------------------------------------------------------------
 
 
@@ -73,24 +75,22 @@ active_ws: dict[str, WebSocket] = {}  # convo_id → WebSocket
 class RunState:
     """Tracks an in-flight agent run independently of WebSocket connections."""
     convo_id: str
+    run_id: str
     task: asyncio.Task | None = None
-    events: list[str] = field(default_factory=list)  # ordered JSON strings for replay
+    events: list[str] = field(default_factory=list)
     full_text: str = ""
     done_event: dict | None = None
     error_msg: str | None = None
     status: str = "running"  # running | done | error
-    subscribers: set = field(default_factory=set)  # set of WebSocket
-    # Carry forward after completion
+    subscribers: set[WebSocket] = field(default_factory=set)
     message_history: list = field(default_factory=list)
     last_context_tokens: int = 0
-    # Tool approval
-    pending_approvals: set = field(default_factory=set)  # tool_call_ids awaiting decision
-    pending_approval_details: dict[str, dict[str, Any]] = field(default_factory=dict)  # tool_call_id → tool metadata
-    approval_decisions: dict = field(default_factory=dict)  # tool_call_id → True/False
+    pending_approvals: set[str] = field(default_factory=set)
+    pending_approval_details: dict[str, dict[str, Any]] = field(default_factory=dict)
+    approval_decisions: dict[str, bool] = field(default_factory=dict)
     approval_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def broadcast(self, msg_str: str):
-        """Send a serialized JSON message to all current subscribers."""
         dead: set[WebSocket] = set()
         for ws in self.subscribers:
             try:
@@ -100,17 +100,65 @@ class RunState:
         self.subscribers -= dead
 
 
-# convo_id → RunState for in-flight or recently completed runs
-active_runs: dict[str, RunState] = {}
+@dataclass
+class ConversationSession:
+    convo_id: str
+    controller: WebSocket | None = None
+    subscribers: set[WebSocket] = field(default_factory=set)
+    run: RunState | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+sessions: dict[str, ConversationSession] = {}
 processed_message_ids: dict[str, set[str]] = {}
+convo_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_session(convo_id: str) -> ConversationSession:
+    session = sessions.get(convo_id)
+    if session is None:
+        session = ConversationSession(convo_id=convo_id)
+        sessions[convo_id] = session
+    return session
+
+
+def _get_convo_lock(convo_id: str) -> asyncio.Lock:
+    lock = convo_locks.get(convo_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        convo_locks[convo_id] = lock
+    return lock
+
+
+async def _append_message(convo_id: str, event: dict) -> None:
+    async with _get_convo_lock(convo_id):
+        storage.append_message(convo_id, event)
+
+
+async def _update_conversation_status(convo_id: str, status: ConvoStatus) -> None:
+    async with _get_convo_lock(convo_id):
+        storage.update_conversation_status(convo_id, status)
+
+
+async def _save_agent_history(convo_id: str, data: bytes, agent_id: str | None = None) -> None:
+    async with _get_convo_lock(convo_id):
+        storage.save_agent_history(convo_id, data, agent_id=agent_id)
+
+
+async def _update_conversation_autonomy(convo_id: str, enabled: bool) -> None:
+    async with _get_convo_lock(convo_id):
+        storage.update_conversation_autonomy(convo_id, enabled)
+
+
+async def _update_conversation_title(convo_id: str, title: str) -> None:
+    async with _get_convo_lock(convo_id):
+        storage.update_conversation_title(convo_id, title)
 
 
 async def _auto_title(convo_id: str, user_message: str, run: RunState):
-    """Generate a short title from the first user message using a lightweight model."""
     from pydantic_ai import Agent as _Agent
     from backend.agents import _available
 
-    # Pick the cheapest available model
     title_model = None
     for preferred in ("openai:gpt-5-nano", "google-gla:gemini-2.5-flash"):
         if preferred in _available:
@@ -126,7 +174,7 @@ async def _auto_title(convo_id: str, user_message: str, run: RunState):
         )
         title = str(result.output).strip().strip('"\'')
         if title:
-            storage.update_conversation_title(convo_id, title)
+            await _update_conversation_title(convo_id, title)
             event = TitleUpdated(title=title).model_dump_json()
             run.events.append(event)
             await run.broadcast(event)
@@ -136,16 +184,10 @@ async def _auto_title(convo_id: str, user_message: str, run: RunState):
 
 
 def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int = 50, cached_messages: list[dict] | None = None) -> str:
-    """Build a summary of recent conversation for cross-agent context.
-
-    Reads the shared JSONL display log and formats messages from other agents
-    and the user so this agent knows what's been discussed.
-    """
     messages = cached_messages if cached_messages is not None else storage.read_messages(convo_id)
     if not messages:
         return ""
 
-    # Take the most recent messages
     recent = messages[-max_messages:]
     lines: list[str] = []
     for msg in recent:
@@ -181,19 +223,15 @@ async def _run_agent_task(
     agent_instance: "Agent | None" = None,
     agent_id: str | None = None,
 ):
-    """Execute an agent run in the background, broadcasting to subscribers."""
     active_agent = agent_instance or agent
 
     async def _emit(msg_str: str):
-        """Buffer an event and broadcast to subscribers."""
         run.events.append(msg_str)
         await run.broadcast(msg_str)
 
-    # Disable the per-tool broadcast — we get events from agent.iter() instead
     agent_tools.set_broadcast(None)
 
     try:
-        # Approval loop: run agent, handle deferred approvals, resume as needed
         current_prompt: str | None = prompt
         current_history = message_history if message_history else None
         deferred_results: DeferredToolResults | None = None
@@ -209,82 +247,74 @@ async def _run_agent_task(
                 iter_kwargs["deferred_tool_results"] = deferred_results
                 deferred_results = None
 
-            async with active_agent.iter(
-                current_prompt,
-                **iter_kwargs,
-            ) as agent_run:
+            async with active_agent.iter(current_prompt, **iter_kwargs) as agent_run:
                 async for node in agent_run:
                     if active_agent.is_model_request_node(node):
-                        # Stream text deltas from the model response
                         segment_text = ""
                         async with node.stream(agent_run.ctx) as stream:
                             async for event in stream:
                                 if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart) and event.part.content:
                                     segment_text += event.part.content
                                     run.full_text += event.part.content
-                                    await _emit(TextDelta(delta=event.part.content, agent_id=agent_id).model_dump_json())
+                                    await _emit(TextDelta(delta=event.part.content, run_id=run.run_id, agent_id=agent_id).model_dump_json())
                                 elif isinstance(event, PartDeltaEvent):
                                     if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
                                         segment_text += event.delta.content_delta
                                         run.full_text += event.delta.content_delta
-                                        await _emit(TextDelta(delta=event.delta.content_delta, agent_id=agent_id).model_dump_json())
+                                        await _emit(TextDelta(delta=event.delta.content_delta, run_id=run.run_id, agent_id=agent_id).model_dump_json())
                                     elif isinstance(event.delta, ThinkingPartDelta):
-                                        await _emit(ThinkingDelta(delta=event.delta.content_delta or "", agent_id=agent_id).model_dump_json())
-                        # Persist this text segment immediately so reload interleaves correctly
+                                        await _emit(ThinkingDelta(delta=event.delta.content_delta or "", run_id=run.run_id, agent_id=agent_id).model_dump_json())
                         if segment_text:
                             msg: dict = {
                                 "role": "assistant",
                                 "content": segment_text,
                                 "timestamp": _iso_now(),
+                                "run_id": run.run_id,
                             }
                             if agent_id:
                                 msg["agent_id"] = agent_id
-                            storage.append_message(convo_id, msg)
+                            await _append_message(convo_id, msg)
                     elif active_agent.is_call_tools_node(node):
-                        # Stream tool call and result events
                         async with node.stream(agent_run.ctx) as tool_stream:
                             async for event in tool_stream:
                                 if isinstance(event, FunctionToolCallEvent):
-                                    ev: dict = {
+                                    ev = {
                                         "type": "tool-use",
                                         "name": event.part.tool_name,
                                         "input": str(event.part.args)[:200],
+                                        "run_id": run.run_id,
                                     }
                                     if agent_id:
                                         ev["agent_id"] = agent_id
                                     await _emit(json.dumps(ev))
-                                    persisted: dict = {
+                                    persisted = {
                                         "role": "tool",
                                         "name": event.part.tool_name,
                                         "input": str(event.part.args)[:200],
                                         "timestamp": _iso_now(),
+                                        "run_id": run.run_id,
                                     }
                                     if agent_id:
                                         persisted["agent_id"] = agent_id
-                                    storage.append_message(convo_id, persisted)
+                                    await _append_message(convo_id, persisted)
                                 elif isinstance(event, FunctionToolResultEvent):
                                     output = str(event.content)[:500] if event.content else "OK"
                                     ev = {
                                         "type": "tool-result",
                                         "name": event.result.tool_name if hasattr(event.result, "tool_name") else "",
                                         "output": output,
+                                        "run_id": run.run_id,
                                     }
                                     if agent_id:
                                         ev["agent_id"] = agent_id
                                     await _emit(json.dumps(ev))
 
-                # Accumulate usage
                 usage = agent_run.usage()
-                total_turns += len([
-                    m for m in agent_run.all_messages()
-                    if isinstance(m, ModelResponse)
-                ])
+                total_turns += len([m for m in agent_run.all_messages() if isinstance(m, ModelResponse)])
 
-                # Check if this run ended with deferred tool approvals
                 result = agent_run.result
                 if result and isinstance(result.output, DeferredToolRequests) and result.output.approvals:
                     approvals_needed = result.output.approvals
-                    # Broadcast tool-confirm events for each pending approval
                     run.pending_approvals = set()
                     run.pending_approval_details = {}
                     run.approval_decisions = {}
@@ -305,83 +335,78 @@ async def _run_agent_task(
                         await _emit(ToolConfirm(
                             tool_call_id=tool_call.tool_call_id,
                             name=tool_call.tool_name,
+                            run_id=run.run_id,
                             args=str(tool_call.args)[:500] if tool_call.args else None,
                             agent_id=agent_id,
                             can_allow_project=not always_confirm,
                         ).model_dump_json())
 
-                    # Wait for all approval decisions
                     if run.pending_approvals:
                         await run.approval_event.wait()
 
-                    # Build DeferredToolResults from decisions
                     approval_map: dict = {}
                     for tc_id, approved in run.approval_decisions.items():
-                        if approved:
-                            approval_map[tc_id] = ToolApproved()
-                        else:
-                            approval_map[tc_id] = ToolDenied(message="User denied this tool call")
+                        approval_map[tc_id] = ToolApproved() if approved else ToolDenied(message="User denied this tool call")
 
                     deferred_results = DeferredToolResults(approvals=approval_map)
                     current_history = agent_run.all_messages()
-                    current_prompt = None  # resuming, no new prompt
-                    continue  # loop again with deferred results
+                    current_prompt = None
+                    continue
 
-                # Normal completion — no deferred tools
                 break
 
-        # Finalization (after the approval loop completes)
         context_tokens = usage.request_tokens or 0
         context_limit = get_context_limit()
-
-        # Update run state
         run.message_history = agent_run.all_messages()
         run.last_context_tokens = context_tokens
 
-        # Persist agent history (per-agent if multi-agent)
-        storage.save_agent_history(
+        await _save_agent_history(
             convo_id,
             ModelMessagesTypeAdapter.dump_json(run.message_history),
             agent_id=agent_id,
         )
 
-        # Persist turn/context metadata (text segments already persisted above)
-        meta_msg: dict = {
+        meta_msg = {
             "role": "assistant",
             "content": "",
             "timestamp": _iso_now(),
             "turns": total_turns,
             "context_tokens": context_tokens,
             "context_limit": context_limit,
+            "run_id": run.run_id,
         }
         if agent_id:
             meta_msg["agent_id"] = agent_id
-        storage.append_message(convo_id, meta_msg)
+        await _append_message(convo_id, meta_msg)
 
-        done = Done(turns=total_turns, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
+        done = Done(turns=total_turns, run_id=run.run_id, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
         run.done_event = done.model_dump()
         run.status = "done"
         await _emit(done.model_dump_json())
+        await _update_conversation_status(convo_id, ConvoStatus.done)
 
-        storage.update_conversation_status(convo_id, ConvoStatus.done)
-
-        # Auto-title: generate a title if still "Untitled"
         meta = storage._read_meta(convo_id)
         if meta and meta.title == "Untitled":
             asyncio.create_task(_auto_title(convo_id, prompt, run))
 
+    except asyncio.CancelledError:
+        run.status = "error"
+        await _update_conversation_status(convo_id, ConvoStatus.idle)
+        await _emit(Error(message="Run stopped", run_id=run.run_id, recoverable=True).model_dump_json())
+        raise
     except Exception as e:
         run.error_msg = str(e)
         run.status = "error"
-        storage.update_conversation_status(convo_id, ConvoStatus.error)
-        await _emit(Error(message=str(e), recoverable=True).model_dump_json())
-
+        await _update_conversation_status(convo_id, ConvoStatus.error)
+        await _emit(Error(message=str(e), run_id=run.run_id, recoverable=True).model_dump_json())
     finally:
         agent_tools.clear_broadcast()
-        # Clean up after a delay to allow reconnecting clients to pick up the result
         await asyncio.sleep(10)
-        if active_runs.get(convo_id) is run:
-            del active_runs[convo_id]
+        session = sessions.get(convo_id)
+        if session and session.run is run:
+            session.run = None
+            if not session.subscribers and session.controller is None:
+                sessions.pop(convo_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -402,8 +427,6 @@ async def _require_token(
 api = APIRouter(prefix="/api", dependencies=[Depends(_require_token)])
 
 
-# -- Projects ---------------------------------------------------------------
-
 @api.get("/projects", response_model=list[Project])
 async def api_list_projects():
     return storage.list_projects()
@@ -412,11 +435,9 @@ async def api_list_projects():
 @api.post("/projects", response_model=Project, status_code=201)
 async def api_create_project(body: ProjectCreate):
     if body.github_url:
-        # Clone the repo into the target path
         target = Path(body.path)
         if target.exists() and any(target.iterdir()):
             raise HTTPException(status_code=400, detail="Target directory already exists and is not empty")
-        # Convert HTTPS GitHub URLs to SSH for auth
         clone_url = body.github_url
         import re as _re
         m = _re.match(r"https?://github\.com/(.+)", clone_url)
@@ -460,8 +481,6 @@ async def api_delete_project(project_id: str):
     if not storage.delete_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
 
-
-# -- Conversations -----------------------------------------------------------
 
 @api.get("/projects/{project_id}/convos", response_model=list[ConvoMeta])
 async def api_list_convos(project_id: str):
@@ -512,33 +531,25 @@ async def api_delete_convo(convo_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
 
-# -- Models ------------------------------------------------------------------
-
 @api.get("/models")
 async def api_list_models():
-    """List available models."""
     from backend.agents import _available, active_model
     return {"models": _available, "active": active_model}
 
 
-# -- Agents ------------------------------------------------------------------
-
 @api.get("/agents")
 async def api_list_global_agents():
-    """List global (default) agents."""
     return [a.model_dump() for a in storage.load_global_agents()]
 
 
 @api.put("/agents")
 async def api_save_global_agents(body: list[AgentConfig]):
-    """Save global (default) agents."""
     storage.save_global_agents(body)
     return [a.model_dump() for a in body]
 
 
 @api.get("/projects/{project_id}/agents")
 async def api_list_agents(project_id: str):
-    """List agents for a project (per-project override or global fallback)."""
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -551,7 +562,6 @@ async def api_list_agents(project_id: str):
 
 @api.put("/projects/{project_id}/agents")
 async def api_save_agents(project_id: str, body: list[AgentConfig]):
-    """Save per-project agent override."""
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -561,7 +571,6 @@ async def api_save_agents(project_id: str, body: list[AgentConfig]):
 
 @api.delete("/projects/{project_id}/agents")
 async def api_delete_project_agents(project_id: str):
-    """Remove per-project override, revert to global agents."""
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -569,11 +578,8 @@ async def api_delete_project_agents(project_id: str):
     return {"ok": True}
 
 
-# -- Skills ------------------------------------------------------------------
-
 @api.get("/projects/{project_id}/skills")
 async def api_list_skills(project_id: str):
-    """List available skills for a project (built-in + file-based)."""
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -582,11 +588,8 @@ async def api_list_skills(project_id: str):
     return [s.model_dump() for s in skills]
 
 
-# -- Files -------------------------------------------------------------------
-
 @api.get("/projects/{project_id}/file")
 async def api_read_file(project_id: str, path: str):
-    """Read a file from the project's workdir for the artifact panel."""
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -602,7 +605,6 @@ async def api_read_file(project_id: str, path: str):
         content = target.read_text(errors="replace")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    # Cap at 200KB
     if len(content) > 200_000:
         content = content[:200_000] + "\n\n--- truncated at 200KB ---"
     return {"path": path, "content": content}
@@ -618,7 +620,6 @@ class FileWrite(_BaseModel):
 
 @api.post("/projects/{project_id}/file")
 async def api_write_file(project_id: str, body: FileWrite):
-    """Write a file in the project's workdir."""
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -636,13 +637,11 @@ async def api_write_file(project_id: str, body: FileWrite):
     return {"path": body.path, "size": len(body.content.encode())}
 
 
-_EXCLUDED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv",
-                  ".next", "dist", "build", ".cache", ".mypy_cache", ".ruff_cache"}
+_EXCLUDED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".next", "dist", "build", ".cache", ".mypy_cache", ".ruff_cache"}
 
 
 @api.get("/projects/{project_id}/files")
 async def api_list_files(project_id: str):
-    """List all files in the project's workdir (recursive, filtered)."""
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -651,7 +650,6 @@ async def api_list_files(project_id: str):
         raise HTTPException(status_code=400, detail="Project path does not exist")
     files: list[str] = []
     for root, dirs, filenames in os.walk(project_path):
-        # Filter excluded dirs in-place to prevent os.walk from descending
         dirs[:] = [d for d in dirs if d not in _EXCLUDED_DIRS and not d.startswith(".")]
         for f in sorted(filenames):
             if f.startswith("."):
@@ -667,28 +665,13 @@ async def api_list_files(project_id: str):
 
 app.include_router(api)
 
-# ---------------------------------------------------------------------------
-# Static files (chat UI)
-# ---------------------------------------------------------------------------
-
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend" / "dist"
-
-# ---------------------------------------------------------------------------
-# Auth helpers
-# ---------------------------------------------------------------------------
 
 
 def check_token(input_token: str) -> bool:
     if not WS_TOKEN:
         return False
     return hmac.compare_digest(input_token.encode(), WS_TOKEN.encode())
-
-
-
-
-# ---------------------------------------------------------------------------
-# Frontend SPA (catch-all — must be last)
-# ---------------------------------------------------------------------------
 
 
 @app.get("/{rest:path}", response_class=HTMLResponse)
@@ -698,7 +681,6 @@ async def chat_page(rest: str = ""):
         return Response("Chat not configured", status_code=503)
     if not FRONTEND_DIR.exists() or not (FRONTEND_DIR / "index.html").exists():
         return Response("Frontend not built. Run: cd frontend && bun run build", status_code=503)
-    # Serve static assets from dist/ (JS, CSS, etc.)
     if rest and "." in rest:
         asset = FRONTEND_DIR / rest
         if asset.exists() and asset.is_file():
@@ -718,56 +700,23 @@ async def chat_page(rest: str = ""):
     return HTMLResponse((FRONTEND_DIR / "index.html").read_text())
 
 
-# ---------------------------------------------------------------------------
-# WebSocket chat
-# ---------------------------------------------------------------------------
-
-
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 @app.websocket("/api/ws/{convo_id}")
 async def ws_convo_chat(ws: WebSocket, convo_id: str):
-    global active_ws
-
-    # Origin check
     origin = ws.headers.get("origin", "")
     if ALLOWED_ORIGIN and origin and origin != ALLOWED_ORIGIN:
         await ws.close(code=4403, reason="Forbidden")
         return
 
-    # If there's an existing connection for this convo, close it
-    old_ws = active_ws.get(convo_id)
-    if old_ws:
-        try:
-            await old_ws.close(code=4409, reason="Replaced by new connection")
-        except Exception:
-            pass
-
-    # Global concurrency limit (different conversations)
-    # Clean up stale connections first (e.g. from navigation between convos)
-    stale = []
-    for k, other_ws in active_ws.items():
-        if k != convo_id:
-            try:
-                if other_ws.client_state.name != "CONNECTED":
-                    stale.append(k)
-            except Exception:
-                stale.append(k)
-    for k in stale:
-        del active_ws[k]
-    other_convos = {k for k in active_ws if k != convo_id}
-    if len(other_convos) >= 1:
-        await ws.close(code=4429, reason="Too many connections")
-        return
-
     await ws.accept()
-    active_ws[convo_id] = ws
-    print(f"ws[{convo_id[:8]}]: connected (active: {len(active_ws)})")
+    session = _get_session(convo_id)
+    session.subscribers.add(ws)
+    print(f"ws[{convo_id[:8]}]: connected (subscribers: {len(session.subscribers)})")
 
     try:
-        # ----- Auth handshake (first-message pattern) -----
         raw = await ws.receive_text()
         try:
             msg = json.loads(raw)
@@ -779,7 +728,6 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             await ws.close(code=4401, reason="Invalid token")
             return
 
-        # ----- Validate conversation exists and load project -----
         convo = storage.get_conversation(convo_id)
         if convo is None:
             await ws.send_text(Error(message="Conversation not found").model_dump_json())
@@ -792,33 +740,21 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             await ws.close(code=4404, reason="Project not found")
             return
 
-        # Scope agent tools to the project's path
         project_path = Path(project.path)
         if not project_path.exists() or not project_path.is_dir():
-            await ws.send_text(
-                Error(message=f"Project path does not exist: {project.path}").model_dump_json()
-            )
+            await ws.send_text(Error(message=f"Project path does not exist: {project.path}").model_dump_json())
             await ws.close(code=4400, reason="Invalid project path")
             return
 
         await ws.send_text(AuthOk().model_dump_json())
         print(f"ws[{convo_id[:8]}]: authenticated, project={project.name}, path={project.path}")
 
-        # ----- Load agent configs for the project -----
         project_agents = storage.load_project_agents(project.id)
-
-        # ----- Caches for the session -----
-        # Agent instances: reuse across messages instead of recreating
         _agent_cache: dict[str | None, "Agent"] = {}
-        # Project instructions: CLAUDE.md + dir tree (rarely changes mid-session)
         _UNSET = object()
         _cached_instructions: str | None | object = _UNSET
         _cached_instructions_subsequent: str | None = None
-
-        # ----- Load existing message history -----
-        # Per-agent histories: agent_id → (message_history, last_context_tokens)
         agent_histories: dict[str | None, tuple[list, int]] = {}
-        # Cache JSONL messages to avoid repeated disk reads
         _cached_messages: list[dict] | None = None
 
         def _get_cached_messages() -> list[dict]:
@@ -832,7 +768,6 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             _cached_messages = None
 
         def _load_history(aid: str | None) -> tuple[list, int]:
-            """Load message history for a specific agent (or default)."""
             if aid in agent_histories:
                 return agent_histories[aid]
             hist: list = []
@@ -843,7 +778,6 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     hist = ModelMessagesTypeAdapter.validate_json(hist_bytes)
                     for msg in reversed(_get_cached_messages()):
                         if msg.get("role") == "assistant" and "context_tokens" in msg:
-                            # Match agent_id for multi-agent, or accept any for legacy
                             if aid is None or msg.get("agent_id") == aid:
                                 ctx_tokens = msg["context_tokens"]
                                 break
@@ -854,34 +788,54 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             agent_histories[aid] = (hist, ctx_tokens)
             return hist, ctx_tokens
 
-        # Pre-load default agent history
         _load_history(None)
 
-        # ----- Check for active run (reconnection scenario) -----
-        existing_run = active_runs.get(convo_id)
+        existing_run = session.run
         if existing_run and existing_run.status == "running":
             existing_run.subscribers.add(ws)
-            await ws.send_text(Running().model_dump_json())
+            # Promote to controller if old controller is gone
+            if session.controller is None or session.controller not in session.subscribers:
+                session.controller = ws
+                print(f"ws[{convo_id[:8]}]: promoted to controller (previous controller disconnected)")
+            await ws.send_text(Running(run_id=existing_run.run_id).model_dump_json())
             for event_str in existing_run.events:
                 await ws.send_text(event_str)
-            print(f"ws[{convo_id[:8]}]: subscribed to active run ({len(existing_run.events)} events buffered)")
-        elif existing_run and existing_run.status in ("done", "error"):
-            agent_histories[None] = (existing_run.message_history, existing_run.last_context_tokens)
-            if active_runs.get(convo_id) is existing_run:
-                del active_runs[convo_id]
+            print(f"ws[{convo_id[:8]}]: subscribed to active run {existing_run.run_id} ({len(existing_run.events)} events buffered)")
 
-        # ----- Chat loop -----
         while True:
             raw_message = await ws.receive_text()
             prompt = raw_message
             message_id: str | None = None
 
-            # Handle JSON control messages and structured user messages
             try:
                 ctrl = json.loads(raw_message)
                 if isinstance(ctrl, dict):
                     if ctrl.get("type") == "stop":
-                        continue  # nothing to stop
+                        run_id = str(ctrl.get("run_id", ""))
+                        run = session.run
+                        if ws is session.controller and run and run.status == "running" and run.run_id == run_id:
+                            if run.task and not run.task.done():
+                                run.task.cancel()
+                        continue
+                    if ctrl.get("type") == "tool-confirm-response":
+                        tc_id = str(ctrl.get("tool_call_id", ""))
+                        run_id = str(ctrl.get("run_id", ""))
+                        approved = bool(ctrl.get("approved", False))
+                        scope = ctrl.get("scope", "once")
+                        run = session.run
+                        if ws is session.controller and run and run.status == "running" and run.run_id == run_id and tc_id in run.pending_approvals:
+                            details = run.pending_approval_details.get(tc_id, {})
+                            if approved and scope == "project":
+                                tool_name = details.get("name")
+                                tool_args = details.get("args")
+                                if tool_name:
+                                    add_project_rule(project_path, tool_name, tool_args)
+                            run.approval_decisions[tc_id] = approved
+                            run.pending_approvals.discard(tc_id)
+                            run.pending_approval_details.pop(tc_id, None)
+                            if not run.pending_approvals:
+                                run.approval_event.set()
+                        continue
                     if ctrl.get("type") == "user-message":
                         prompt = str(ctrl.get("text", "")).strip()
                         message_id = str(ctrl.get("message_id", "")).strip() or None
@@ -893,36 +847,31 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                             await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
                             continue
             except (json.JSONDecodeError, TypeError):
-                pass  # Not JSON — treat as a regular text prompt
+                pass
 
-            # Sync state from a completed run
-            completed_run = active_runs.get(convo_id)
+            completed_run = session.run
             if completed_run and completed_run.task and completed_run.task.done():
                 agent_histories[None] = (completed_run.message_history, completed_run.last_context_tokens)
-                if active_runs.get(convo_id) is completed_run:
-                    del active_runs[convo_id]
+                session.run = None
+                completed_run = None
             elif completed_run and completed_run.status == "running":
-                # If this socket is the subscriber for the in-flight run, don't reject
-                # the next loop iteration after a reconnect/navigation. Just ignore any
-                # non-control input while the run continues streaming.
-                if ws in completed_run.subscribers:
-                    continue
-                await ws.send_text(
-                    Error(message="Agent is still running", recoverable=True).model_dump_json()
-                )
+                await ws.send_text(Error(message="Agent is still running", run_id=completed_run.run_id, recoverable=True).model_dump_json())
                 continue
 
-            # Handle slash commands (skills)
+            async with session.lock:
+                if session.controller not in (None, ws):
+                    await ws.send_text(Error(message="Conversation is controlled by another client", recoverable=True).model_dump_json())
+                    continue
+                session.controller = ws
+
             if prompt.strip().startswith("/"):
                 parts = prompt.strip().split(None, 1)
-                cmd_name = parts[0][1:]  # strip leading /
+                cmd_name = parts[0][1:]
                 cmd_args = parts[1] if len(parts) > 1 else ""
                 skill = get_skill(cmd_name, project_path)
 
                 if skill and skill.type == SkillType.server:
-                    # --- Server skill: /compact ---
                     if skill.name == "compact":
-                        # Discover all agent histories (on disk + already loaded)
                         for p in storage.CONVOS_DIR.glob(f"{convo_id}.agent*.json"):
                             parts = p.stem.replace(f"{convo_id}.agent", "")
                             aid = parts.lstrip(".") or None
@@ -930,9 +879,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
                         aids_to_compact = [aid for aid, (h, _) in agent_histories.items() if h]
                         if not aids_to_compact:
-                            await ws.send_text(
-                                Error(message="No message history to compact", recoverable=True).model_dump_json()
-                            )
+                            await ws.send_text(Error(message="No message history to compact", recoverable=True).model_dump_json())
                         else:
                             compacted_any = False
                             for aid in aids_to_compact:
@@ -944,81 +891,50 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                     est_tokens = sum(len(str(m)) for m in hist) // 4
                                     agent_histories[aid] = (hist, est_tokens)
                                     label = f"@{aid} " if aid else ""
-                                    storage.append_message(convo_id, {
+                                    await _append_message(convo_id, {
                                         "role": "tool",
                                         "name": "compact",
                                         "input": f"{label}{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
                                         "timestamp": _iso_now(),
                                     })
-                                    storage.save_agent_history(
-                                        convo_id,
-                                        ModelMessagesTypeAdapter.dump_json(hist),
-                                        agent_id=aid,
-                                    )
-                                    await ws.send_text(
-                                        Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
-                                    )
+                                    await _save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
+                                    await ws.send_text(Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json())
                             if not compacted_any:
-                                await ws.send_text(
-                                    Error(message="Not enough history to compact", recoverable=True).model_dump_json()
-                                )
-
-                    # --- Server skill: /model [name] ---
+                                await ws.send_text(Error(message="Not enough history to compact", recoverable=True).model_dump_json())
                     elif skill.name == "model":
                         from backend.agents import active_model, _available, set_model
                         if cmd_args.strip():
-                            # Switch model
                             try:
                                 new_model = set_model(cmd_args.strip())
-                                # Clear agent cache so next message uses new model
                                 _agent_cache.clear()
                                 output = f"Switched to {new_model}"
                             except ValueError as e:
                                 output = str(e)
                         else:
-                            # Show current model + available alternatives
                             output = f"Model: {active_model}"
                             others = [m for m in _available if m != active_model]
                             if others:
                                 output += "\nAvailable: " + ", ".join(others)
-                                # Show short switch commands
                                 def _short(m: str) -> str:
-                                    # "anthropic:claude-sonnet-4-6" → "sonnet"
-                                    # "openai:gpt-5-nano" → "gpt-5-nano"
-                                    # "google-gla:gemini-2.5-flash" → "gemini"
                                     name = m.split(":")[-1]
-                                    # Strip known prefixes
                                     if name.startswith("claude-"):
                                         name = name[len("claude-"):]
                                     return name
                                 output += "\nSwitch: " + ", ".join(f"/model {_short(m)}" for m in others)
-                        storage.append_message(convo_id, {
+                        await _append_message(convo_id, {
                             "role": "tool",
                             "name": "model",
                             "input": output,
                             "timestamp": _iso_now(),
                         })
-                        await ws.send_text(
-                            SkillResult(skill="model", output=output).model_dump_json()
-                        )
-
+                        await ws.send_text(SkillResult(skill="model", output=output).model_dump_json())
                     continue
-
                 elif skill and skill.type == SkillType.prompt:
-                    # Rewrite prompt: prepend the skill's prompt template
                     user_text = cmd_args.strip()
                     prompt = f"{skill.prompt}\n\n{user_text}" if user_text else skill.prompt
-                    # Fall through to normal message handling below
 
-                elif not skill:
-                    # Unknown command — send as regular message
-                    pass
-
-            # Invalidate cached messages since we're about to append
             _invalidate_message_cache()
-
-            # Persist the user message
-            storage.append_message(convo_id, {
+            await _append_message(convo_id, {
                 "role": "user",
                 "content": prompt,
                 "timestamp": _iso_now(),
@@ -1028,228 +944,113 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 processed_message_ids.setdefault(convo_id, set()).add(message_id)
                 await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
 
-            # Mark conversation as running
-            storage.update_conversation_status(convo_id, ConvoStatus.running)
+            await _update_conversation_status(convo_id, ConvoStatus.running)
 
-            # Determine target agents
             if project_agents:
                 target_agents, cleaned_prompt = parse_mentions(prompt, project_agents)
             else:
-                target_agents = [None]  # None = use default global agent
+                target_agents = [None]
                 cleaned_prompt = prompt
 
-            # Extract @file references and inject content
             file_refs, cleaned_prompt = extract_file_mentions(cleaned_prompt, project_path)
             if file_refs:
-                file_context = "\n\n".join(
-                    f"[File: {path}]\n```\n{content}\n```"
-                    for path, content in file_refs
-                )
+                file_context = "\n\n".join(f"[File: {path}]\n```\n{content}\n```" for path, content in file_refs)
                 cleaned_prompt = f"{file_context}\n\n{cleaned_prompt}"
 
-            # Notify client that the run is starting
-            await ws.send_text(Running().model_dump_json())
+            run = RunState(convo_id=convo_id, run_id=_new_run_id())
+            run.subscribers.update(session.subscribers)
+            session.run = run
+            await ws.send_text(Running(run_id=run.run_id).model_dump_json())
 
-            # Set workdir
             agent_tools.set_workdir(project_path)
-
-            # Build project instructions in a thread to avoid blocking event loop
-            # Cache after first turn since CLAUDE.md rarely changes mid-conversation
             if _cached_instructions is _UNSET:
-                _cached_instructions = await asyncio.to_thread(
-                    build_project_instructions, project_path, True
-                )
-                _cached_instructions_subsequent = await asyncio.to_thread(
-                    build_project_instructions, project_path, False
-                )
+                _cached_instructions = await asyncio.to_thread(build_project_instructions, project_path, True)
+                _cached_instructions_subsequent = await asyncio.to_thread(build_project_instructions, project_path, False)
 
-            # Agent-to-agent @mention loop: run agents, then check output
-            # for @mentions of other agents and chain automatically.
-            MAX_HANDOFFS = 10  # safety valve
+            MAX_HANDOFFS = 10
             handoff_count = 0
             current_targets = target_agents
             current_prompt = cleaned_prompt
-            is_handoff = False  # first round is from user, subsequent are agent-to-agent
+            is_handoff = False
+            run_context = run
 
             while current_targets and handoff_count <= MAX_HANDOFFS:
-                # Invalidate message cache since agents will append messages
                 _invalidate_message_cache()
-
                 runs: list[RunState] = []
                 for ac in current_targets:
                     aid = ac.id if ac else None
                     hist, ctx_tokens = _load_history(aid)
 
-                    # Auto-compact if over budget
                     if hist and needs_compaction(ctx_tokens):
                         old_tokens = ctx_tokens
                         hist, summary = await compact(hist)
                         if summary:
                             est_tokens = sum(len(str(m)) for m in hist) // 4
                             agent_histories[aid] = (hist, est_tokens)
-                            storage.append_message(convo_id, {
+                            await _append_message(convo_id, {
                                 "role": "tool",
                                 "name": "compact",
                                 "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
                                 "timestamp": _iso_now(),
+                                "run_id": run_context.run_id,
                             })
-                            storage.save_agent_history(
-                                convo_id,
-                                ModelMessagesTypeAdapter.dump_json(hist),
-                                agent_id=aid,
-                            )
-                            await ws.send_text(
-                                Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
-                            )
+                            await _save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
+                            await ws.send_text(Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json())
 
                     is_first_turn = len(hist) == 0
                     instructions = _cached_instructions if is_first_turn else _cached_instructions_subsequent
-
-                    # Build the prompt — prepend shared conversation context so
-                    # this agent can see what other agents and the user discussed
                     agent_prompt = current_prompt
                     if ac:
                         _invalidate_message_cache()
                         shared_ctx = _build_shared_context(convo_id, aid, cached_messages=_get_cached_messages())
                         if shared_ctx:
                             if is_handoff:
-                                agent_prompt = (
-                                    f"[Conversation context]\n{shared_ctx}\n\n"
-                                    f"[Handoff from another agent]\n{current_prompt}"
-                                )
+                                agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[Handoff from another agent]\n{current_prompt}"
                             else:
-                                agent_prompt = (
-                                    f"[Conversation context]\n{shared_ctx}\n\n"
-                                    f"[New message from user]\n{current_prompt}"
-                                )
-
-                    # Send agent-start event for multi-agent
-                    if ac:
-                        await ws.send_text(AgentStart(
-                            agent_id=ac.id, agent_name=ac.name, agent_color=ac.color,
-                        ).model_dump_json())
+                                agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[New message from user]\n{current_prompt}"
+                        await ws.send_text(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color).model_dump_json())
 
                     agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
-                    if ac:
-                        _agent_cache[ac.id] = agent_instance
-                    else:
-                        _agent_cache[None] = agent_instance
+                    _agent_cache[ac.id if ac else None] = agent_instance
 
-                    run = RunState(
-                        convo_id=convo_id,
-                        message_history=list(hist),
-                    )
-                    run.subscribers.add(ws)
-                    active_runs[convo_id] = run  # last one wins for reconnect
-
-                    run.task = asyncio.create_task(
+                    agent_run = RunState(convo_id=convo_id, run_id=run_context.run_id, message_history=list(hist))
+                    agent_run.subscribers.update(session.subscribers)
+                    session.run = agent_run
+                    agent_run.task = asyncio.create_task(
                         _run_agent_task(
-                            run, agent_prompt, hist, convo_id,
+                            agent_run, agent_prompt, hist, convo_id,
                             instructions=instructions,
                             agent_instance=agent_instance,
                             agent_id=aid,
                         )
                     )
-                    runs.append(run)
+                    runs.append(agent_run)
 
-                # Wait for all runs to complete, but also listen for stop commands
                 agent_tasks = {r.task for r in runs if r.task}
-                stopped = False
-                ws_recv: asyncio.Task | None = None
-                while agent_tasks:
-                    # Reuse the ws_recv future across iterations to avoid
-                    # concurrent recv() calls on the same websocket
-                    if ws_recv is None or ws_recv.done():
-                        ws_recv = asyncio.ensure_future(ws.receive_text())
-                    done_set, _ = await asyncio.wait(
-                        agent_tasks | {ws_recv},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    for t in done_set:
-                        if t is ws_recv:
-                            try:
-                                raw = t.result()
-                                ctrl = json.loads(raw)
-                                if isinstance(ctrl, dict) and ctrl.get("type") == "stop":
-                                    for r in runs:
-                                        if r.task and not r.task.done():
-                                            r.task.cancel()
-                                    agent_tasks = set()
-                                    stopped = True
-                                    storage.update_conversation_status(convo_id, ConvoStatus.idle)
-                                    done_ev = Done(turns=0, context_tokens=0, context_limit=0)
-                                    await ws.send_text(done_ev.model_dump_json())
-                                elif isinstance(ctrl, dict) and ctrl.get("type") == "tool-confirm-response":
-                                    # Route approval decision to the appropriate run
-                                    tc_id = ctrl.get("tool_call_id", "")
-                                    approved = ctrl.get("approved", False)
-                                    scope = ctrl.get("scope", "once")
-                                    for r in runs:
-                                        if tc_id in r.pending_approvals:
-                                            details = r.pending_approval_details.get(tc_id, {})
-                                            if approved and scope == "project":
-                                                tool_name = details.get("name")
-                                                tool_args = details.get("args")
-                                                if tool_name:
-                                                    add_project_rule(project_path, tool_name, tool_args)
-                                            r.approval_decisions[tc_id] = approved
-                                            r.pending_approvals.discard(tc_id)
-                                            r.pending_approval_details.pop(tc_id, None)
-                                            if not r.pending_approvals:
-                                                r.approval_event.set()
-                                            break
-                            except (json.JSONDecodeError, TypeError):
-                                pass
-                            except WebSocketDisconnect:
-                                raise
-                        else:
-                            agent_tasks.discard(t)
-                # Clean up pending ws_recv when exiting the loop — must await
-                # cancellation so the underlying websocket recv is fully released
-                # before the outer chat loop calls receive_text() again
-                if ws_recv and not ws_recv.done():
-                    ws_recv.cancel()
-                    try:
-                        await ws_recv
-                    except (asyncio.CancelledError, Exception):
-                        pass
-
-                if stopped:
-                    # Sync whatever history we have from cancelled runs
+                try:
+                    if agent_tasks:
+                        await asyncio.gather(*agent_tasks)
+                except asyncio.CancelledError:
                     for r in runs:
-                        if r.message_history:
-                            aid = None
-                            if r.done_event and r.done_event.get("agent_id"):
-                                aid = r.done_event["agent_id"]
-                            agent_histories[aid] = (r.message_history, r.last_context_tokens)
-                    break  # back to chat loop
+                        if r.task and not r.task.done():
+                            r.task.cancel()
+                    raise
 
-                # Sync state from completed runs and collect output for @mention parsing
                 next_targets: list[AgentConfig] = []
                 next_prompt_parts: list[str] = []
                 for r in runs:
                     if r.status == "done":
-                        aid = None
-                        if r.done_event and r.done_event.get("agent_id"):
-                            aid = r.done_event["agent_id"]
+                        aid = r.done_event.get("agent_id") if r.done_event else None
                         agent_histories[aid] = (r.message_history, r.last_context_tokens)
-
-                        # Check agent output for @mentions of other agents
                         if r.full_text and project_agents:
                             mentioned, remaining_text = parse_mentions(r.full_text, project_agents)
-                            # Only follow mentions that are explicit (not default fallback)
-                            # parse_mentions returns defaults when no @mention found — filter those out
-                            explicit_mentions = [
-                                a for a in mentioned
-                                if f"@{a.id}" in r.full_text.lower() or f"@{a.name.lower()}" in r.full_text.lower()
-                            ]
+                            explicit_mentions = [a for a in mentioned if f"@{a.id}" in r.full_text.lower() or f"@{a.name.lower()}" in r.full_text.lower()]
                             if explicit_mentions:
                                 for a in explicit_mentions:
                                     if a.id not in {t.id for t in next_targets}:
                                         next_targets.append(a)
                                 next_prompt_parts.append(remaining_text)
 
-                # If agents mentioned other agents, chain the next round
                 if next_targets and handoff_count < MAX_HANDOFFS:
                     handoff_count += 1
                     current_targets = next_targets
@@ -1260,13 +1061,21 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 else:
                     break
 
+            if session.run and session.run.run_id == run.run_id and session.run.status != "running":
+                session.controller = None
+
     except WebSocketDisconnect:
-        # Unsubscribe from any active run (task continues in background)
-        run = active_runs.get(convo_id)
+        run = session.run
         if run:
             run.subscribers.discard(ws)
             print(f"ws[{convo_id[:8]}]: disconnected, run continues in background")
     finally:
-        if active_ws.get(convo_id) is ws:
-            del active_ws[convo_id]
-        print(f"ws[{convo_id[:8]}]: disconnected (active: {len(active_ws)})")
+        session.subscribers.discard(ws)
+        if session.controller is ws:
+            session.controller = None
+        run = session.run
+        if run:
+            run.subscribers.discard(ws)
+        if not session.subscribers and session.controller is None and session.run is None:
+            sessions.pop(convo_id, None)
+        print(f"ws[{convo_id[:8]}]: disconnected (subscribers: {len(session.subscribers)})")

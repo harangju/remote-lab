@@ -44,10 +44,6 @@ export interface AgentConfig {
   is_default: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Token helpers
-// ---------------------------------------------------------------------------
-
 const TOKEN_KEY = "ws_token";
 
 export function getToken(): string | null {
@@ -61,10 +57,6 @@ export function setToken(token: string) {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
-
-// ---------------------------------------------------------------------------
-// Base fetch wrapper
-// ---------------------------------------------------------------------------
 
 const BASE = "/api";
 
@@ -94,10 +86,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-// ---------------------------------------------------------------------------
-// Projects
-// ---------------------------------------------------------------------------
-
 export function listProjects(): Promise<Project[]> {
   return request("/projects");
 }
@@ -123,10 +111,6 @@ export function updateProject(id: string, body: { name?: string; path?: string; 
 export function deleteProject(id: string): Promise<void> {
   return request(`/projects/${id}`, { method: "DELETE" });
 }
-
-// ---------------------------------------------------------------------------
-// Conversations
-// ---------------------------------------------------------------------------
 
 export function listConvos(projectId: string): Promise<ConvoMeta[]> {
   return request(`/projects/${projectId}/convos`);
@@ -154,10 +138,6 @@ export function deleteConvo(convoId: string): Promise<void> {
   return request(`/convos/${convoId}`, { method: "DELETE" });
 }
 
-// ---------------------------------------------------------------------------
-// Files
-// ---------------------------------------------------------------------------
-
 export function readFile(projectId: string, path: string): Promise<{ path: string; content: string }> {
   return request(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`);
 }
@@ -173,19 +153,10 @@ export function listFiles(projectId: string): Promise<{ root: string; files: str
   return request(`/projects/${projectId}/files`);
 }
 
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
-
 export function listModels(): Promise<{ models: string[]; active: string }> {
   return request("/models");
 }
 
-// ---------------------------------------------------------------------------
-// Agents
-// ---------------------------------------------------------------------------
-
-// Global agents (default for all projects)
 export function listGlobalAgents(): Promise<AgentConfig[]> {
   return request("/agents");
 }
@@ -197,7 +168,6 @@ export function saveGlobalAgents(agents: AgentConfig[]): Promise<AgentConfig[]> 
   });
 }
 
-// Per-project agents (override or fallback to global)
 export function listProjectAgents(projectId: string): Promise<{ agents: AgentConfig[]; custom: boolean }> {
   return request(`/projects/${projectId}/agents`);
 }
@@ -213,10 +183,6 @@ export function deleteProjectAgents(projectId: string): Promise<void> {
   return request(`/projects/${projectId}/agents`, { method: "DELETE" });
 }
 
-// ---------------------------------------------------------------------------
-// Skills
-// ---------------------------------------------------------------------------
-
 export interface Skill {
   name: string;
   type: "server" | "prompt";
@@ -228,25 +194,21 @@ export function listSkills(projectId: string): Promise<Skill[]> {
   return request(`/projects/${projectId}/skills`);
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket
-// ---------------------------------------------------------------------------
-
 export type WsEvent =
   | { type: "auth-ok" }
   | { type: "message-ack"; message_id: string }
-  | { type: "running" }
-  | { type: "agent-start"; agent_id: string; agent_name: string; agent_color?: string }
-  | { type: "thinking-delta"; delta: string; agent_id?: string }
-  | { type: "text-delta"; delta: string; agent_id?: string }
-  | { type: "tool-use"; name: string; input?: string; agent_id?: string }
-  | { type: "tool-result"; name: string; output: string; agent_id?: string }
-  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; agent_id?: string; can_allow_project?: boolean }
-  | { type: "done"; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
+  | { type: "running"; run_id: string }
+  | { type: "agent-start"; run_id: string; agent_id: string; agent_name: string; agent_color?: string }
+  | { type: "thinking-delta"; run_id: string; delta: string; agent_id?: string }
+  | { type: "text-delta"; run_id: string; delta: string; agent_id?: string }
+  | { type: "tool-use"; run_id: string; name: string; input?: string; agent_id?: string }
+  | { type: "tool-result"; run_id: string; name: string; output: string; agent_id?: string }
+  | { type: "tool-confirm"; run_id: string; tool_call_id: string; name: string; args?: string; agent_id?: string; can_allow_project?: boolean }
+  | { type: "done"; run_id: string; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "skill-result"; skill: string; output: string }
   | { type: "title-updated"; title: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; run_id?: string };
 
 export function connectWs(convoId: string): WebSocket {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";

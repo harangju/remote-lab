@@ -518,7 +518,9 @@ export function Chat() {
   // Track active agent info during streaming (for multi-agent labeling)
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessagesRef = useRef<PendingMessage[]>([]);
   const flushingQueueRef = useRef(false);
@@ -560,6 +562,11 @@ export function Chat() {
     } finally {
       flushingQueueRef.current = false;
     }
+  }, []);
+
+  const setCurrentRunId = useCallback((runId: string | null) => {
+    activeRunIdRef.current = runId;
+    setActiveRunId(runId);
   }, []);
 
   const queueMessage = useCallback((text: string) => {
@@ -742,19 +749,23 @@ export function Chat() {
           setError(null);
           break;
         case "running":
+          setCurrentRunId(data.run_id);
           setBusy(true);
           setWaitingForModel(true);
           break;
         case "agent-start": {
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color };
           activeAgentRef.current = ag;
           setActiveAgent(ag);
           break;
         }
         case "thinking-delta":
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setThinking(true);
           break;
         case "text-delta": {
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setThinking(false);
           setWaitingForModel(false);
           const blocks = blocksRef.current;
@@ -769,12 +780,14 @@ export function Chat() {
           break;
         }
         case "tool-use": {
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(false);
           blocksRef.current = [...blocksRef.current, { type: "tool", name: data.name, input: data.input }];
           setStreamBlocks(blocksRef.current);
           break;
         }
         case "tool-result": {
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(true);
           const blocks = [...blocksRef.current];
           for (let i = blocks.length - 1; i >= 0; i--) {
@@ -794,6 +807,7 @@ export function Chat() {
           break;
         }
         case "tool-confirm": {
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(false);
           blocksRef.current = [...blocksRef.current, {
             type: "tool-confirm" as const,
@@ -807,6 +821,7 @@ export function Chat() {
           break;
         }
         case "done": {
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           const finalBlocks = blocksRef.current;
           if (finalBlocks.length > 0) {
             const ag = activeAgentRef.current;
@@ -830,6 +845,7 @@ export function Chat() {
             context_limit: data.context_limit,
           }));
           setBusy(false);
+          setCurrentRunId(null);
           break;
         }
         case "compacted":
@@ -840,6 +856,7 @@ export function Chat() {
           }]);
           setWaitingForModel(false);
           setBusy(false);
+          setCurrentRunId(null);
           break;
         case "skill-result":
           setMessages((msgs) => [...msgs, {
@@ -853,6 +870,7 @@ export function Chat() {
           setTitle(data.title);
           break;
         case "error":
+          if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);
           if (blocksRef.current.length > 0) {
             setMessages((msgs) => [...msgs, { role: "assistant", blocks: [...blocksRef.current] }]);
@@ -871,6 +889,8 @@ export function Chat() {
       setBusy(false);
       setWaitingForModel(false);
       setThinking(false);
+      setCurrentRunId(null);
+      setCurrentRunId(null);
       if (event.code !== 1000 && event.code !== 4409) {
         reconnectTimer.current = window.setTimeout(
           () => setWsAttempt((a) => a + 1),
@@ -1071,8 +1091,9 @@ export function Chat() {
 
   const stop = () => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "stop" }));
+    const runId = activeRunIdRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN && runId) {
+      ws.send(JSON.stringify({ type: "stop", run_id: runId }));
     }
     // Optimistically reset busy state so UI is responsive even if WS is flaky
     setBusy(false);
@@ -1082,8 +1103,9 @@ export function Chat() {
 
   const handleToolApproval = useCallback((toolCallId: string, approved: boolean, scope: ApprovalScope = "once") => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "tool-confirm-response", tool_call_id: toolCallId, approved, scope }));
+    const runId = activeRunIdRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN && runId) {
+      ws.send(JSON.stringify({ type: "tool-confirm-response", run_id: runId, tool_call_id: toolCallId, approved, scope }));
     }
     // Update the block status
     const blocks = blocksRef.current.map((b) =>
