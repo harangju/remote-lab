@@ -20,12 +20,12 @@ interface ToolCall {
   output?: string;
 }
 
-type ApprovalScope = "once" | "conversation" | "project";
+type ApprovalScope = "once" | "project";
 
 type StreamBlock =
   | { type: "text"; content: string }
   | { type: "tool"; name: string; input?: string; output?: string }
-  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied"; canAllowConversation?: boolean; canAllowProject?: boolean; approvedScope?: ApprovalScope };
+  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
 
 interface DisplayMessage {
   role: "user" | "assistant";
@@ -225,6 +225,14 @@ function ApprovalCard({ block, onRespond }: {
 }) {
   const [expanded, setExpanded] = useState(false);
   const isPending = block.status === "pending";
+  const statusLabel =
+    block.status === "approved"
+      ? block.approvedScope === "project"
+        ? "Approved for project"
+        : "Approved once"
+      : block.status === "denied"
+        ? "Denied"
+        : "Approval required";
 
   return (
     <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0, maxWidth: "85%", opacity: isPending ? 1 : 0.6 }}>
@@ -248,6 +256,16 @@ function ApprovalCard({ block, onRespond }: {
           {isPending ? <ShieldCheck size={13} /> : block.status === "approved" ? <ShieldCheck size={13} /> : <ShieldX size={13} />}
         </span>
         <span style={{ fontFamily: "monospace" }}>{block.name}</span>
+        {!isPending && (
+          <span style={{
+            fontSize: "0.72rem",
+            color: block.status === "approved" ? "var(--text-muted)" : "#c4554d",
+            border: "1px solid var(--border)",
+            borderRadius: "999px",
+            padding: "1px 6px",
+            flexShrink: 0,
+          }}>{statusLabel}</span>
+        )}
         {block.args && (
           <span style={{
             fontFamily: "monospace",
@@ -281,29 +299,6 @@ function ApprovalCard({ block, onRespond }: {
               >
                 <ShieldCheck size={12} /> Allow once
               </button>
-              {block.canAllowConversation && (
-                <button
-                  onClick={() => onRespond(block.tool_call_id, true, "conversation")}
-                  style={{
-                    background: "transparent",
-                    color: "var(--text-muted)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "5px",
-                    padding: "3px 10px",
-                    fontSize: "0.75rem",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "4px",
-                    minHeight: "22px",
-                    boxSizing: "border-box",
-                    flexShrink: 0,
-                  }}
-                >
-                  <ShieldCheck size={12} /> Allow in convo
-                </button>
-              )}
               {block.canAllowProject && (
                 <button
                   onClick={() => onRespond(block.tool_call_id, true, "project")}
@@ -806,7 +801,6 @@ export function Chat() {
             name: data.name,
             args: data.args,
             status: "pending" as const,
-            canAllowConversation: data.can_allow_conversation !== false,
             canAllowProject: data.can_allow_project !== false,
           }];
           setStreamBlocks(blocksRef.current);
@@ -1090,9 +1084,6 @@ export function Chat() {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "tool-confirm-response", tool_call_id: toolCallId, approved, scope }));
-    }
-    if (approved && scope === "conversation") {
-      setAutonomousToolsEnabled(true);
     }
     // Update the block status
     const blocks = blocksRef.current.map((b) =>

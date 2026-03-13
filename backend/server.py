@@ -307,7 +307,6 @@ async def _run_agent_task(
                             name=tool_call.tool_name,
                             args=str(tool_call.args)[:500] if tool_call.args else None,
                             agent_id=agent_id,
-                            can_allow_conversation=not always_confirm,
                             can_allow_project=not always_confirm,
                         ).model_dump_json())
 
@@ -1193,8 +1192,6 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                                 tool_args = details.get("args")
                                                 if tool_name:
                                                     add_project_rule(project_path, tool_name, tool_args)
-                                            elif approved and scope == "conversation":
-                                                storage.update_conversation_autonomy(convo_id, True)
                                             r.approval_decisions[tc_id] = approved
                                             r.pending_approvals.discard(tc_id)
                                             r.pending_approval_details.pop(tc_id, None)

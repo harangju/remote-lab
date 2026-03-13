@@ -80,7 +80,6 @@ class ToolConfirm(BaseModel):
     name: str
     args: dict | str | None = None
     agent_id: str | None = None
-    can_allow_conversation: bool = True
     can_allow_project: bool = True
 
 
@@ -93,3 +92,4 @@ class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str
     recoverable: bool = False
+
