@@ -1,97 +1,74 @@
 # Remote Lab
 
-**Remote Lab — a self-hosted, self-hackable, agentic chat+file workspace.**
+**Remote Lab — a persistent, mobile-friendly, self-hosted AI workspace for real files and real tools.**
 
-Remote Lab is for people who want AI to work in a **real environment**, not in a disposable chat or a job queue.
+I wanted something like Claude Code, but:
 
-It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, coordinate multi-agent workflows with `@mentions`, and even improve Remote Lab from inside Remote Lab.
+- **persistent** — keeps running after you leave, and you can reconnect later to monitor progress
+- **mobile-friendly** — a real chat UI you can use from your phone, plus optional voice input
+- **connected to real projects** — files, bash, and actual project directories
+- **editable** — inspect and edit files in the same interface
+- **private** — runs on your own server
+- **hackable from within itself** — use the tool to improve the tool
+- **not locked to one model** — choose the provider that fits
 
-## Why this exists
+Existing tools each got part of this right, but not the whole workflow.
 
-Most AI tools split into a few camps:
+- **chat apps** are easy to use, but usually do not have real system access
+- **terminal coding agents** are powerful, but are not great on mobile and usually assume an active session
+- **remote agent systems** can be persistent, but don't have great UI and system access
 
-- **chat apps** — conversational, but disconnected from your files and machine
-- **local coding tools** — powerful, but tied to one session on one computer
-- **agent runners** — persistent, but often feel like job queues or message-bot wrappers
+Remote Lab is an attempt to combine those missing pieces in one place.
 
-Remote Lab tries to combine the best parts:
+## Features
 
-- **conversational like Claude/ChatGPT**
-- **acts on real files like Claude Code**
-- **persistent and remote like self-hosted agent systems**
+### Persistent
 
-## What makes it useful
+Keep an agent running after you leave. Close the browser, come back later, reconnect to the same conversation, and monitor what happened while you were away.
 
-### 1. It’s a real workspace, not just a chat
+### Mobile-friendly
 
-You don’t just send prompts. You chat, inspect files, edit files, and watch work happen in one place.
+Use a real chat UI from your phone, not just a terminal session. Optional voice input lets you speak into the draft before sending.
 
-That makes it useful for more than coding:
+### System access
 
-- writing
-- research
-- docs
-- repo maintenance
-- debugging
-- ops work
-- any other file-based work
+Agents can work on real project directories with real tools:
 
-### 2. It keeps running after you leave
-
-Remote Lab is built for **asynchronous work**.
-
-Give an agent something to do, close the browser, come back later, and continue from the same conversation. You can review what happened, redirect it, or send it off again.
-
-### 3. It works on your actual machine
-
-Agents can operate on your real project directory with real shell tools.
-
-That means:
-
-- real files
-- real git repos
-- real bash
+- files
+- bash
+- git repos
 - real outputs you can keep, diff, commit, or publish
 
-### 4. It’s conversational, but not chat-only
+### File editing
 
-The interface is a hybrid: chat for direction, files for inspection and editing.
+Inspect and edit files in the same interface you use to chat with the agent.
 
-That’s the sweet spot between:
+### Shareable output
 
-- a pure chat box with no access to the work
-- a traditional app UI with no flexible conversation layer
-- Slack/Telegram-style control loops that are fine for notifications but awkward for real work
+Publish Markdown or HTML artifacts directly from the workspace when you want to share results.
 
-Remote Lab also supports multi-agent workflows via `@mentions`, so you can route work between specialized agents inside the same workspace.
-
-### 5. It’s self-hosted and minimal
+### Private / self-hosted
 
 Remote Lab is meant to be personal infrastructure.
 
-- runs on a cheap VPS
+- runs on your own VPS
 - no database
 - flat-file storage
-- small dependency footprint
-- simple enough to understand and modify
+- simple enough to inspect and modify
 
-### 6. It’s self-hackable
+### Hackable from within itself
 
-One of the coolest parts is that you can improve Remote Lab **from inside itself**.
+One of the most interesting parts is that you can improve Remote Lab from inside Remote Lab.
 
-You can use Remote Lab to edit Remote Lab, test changes, and iterate on the system while working in it.
+You can use it to edit its own code, test changes, and iterate on the system while working in it.
 
-## What’s included
+### Model / provider agnostic
 
-- persistent agent conversations
-- chat UI with streaming responses
-- file panel/editor
-- project-scoped bash and file tools
-- multi-agent workflows with `@mentions`
-- mobile-friendly remote access
-- built-in docs publishing
-- flat-file storage, no database
-- self-hosted deployment on your own VPS
+Remote Lab supports multiple providers and lets you switch models globally or per agent.
+
+### Multi-agent delegation
+
+Coordinate work between specialized agents with `@mentions` inside the same workspace.
 
 ## Core ideas
 

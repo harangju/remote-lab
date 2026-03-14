@@ -24,7 +24,7 @@ Tool availability can vary by agent configuration.
 
 Click a filename in the chat to open it in the side panel.
 
-The file panel includes a full CodeMirror editor for inspecting and editing files without leaving the conversation.
+The file panel includes a full CodeMirror editor for inspecting and editing files without leaving the conversation. That keeps chat, tool use, and file editing in the same workspace.
 
 ## File finder
 

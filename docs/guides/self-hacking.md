@@ -2,7 +2,7 @@
 
 One of Remote Lab's most useful properties is that you can improve it from inside itself.
 
-You can use Remote Lab to edit Remote Lab, inspect files, run builds, and iterate on the app while working in the same environment.
+You can use Remote Lab to edit Remote Lab, inspect files, run builds, and iterate on the app while working in the same environment. It is not just a tool you use — it is a tool you can hack on from within the workspace itself.
 
 ## Frontend changes
 

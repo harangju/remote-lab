@@ -27,9 +27,9 @@ Typical examples:
 
 Each project can have multiple conversations.
 
-Conversations persist on disk, so you can close the browser and continue later. Agent runs are decoupled from the WebSocket connection, which means work can continue server-side while you are disconnected.
+Conversations persist on disk, so you can close the browser and continue later from the same laptop or a different device. Agent runs are decoupled from the WebSocket connection, which means work can continue server-side while you are disconnected.
 
-When you reconnect, you see the messages and tool activity that happened while you were away.
+When you reconnect, you can monitor the messages and tool activity that happened while you were away.
 
 ## Chat
 

@@ -2,6 +2,8 @@
 
 This is the fastest path to a working Remote Lab install on a VPS.
 
+Remote Lab is a persistent, mobile-friendly, self-hosted AI workspace: you can run agents against real files and shell tools on your own server, leave, and reconnect later from your laptop or phone.
+
 If you want the full server provisioning and operations details, read [Deployment](reference/deployment.md).
 
 ## What you need
