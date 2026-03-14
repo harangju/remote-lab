@@ -224,6 +224,6 @@ async def doc_or_asset(path: str, request: Request):
         return HTMLResponse(_layout("Not Found", body), status_code=404)
 
     md_text = resolved.read_text(errors="replace")
-    html = markdown.markdown(md_text, extensions=["fenced_code", "tables", "toc"])
+    html = markdown.markdown(md_text, extensions=["fenced_code", "tables", "toc", "sane_lists"])
     body = f'<article class="article">\n{html}\n</article>'
     return HTMLResponse(_layout(slug, body))
