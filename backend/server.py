@@ -38,7 +38,7 @@ from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, Error
+from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, VoiceState, VoiceTranscript, Error
 from backend.skills import get_skills, get_skill, SkillType
 from backend.permissions import is_tool_auto_allowed, add_project_rule, tool_is_always_confirmed
 from backend.models import (
@@ -48,6 +48,7 @@ from backend.models import (
 )
 from backend import storage
 from backend import tools as agent_tools
+from backend.stt import DeepgramSTTSession
 
 
 def get_workdir() -> Path:
@@ -124,6 +125,9 @@ class ConversationSession:
     subscribers: set[WebSocket] = field(default_factory=set)
     run: RunState | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    stt_session: DeepgramSTTSession | None = None
+    stt_partial: str = ""
+    stt_final: str = ""
 
 
 sessions: dict[str, ConversationSession] = {}
@@ -1146,6 +1150,70 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                             if run.task and not run.task.done():
                                 run.task.cancel()
                         continue
+                    if ctrl.get("type") == "voice-start":
+                        if session.run and session.run.status == "running":
+                            await ws.send_text(Error(message="Voice input is unavailable while the assistant is running", recoverable=True).model_dump_json())
+                            continue
+                        if session.stt_session is not None:
+                            await ws.send_text(Error(message="Voice input already active", recoverable=True).model_dump_json())
+                            continue
+                        session.stt_partial = ""
+                        session.stt_final = ""
+                        await ws.send_text(VoiceState(state="starting").model_dump_json())
+
+                        async def _on_transcript(text: str, is_final: bool) -> None:
+                            if is_final:
+                                session.stt_final = f"{session.stt_final} {text}".strip()
+                                session.stt_partial = ""
+                            else:
+                                session.stt_partial = text
+                            combined = f"{session.stt_final} {session.stt_partial}".strip()
+                            await ws.send_text(VoiceTranscript(text=combined, is_final=is_final).model_dump_json())
+
+                        async def _on_voice_error(message: str) -> None:
+                            await ws.send_text(Error(message=message, recoverable=True).model_dump_json())
+                            await ws.send_text(VoiceState(state="stopped").model_dump_json())
+                            session.stt_session = None
+                            session.stt_partial = ""
+                            session.stt_final = ""
+
+                        async def _on_voice_state(state: str) -> None:
+                            if state in {"listening", "stopped"}:
+                                await ws.send_text(VoiceState(state=state).model_dump_json())
+
+                        try:
+                            stt = DeepgramSTTSession(_on_transcript, _on_voice_error, _on_voice_state)
+                            await stt.start()
+                            session.stt_session = stt
+                        except Exception:
+                            await ws.send_text(Error(message="Voice input failed. Your existing draft was preserved.", recoverable=True).model_dump_json())
+                            await ws.send_text(VoiceState(state="stopped").model_dump_json())
+                        continue
+                    if ctrl.get("type") == "voice-audio":
+                        stt = session.stt_session
+                        if stt is None:
+                            continue
+                        chunk_b64 = ctrl.get("audio", "")
+                        if not isinstance(chunk_b64, str) or not chunk_b64:
+                            continue
+                        import base64
+                        try:
+                            await stt.send_audio(base64.b64decode(chunk_b64))
+                        except Exception:
+                            await ws.send_text(Error(message="Voice input failed. Your existing draft was preserved.", recoverable=True).model_dump_json())
+                        continue
+                    if ctrl.get("type") == "voice-stop":
+                        stt = session.stt_session
+                        session.stt_session = None
+                        if stt is not None:
+                            try:
+                                await stt.stop()
+                            except Exception:
+                                await ws.send_text(Error(message="Voice input failed. Your existing draft was preserved.", recoverable=True).model_dump_json())
+                        session.stt_partial = ""
+                        session.stt_final = ""
+                        await ws.send_text(VoiceState(state="stopped").model_dump_json())
+                        continue
                     if ctrl.get("type") == "tool-confirm-response":
                         tc_id = str(ctrl.get("tool_call_id", ""))
                         run_id = str(ctrl.get("run_id", ""))
@@ -1517,6 +1585,12 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             run.subscribers.discard(ws)
             print(f"ws[{convo_id[:8]}]: disconnected, run continues in background")
     finally:
+        if session.stt_session is not None:
+            try:
+                await session.stt_session.stop()
+            except Exception:
+                pass
+            session.stt_session = None
         session.subscribers.discard(ws)
         if session.controller is ws:
             session.controller = None

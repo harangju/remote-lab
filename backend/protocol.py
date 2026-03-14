@@ -96,6 +96,17 @@ class TitleUpdated(BaseModel):
     title: str
 
 
+class VoiceState(BaseModel):
+    type: Literal["voice-state"] = "voice-state"
+    state: Literal["starting", "listening", "stopped"]
+
+
+class VoiceTranscript(BaseModel):
+    type: Literal["voice-transcript"] = "voice-transcript"
+    text: str
+    is_final: bool = False
+
+
 class Error(BaseModel):
     type: Literal["error"] = "error"
     message: str

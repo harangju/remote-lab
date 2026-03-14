@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMe
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment, type ConvoDetail } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
@@ -619,6 +619,12 @@ export function Chat() {
   const [dragActive, setDragActive] = useState(false);
   const [dragDepth, setDragDepth] = useState(0);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [voiceUiActive, setVoiceUiActive] = useState(false);
+  const [voiceElapsedSec, setVoiceElapsedSec] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceBaseText, setVoiceBaseText] = useState("");
+  const [voiceTranscriptText, setVoiceTranscriptText] = useState("");
+  const [voiceStatusText, setVoiceStatusText] = useState("Listening…");
   const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -631,6 +637,9 @@ export function Chat() {
   const reconnectTimer = useRef<number | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const voiceTimerRef = useRef<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
   // Panel hook
   const panel = usePanel(projectId);
@@ -877,6 +886,23 @@ export function Chat() {
           markMessagePending(data.message_id, false);
           setError(null);
           break;
+        case "voice-state":
+          if (data.state === "starting") {
+            setVoiceError(null);
+            setVoiceStatusText("Starting microphone…");
+            setVoiceUiActive(true);
+          } else if (data.state === "listening") {
+            setVoiceStatusText("Listening…");
+            setVoiceUiActive(true);
+          } else if (data.state === "stopped") {
+            setVoiceStatusText("Listening…");
+            setVoiceUiActive(false);
+          }
+          break;
+        case "voice-transcript":
+          setVoiceTranscriptText(data.text);
+          setInput(`${voiceBaseText}${voiceBaseText && data.text ? " " : ""}${data.text}`);
+          break;
         case "running":
           setCurrentRunId(data.run_id);
           setBusy(true);
@@ -998,6 +1024,11 @@ export function Chat() {
           setTitle(data.title);
           break;
         case "error":
+          if (!data.run_id && data.message.startsWith("Voice input failed")) {
+            setVoiceError(data.message);
+            setVoiceUiActive(false);
+            break;
+          }
           if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);
           if (blocksRef.current.length > 0) {
@@ -1036,6 +1067,10 @@ export function Chat() {
     return () => {
       cancelled = true;
       clearTimeout(reconnectTimer.current);
+      mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
       ws.close();
     };
   }, [convId, wsAttempt, flushPendingQueue, reloadConversation, setCurrentRunId]);
@@ -1416,6 +1451,86 @@ export function Chat() {
     document.addEventListener("mouseup", onMouseUp);
   }, [panelWidth]);
 
+  useEffect(() => {
+    if (!voiceUiActive) {
+      if (voiceTimerRef.current !== null) {
+        window.clearInterval(voiceTimerRef.current);
+        voiceTimerRef.current = null;
+      }
+      setVoiceElapsedSec(0);
+      return;
+    }
+    voiceTimerRef.current = window.setInterval(() => {
+      setVoiceElapsedSec((prev) => prev + 1);
+    }, 1000);
+    return () => {
+      if (voiceTimerRef.current !== null) {
+        window.clearInterval(voiceTimerRef.current);
+        voiceTimerRef.current = null;
+      }
+    };
+  }, [voiceUiActive]);
+
+  const stopVoiceCapture = useCallback(() => {
+    setVoiceStatusText("Finishing…");
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "voice-stop" }));
+    }
+  }, []);
+
+  const startVoiceCapture = useCallback(async () => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || busy || voiceUiActive) return;
+    setVoiceError(null);
+    setVoiceBaseText(input.trim());
+    setVoiceTranscriptText("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : (MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "");
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.addEventListener("dataavailable", async (event) => {
+        if (!event.data || event.data.size === 0) return;
+        const buf = await event.data.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        const b64 = btoa(binary);
+        const socket = wsRef.current;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "voice-audio", audio: b64 }));
+        }
+      });
+      ws.send(JSON.stringify({ type: "voice-start" }));
+      recorder.start(250);
+      setVoiceUiActive(true);
+    } catch (e: any) {
+      setVoiceError(e?.name === "NotAllowedError" ? "Microphone access was denied" : "Voice input failed. Your existing draft was preserved.");
+      setVoiceStatusText("Listening…");
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+      setVoiceUiActive(false);
+    }
+  }, [busy, input]);
+
+  const formatVoiceElapsed = (seconds: number) => {
+    const mins = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const secs = (seconds % 60).toString().padStart(2, "0");
+    return `${mins}:${secs}`;
+  };
+
   return (
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       {/* Chat column */}
@@ -1786,6 +1901,11 @@ export function Chat() {
               {error}
             </div>
           )}
+          {voiceError && (
+            <div style={{ fontSize: "0.8rem", color: "#c4554d", textAlign: "center", margin: "8px 0" }}>
+              {voiceError}
+            </div>
+          )}
 
           <div style={{ flexShrink: 0, height: `${bottomSlackPx}px`, pointerEvents: "none" }} />
         </div>
@@ -1929,6 +2049,38 @@ export function Chat() {
             transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
             position: "relative",
           }}>
+            {voiceUiActive && (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                padding: "8px 10px",
+                borderRadius: "10px",
+                border: "1px solid color-mix(in srgb, var(--accent) 35%, var(--border))",
+                background: "color-mix(in srgb, var(--accent) 14%, var(--bg))",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--accent)", display: "inline-block", animation: "pulse 1.2s infinite", flexShrink: 0 }} />
+                  <span style={{ fontSize: "0.85rem", fontWeight: 500, minWidth: 0 }}>{voiceStatusText}</span>
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontFamily: "monospace" }}>{formatVoiceElapsed(voiceElapsedSec)}</span>
+                </div>
+                <button type="button" onClick={stopVoiceCapture} style={{
+                  background: "color-mix(in srgb, var(--bg) 76%, var(--accent) 24%)",
+                  color: "var(--text)",
+                  border: "1px solid color-mix(in srgb, var(--accent) 40%, var(--border))",
+                  borderRadius: "999px",
+                  padding: "5px 10px",
+                  fontSize: "0.78rem",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}>
+                  <Square size={12} fill="currentColor" /> Stop voice
+                </button>
+              </div>
+            )}
             {dragActive && (
               <div style={{
                 display: "flex",
@@ -1969,6 +2121,7 @@ export function Chat() {
             <textarea
               ref={inputRef}
               rows={1}
+              readOnly={voiceUiActive}
               style={{
                 ...inputStyle,
                 background: "transparent",
@@ -1989,6 +2142,28 @@ export function Chat() {
               }}
               autoFocus
             />
+            {!busy && !voiceUiActive && (
+              <button
+                type="button"
+                onClick={() => { void startVoiceCapture(); }}
+                style={{
+                  background: "color-mix(in srgb, var(--accent) 12%, var(--bg))",
+                  color: "var(--text)",
+                  border: "1px solid color-mix(in srgb, var(--accent) 32%, var(--border))",
+                  borderRadius: "999px",
+                  padding: "0 12px",
+                  minHeight: "34px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  flexShrink: 0,
+                  fontWeight: 500,
+                }}
+                data-tooltip="Start voice input"
+              >
+                <Mic size={15} /> Voice
+              </button>
+            )}
             {busy ? (
               <button type="button" onClick={stop} style={{ ...btnPrimary, borderRadius: "8px", background: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
                 <Square size={14} fill="currentColor" /> Stop

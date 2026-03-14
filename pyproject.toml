@@ -7,6 +7,8 @@ dependencies = [
     "fastapi[standard]",
     "markdown",
     "python-dotenv",
+    "deepgram-sdk",
+    "websockets",
 ]
 
 [project.scripts]

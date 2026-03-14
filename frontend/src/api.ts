@@ -228,6 +228,8 @@ export function listSkills(projectId: string): Promise<Skill[]> {
 export type WsEvent =
   | { type: "auth-ok" }
   | { type: "message-ack"; message_id: string }
+  | { type: "voice-state"; state: "starting" | "listening" | "stopped" }
+  | { type: "voice-transcript"; text: string; is_final: boolean }
   | { type: "running"; run_id: string }
   | { type: "agent-start"; run_id: string; agent_id: string; agent_name: string; agent_color?: string }
   | { type: "thinking-delta"; run_id: string; delta: string; agent_id?: string }
