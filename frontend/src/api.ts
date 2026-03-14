@@ -239,7 +239,7 @@ export type WsEvent =
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "skill-result"; skill: string; output: string }
   | { type: "title-updated"; title: string }
-  | { type: "error"; message: string; run_id?: string };
+  | { type: "error"; message: string; run_id?: string; recoverable?: boolean };
 
 export function connectWs(convoId: string): WebSocket {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";

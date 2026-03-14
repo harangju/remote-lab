@@ -821,6 +821,10 @@ export function Chat() {
     setAutonomousToolsEnabled(rebuilt.autonomousToolsEnabled);
     setMessages(rebuilt.messages);
     setMeta(rebuilt.meta);
+    blocksRef.current = [];
+    setStreamBlocks([]);
+    activeAgentRef.current = null;
+    setActiveAgent(null);
   }, [convId, projectId]);
 
   // Load agent configs + existing messages together so agent labels resolve
@@ -843,14 +847,9 @@ export function Chat() {
   useEffect(() => {
     if (!convId) return;
     let cancelled = false;
-    let sawDisconnect = false;
-    const resetLiveState = () => {
-      blocksRef.current = [];
-      setStreamBlocks([]);
+    const clearConnectionOnlyState = () => {
       setThinking(false);
       setWaitingForModel(false);
-      activeAgentRef.current = null;
-      setActiveAgent(null);
       setCurrentRunId(null);
       setBusy(false);
     };
@@ -868,13 +867,9 @@ export function Chat() {
       switch (data.type) {
         case "auth-ok":
           setConnected(true);
-          if (sawDisconnect) {
-            resetLiveState();
-            reloadConversation().catch((e) => {
-              if (!cancelled) setError(e.message);
-            });
-            sawDisconnect = false;
-          }
+          reloadConversation().catch((e) => {
+            if (!cancelled) setError(e.message);
+          });
           flushPendingQueue();
           break;
         case "message-ack":
@@ -1012,16 +1007,20 @@ export function Chat() {
           setStreamBlocks([]);
           setThinking(false);
           setWaitingForModel(false);
+          activeAgentRef.current = null;
+          setActiveAgent(null);
           setBusy(false);
           setCurrentRunId(null);
+          if (data.recoverable && convId) {
+            reloadConversation().catch((e) => setError(e.message));
+          }
           break;
       }
     });
 
     ws.addEventListener("close", (event) => {
-      sawDisconnect = true;
       setConnected(false);
-      resetLiveState();
+      clearConnectionOnlyState();
       if (event.code !== 1000 && event.code !== 4409) {
         reconnectTimer.current = window.setTimeout(
           () => setWsAttempt((a) => a + 1),
@@ -1030,9 +1029,8 @@ export function Chat() {
       }
     });
     ws.addEventListener("error", () => {
-      sawDisconnect = true;
       setConnected(false);
-      resetLiveState();
+      clearConnectionOnlyState();
     });
 
     return () => {
@@ -1696,55 +1694,74 @@ export function Chat() {
             </React.Fragment>
           ))}
 
-          {/* Live streaming: agent label */}
-          {activeAgent && streamBlocks.length > 0 && (
-            <div style={{
-              fontSize: "0.7rem",
-              fontWeight: 600,
-              color: activeAgent.color || "var(--text-muted)",
-              marginTop: "6px",
-              marginBottom: "1px",
-              alignSelf: "flex-start",
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-            }}>
-              <span style={{
-                width: 6, height: 6, borderRadius: "50%",
-                background: activeAgent.color || "var(--text-muted)",
-                display: "inline-block",
-              }} />
-              {activeAgent.name}
-            </div>
-          )}
-
-          {/* Live streaming blocks */}
-          {streamBlocks.map((b, j) => (
-            b.type === "tool-confirm" ? (
-              <div key={j} style={{ alignSelf: "flex-start", margin: "4px 0 2px" }}>
-                <ApprovalCard block={b} onRespond={handleToolApproval} />
-              </div>
-            ) : b.type === "tool" ? (
-              <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                <ToolChip tool={b} live={!b.output} onOpenFile={handleOpenFile} />
-              </div>
-            ) : b.type === "text" && b.content ? (
-              <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
-                <div style={{ ...msgBubble("assistant", activeAgent?.color), maxWidth: "100%", paddingRight: "42px" }}>
-                  <MdContent text={b.content} />
-                </div>
-                <button
-                  onClick={() => navigator.clipboard.writeText(b.content)}
-                  data-tooltip="Copy message"
-                  style={assistantCopyBtnStyle}
-                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
-                >
-                  <Copy size={12} />
-                </button>
-              </div>
-            ) : null
-          ))}
+          {/* Live streaming / reconnect fallback */}
+          {(() => {
+            const reconnectPreview = !connected && streamBlocks.length > 0 ? [{
+              role: "assistant" as const,
+              blocks: streamBlocks,
+              agent_id: activeAgent?.id,
+              agent_name: activeAgent?.name,
+              agent_color: activeAgent?.color,
+            }] : [];
+            const liveRows = connected && streamBlocks.length > 0 ? [{
+              role: "assistant" as const,
+              blocks: streamBlocks,
+              agent_id: activeAgent?.id,
+              agent_name: activeAgent?.name,
+              agent_color: activeAgent?.color,
+              live: true,
+            }] : [];
+            return [...reconnectPreview, ...liveRows].map((m, idx) => (
+              <React.Fragment key={`live-${idx}`}>
+                {m.agent_name && (
+                  <div style={{
+                    fontSize: "0.7rem",
+                    fontWeight: 600,
+                    color: m.agent_color || "var(--text-muted)",
+                    marginTop: "6px",
+                    marginBottom: "1px",
+                    alignSelf: "flex-start",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}>
+                    <span style={{
+                      width: 6, height: 6, borderRadius: "50%",
+                      background: m.agent_color || "var(--text-muted)",
+                      display: "inline-block",
+                    }} />
+                    {m.agent_name}
+                  </div>
+                )}
+                {m.blocks.map((b, j) => (
+                  b.type === "tool-confirm" ? (
+                    <div key={j} style={{ alignSelf: "flex-start", margin: "4px 0 2px" }}>
+                      <ApprovalCard block={b} onRespond={handleToolApproval} />
+                    </div>
+                  ) : b.type === "tool" ? (
+                    <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
+                      <ToolChip tool={b} live={!!(m as any).live && !b.output} onOpenFile={handleOpenFile} />
+                    </div>
+                  ) : b.type === "text" && b.content ? (
+                    <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
+                      <div style={{ ...msgBubble("assistant", m.agent_color), maxWidth: "100%", paddingRight: "42px" }}>
+                        <MdContent text={b.content} />
+                      </div>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(b.content)}
+                        data-tooltip="Copy message"
+                        style={assistantCopyBtnStyle}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                  ) : null
+                ))}
+              </React.Fragment>
+            ));
+          })()}
 
           {/* Thinking / waiting indicator */}
           {waitingForModel && (
