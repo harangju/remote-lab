@@ -59,9 +59,12 @@ Edit `.env` and set:
 WS_TOKEN=<generate with: openssl rand -hex 32>
 ALLOWED_ORIGIN=https://lab.yourdomain.com
 ANTHROPIC_API_KEY=sk-ant-...
+DEEPGRAM_API_KEY=<your Deepgram API key>   # optional, enables voice input
 ```
 
 You can also add other providers such as OpenAI or Gemini.
+
+If `DEEPGRAM_API_KEY` is set, the chat composer shows a **Voice** button that streams microphone audio to Deepgram and inserts a live transcript into the draft. If you leave it unset, the rest of the app still works normally — voice input is just unavailable.
 
 ## 4. Make files writable by the service
 

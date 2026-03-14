@@ -104,11 +104,14 @@ WS_TOKEN=<generate with: openssl rand -hex 32>
 ALLOWED_ORIGIN=https://lab.yourdomain.com
 PUBLIC_BASE_URL=https://docs.yourdomain.com
 ANTHROPIC_API_KEY=sk-ant-...
+DEEPGRAM_API_KEY=<your Deepgram API key>   # optional, enables voice input
 OPENAI_API_KEY=sk-...   # optional
 GOOGLE_API_KEY=AI...    # optional
 ```
 
 `PUBLIC_BASE_URL` is used by `/share` and `/shares` to report published URLs on the docs/public site instead of the lab app origin.
+
+If `DEEPGRAM_API_KEY` is configured, users can start **voice input** from the chat composer. Browser microphone audio is streamed to the backend, proxied to Deepgram's realtime API (`nova-3`), and partial/final transcripts are inserted into the draft without auto-sending.
 
 ## 9. Set up Caddy
 

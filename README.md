@@ -65,7 +65,7 @@ That’s the sweet spot between:
 - a traditional app UI with no flexible conversation layer
 - Slack/Telegram-style control loops that are fine for notifications but awkward for real work
 
-Remote Lab also supports multi-agent workflows via `@mentions`, so you can route work between specialized agents inside the same workspace.
+Remote Lab also supports multi-agent workflows via `@mentions`, and optional voice input via Deepgram, so you can speak into the draft before sending.
 
 ### 5. It’s self-hosted and minimal
 
@@ -103,6 +103,7 @@ You can use Remote Lab to edit Remote Lab, test changes, and iterate on the syst
 - project-scoped bash and file tools
 - multi-agent workflows with `@mentions`
 - mobile-friendly remote access
+- optional live voice input with Deepgram
 - built-in docs publishing
 - flat-file storage, no database
 - self-hosted deployment on your own VPS
