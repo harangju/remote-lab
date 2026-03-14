@@ -210,6 +210,8 @@ def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int
     for msg in recent:
         role = msg.get("role", "")
         if role == "user":
+            if msg.get("server_command"):
+                continue
             lines.append(f"User: {msg.get('content', '')}")
         elif role == "assistant":
             content = msg.get("content", "")
@@ -1096,6 +1098,14 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
                 if skill and skill.type == SkillType.server:
                     if skill.name == "compact":
+                        await _append_message(convo_id, {
+                            "role": "user",
+                            "content": prompt,
+                            "timestamp": _iso_now(),
+                            "server_command": True,
+                            **({"message_id": message_id} if message_id else {}),
+                        })
+                        _invalidate_message_cache()
                         for p in storage.CONVOS_DIR.glob(f"{convo_id}.agent*.json"):
                             parts = p.stem.replace(f"{convo_id}.agent", "")
                             aid = parts.lstrip(".") or None
@@ -1138,6 +1148,14 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                     message_id = None
                                 await ws.send_text(Error(message="Not enough history to compact", recoverable=True).model_dump_json())
                     elif skill.name == "model":
+                        await _append_message(convo_id, {
+                            "role": "user",
+                            "content": prompt,
+                            "timestamp": _iso_now(),
+                            "server_command": True,
+                            **({"message_id": message_id} if message_id else {}),
+                        })
+                        _invalidate_message_cache()
                         from backend.agents import active_model, _available, set_model
                         if cmd_args.strip():
                             try:
@@ -1168,6 +1186,14 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                             await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
                         await ws.send_text(SkillResult(skill="model", output=output).model_dump_json())
                     elif skill.name == "share":
+                        await _append_message(convo_id, {
+                            "role": "user",
+                            "content": prompt,
+                            "timestamp": _iso_now(),
+                            "server_command": True,
+                            **({"message_id": message_id} if message_id else {}),
+                        })
+                        _invalidate_message_cache()
                         output = await _handle_share(cmd_args, project_path, ws)
                         await _append_message(convo_id, {
                             "role": "tool",
