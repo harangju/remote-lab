@@ -9,6 +9,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Awaitable, Callable
 
+from backend.protocol import FileChanged
+
 import httpx
 from pydantic_ai import RunContext
 
@@ -63,6 +65,16 @@ async def _notify_tool_result(name: str, output: str):
                 "name": name,
                 "output": output[:500],
             }))
+        except Exception:
+            pass
+
+
+async def _notify_file_changed(path: str, change: str):
+    """Send a file-changed event via the broadcast function, if set."""
+    fn = _broadcast_fn.get()
+    if fn:
+        try:
+            await fn(FileChanged(path=path, change=change, run_id="").model_dump_json())
         except Exception:
             pass
 
@@ -122,10 +134,12 @@ async def _write_file(ctx: RunContext, path: str, content: str) -> str:
         await _notify_tool_result("write_file", result)
         return result
     try:
+        existed = p.exists()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
         result = f"Wrote {len(content)} bytes to {path}"
         await _notify_tool_result("write_file", result)
+        await _notify_file_changed(path, "updated" if existed else "created")
         return result
     except Exception as e:
         result = f"Error: {e}"
@@ -151,6 +165,7 @@ async def _edit_file(ctx: RunContext, path: str, old_string: str, new_string: st
         text = text.replace(old_string, new_string, 1)
         p.write_text(text)
         await _notify_tool_result("edit_file", "OK")
+        await _notify_file_changed(path, "updated")
         return "OK"
     except Exception as e:
         result = f"Error: {e}"

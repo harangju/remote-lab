@@ -26,9 +26,10 @@ export interface PanelActions {
   saveFile: () => Promise<void>;
   cancelEdit: () => void;
   toggleFileFinder: () => void;
-  notifyExternalChange: (path: string) => void;
+  applyExternalChange: (path: string) => void;
   reloadFile: () => void;
   dismissExternalChange: () => void;
+  upsertFileInList: (path: string) => void;
   forceClose: () => void;
 }
 
@@ -57,6 +58,16 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const [fileList, setFileList] = useState<string[] | null>(null);
   const [fileListLoading, setFileListLoading] = useState(false);
   const originalContentRef = useRef<string>("");
+  const fileRef = useRef<PanelFile | null>(null);
+  const dirtyRef = useRef(false);
+
+  useEffect(() => {
+    fileRef.current = file;
+  }, [file]);
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
 
   // beforeunload guard when dirty
   useEffect(() => {
@@ -156,11 +167,36 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     setShowFileFinder((v) => !v);
   }, [fileList, fileListLoading, projectId]);
 
-  const notifyExternalChange = useCallback((path: string) => {
-    if (file && file.path === path) {
-      setExternalChange(true);
+  const upsertFileInList = useCallback((path: string) => {
+    setFileList((prev) => {
+      if (!prev) return prev;
+      if (prev.includes(path)) return prev;
+      return [...prev, path].sort((a, b) => a.localeCompare(b));
+    });
+  }, []);
+
+  const applyExternalChange = useCallback((path: string) => {
+    upsertFileInList(path);
+    const currentFile = fileRef.current;
+    if (currentFile && currentFile.path === path) {
+      if (dirtyRef.current) {
+        setExternalChange(true);
+      } else if (projectId) {
+        readFile(projectId, path)
+          .then((res) => {
+            setFile((prev) => prev && prev.path === path
+              ? { ...prev, content: res.content, language: langFromPath(path) }
+              : prev);
+            originalContentRef.current = res.content;
+            setExternalChange(false);
+            setDirty(false);
+          })
+          .catch(() => {
+            setExternalChange(true);
+          });
+      }
     }
-  }, [file]);
+  }, [projectId, upsertFileInList]);
 
   const reloadFile = useCallback(() => {
     if (file) {
@@ -177,6 +213,6 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     showFileFinder, fileList, fileListLoading,
     openFile, closePanel, setEditMode, updateContent,
     saveFile, cancelEdit, toggleFileFinder,
-    notifyExternalChange, reloadFile, dismissExternalChange, forceClose,
+    applyExternalChange, reloadFile, dismissExternalChange, upsertFileInList, forceClose,
   };
 }

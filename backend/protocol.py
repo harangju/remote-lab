@@ -73,6 +73,15 @@ class ToolResult(BaseModel):
     agent_id: str | None = None
 
 
+class FileChanged(BaseModel):
+    """Sent when a file is created or updated on disk."""
+    type: Literal["file-changed"] = "file-changed"
+    path: str
+    change: Literal["created", "updated"]
+    run_id: str
+    agent_id: str | None = None
+
+
 class SkillResult(BaseModel):
     """Sent after a server-side skill finishes executing."""
     type: Literal["skill-result"] = "skill-result"

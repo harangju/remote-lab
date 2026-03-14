@@ -521,6 +521,7 @@ function MdContent({ text, onOpenSnippet }: { text: string; onOpenSnippet?: (cod
 
 // ---------------------------------------------------------------------------
 // Chat component
+// Live file-change sync test marker 2
 // ---------------------------------------------------------------------------
 
 const MIN_USER_MESSAGE_TOP_OFFSET_PX = 24;
@@ -949,16 +950,15 @@ export function Chat() {
             const b = blocks[i];
             if (b.type === "tool" && b.name === data.name && !b.output) {
               blocks[i] = { ...b, output: data.output };
-              // Conflict detection: if agent modified a file that's open in panel
-              if (["write_file", "edit_file"].includes(data.name) && b.input) {
-                const path = extractFilePath(data.name, b.input);
-                if (path) panel.notifyExternalChange(path);
-              }
               break;
             }
           }
           blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
+          break;
+        }
+        case "file-changed": {
+          panel.applyExternalChange(data.path);
           break;
         }
         case "tool-confirm": {

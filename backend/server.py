@@ -38,7 +38,7 @@ from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, VoiceState, VoiceTranscript, Error
+from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, VoiceState, VoiceTranscript, Error, FileChanged
 from backend.skills import get_skills, get_skill, SkillType
 from backend.permissions import is_tool_auto_allowed, add_project_rule, tool_is_always_confirmed
 from backend.models import (
@@ -249,10 +249,19 @@ async def _run_agent_task(
     active_agent = agent_instance or agent
 
     async def _emit(msg_str: str):
+        try:
+            payload = json.loads(msg_str)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            payload.setdefault("run_id", run.run_id)
+            if agent_id and payload.get("agent_id") is None:
+                payload["agent_id"] = agent_id
+            msg_str = json.dumps(payload)
         run.events.append(msg_str)
         await run.broadcast(msg_str)
 
-    agent_tools.set_broadcast(None)
+    agent_tools.set_broadcast(_emit)
 
     try:
         current_prompt: str | None = prompt
