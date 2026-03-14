@@ -6,7 +6,7 @@ Remote Lab is for people who want AI to work in a **real environment**, not in a
 
 It gives you a persistent workspace where you can chat with agents, inspect and edit files, steer long-running work, coordinate multi-agent workflows with `@mentions`, and even improve Remote Lab from inside Remote Lab.
 
-The detailed docs live at [harangju.github.io/remote-lab](https://harangju.github.io/remote-lab/).
+The detailed docs live at your docs site, e.g. [yourname.github.io/remote-lab](https://yourname.github.io/remote-lab/).
 
 ## Why this exists
 
@@ -85,15 +85,15 @@ You can use Remote Lab to edit Remote Lab, test changes, and iterate on the syst
 
 ## Docs map
 
-- [Overview](https://harangju.github.io/remote-lab/)
-- [Getting Started](https://harangju.github.io/remote-lab/getting-started/)
-- [Projects and Chat](https://harangju.github.io/remote-lab/guides/projects-and-chat/)
-- [Files and Tools](https://harangju.github.io/remote-lab/guides/files-and-tools/)
-- [Agents and Mentions](https://harangju.github.io/remote-lab/guides/agents-and-mentions/)
-- [Self-Hacking](https://harangju.github.io/remote-lab/guides/self-hacking/)
-- [Deployment](https://harangju.github.io/remote-lab/reference/deployment/)
-- [Architecture](https://harangju.github.io/remote-lab/reference/architecture/)
-- [Operations](https://harangju.github.io/remote-lab/reference/operations/)
+- [Overview](https://yourname.github.io/remote-lab/)
+- [Getting Started](https://yourname.github.io/remote-lab/getting-started/)
+- [Projects and Chat](https://yourname.github.io/remote-lab/guides/projects-and-chat/)
+- [Files and Tools](https://yourname.github.io/remote-lab/guides/files-and-tools/)
+- [Agents and Mentions](https://yourname.github.io/remote-lab/guides/agents-and-mentions/)
+- [Self-Hacking](https://yourname.github.io/remote-lab/guides/self-hacking/)
+- [Deployment](https://yourname.github.io/remote-lab/reference/deployment/)
+- [Architecture](https://yourname.github.io/remote-lab/reference/architecture/)
+- [Operations](https://yourname.github.io/remote-lab/reference/operations/)
 
 ## What’s included
 
