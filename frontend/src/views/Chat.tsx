@@ -1329,7 +1329,7 @@ export function Chat() {
   // Keyboard shortcut: Cmd+P for file finder
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+      if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         panel.toggleFileFinder();
       }
