@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X } from "lucide-react";
-import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment } from "../api";
+import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment, type ConvoDetail } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
 import { FilePanel } from "../components/FilePanel";
@@ -533,6 +533,60 @@ const CHAT_MESSAGES_MAX_WIDTH = "64rem";
 const CHAT_INPUT_MAX_WIDTH = "64rem";
 const MESSAGE_MAX_WIDTH = "92%";
 
+function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { messages: DisplayMessage[]; meta: MetaInfo | null; title: string; autonomousToolsEnabled: boolean } {
+  const msgs: DisplayMessage[] = [];
+  let pendingBlocks: StreamBlock[] = [];
+
+  for (const m of detail.messages) {
+    const mAny = m as any;
+    if (mAny.role === "tool") {
+      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input });
+    } else if (m.role === "user") {
+      if (pendingBlocks.length > 0) {
+        msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
+        pendingBlocks = [];
+      }
+      msgs.push({
+        role: "user",
+        blocks: [{ type: "text", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+        message_id: typeof mAny.message_id === "string" ? mAny.message_id : undefined,
+        pending: false,
+        attachments: Array.isArray(mAny.attachments) ? mAny.attachments : undefined,
+      });
+    } else if (m.role === "assistant") {
+      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      const blocks: StreamBlock[] = [...pendingBlocks];
+      if (content) blocks.push({ type: "text", content });
+      if (blocks.length > 0) {
+        const agentId = mAny.agent_id;
+        const agentCfg = agentId ? agentList.find((a: AgentConfig) => a.id === agentId) : undefined;
+        msgs.push({
+          role: "assistant", blocks,
+          agent_id: agentId,
+          agent_name: agentCfg?.name,
+          agent_color: agentCfg?.color,
+        });
+      }
+      pendingBlocks = [];
+    }
+  }
+
+  if (pendingBlocks.length > 0) {
+    msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
+  }
+
+  return {
+    messages: msgs,
+    meta: detail.context_limit > 0 ? {
+      turns: 0,
+      context_tokens: detail.context_tokens,
+      context_limit: detail.context_limit,
+    } : null,
+    title: detail.title || "Untitled",
+    autonomousToolsEnabled: !!detail.autonomous_tools_enabled,
+  };
+}
+
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -754,67 +808,25 @@ export function Chat() {
     });
   }, [messages.length, scrollUserMessageNearTop]);
 
-  // Load agent configs + existing messages together so agent labels resolve
-  useEffect(() => {
+  const reloadConversation = useCallback(async () => {
     if (!convId || !projectId) return;
-    Promise.all([
+    const [detail, agentRes] = await Promise.all([
       getConvo(convId),
       listProjectAgents(projectId),
-    ]).then(([detail, agentRes]) => {
-        const agentList = agentRes.agents;
-        setAgents(agentList);
-        setTitle(detail.title || "Untitled");
-        setAutonomousToolsEnabled(!!detail.autonomous_tools_enabled);
-        const msgs: DisplayMessage[] = [];
-        let pendingBlocks: StreamBlock[] = [];
-
-        for (const m of detail.messages) {
-          const mAny = m as any;
-          if (mAny.role === "tool") {
-            pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input });
-          } else if (m.role === "user") {
-            if (pendingBlocks.length > 0) {
-              msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
-              pendingBlocks = [];
-            }
-            msgs.push({
-              role: "user",
-              blocks: [{ type: "text", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
-              message_id: typeof mAny.message_id === "string" ? mAny.message_id : undefined,
-              pending: false,
-              attachments: Array.isArray(mAny.attachments) ? mAny.attachments : undefined,
-            });
-          } else if (m.role === "assistant") {
-            const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-            const blocks: StreamBlock[] = [...pendingBlocks];
-            if (content) blocks.push({ type: "text", content });
-            if (blocks.length > 0) {
-              const agentId = mAny.agent_id;
-              const agentCfg = agentId ? agentList.find((a: AgentConfig) => a.id === agentId) : undefined;
-              msgs.push({
-                role: "assistant", blocks,
-                agent_id: agentId,
-                agent_name: agentCfg?.name,
-                agent_color: agentCfg?.color,
-              });
-            }
-            pendingBlocks = [];
-          }
-        }
-        if (pendingBlocks.length > 0) {
-          msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
-        }
-        setMessages(msgs);
-        if (detail.context_limit > 0) {
-          setMeta({
-            turns: 0,
-            context_tokens: detail.context_tokens,
-            context_limit: detail.context_limit,
-          });
-        }
-      })
-      .catch((e) => setError(e.message));
+    ]);
+    const agentList = agentRes.agents;
+    setAgents(agentList);
+    const rebuilt = buildDisplayMessages(detail, agentList);
+    setTitle(rebuilt.title);
+    setAutonomousToolsEnabled(rebuilt.autonomousToolsEnabled);
+    setMessages(rebuilt.messages);
+    setMeta(rebuilt.meta);
   }, [convId, projectId]);
+
+  // Load agent configs + existing messages together so agent labels resolve
+  useEffect(() => {
+    reloadConversation().catch((e) => setError(e.message));
+  }, [reloadConversation]);
 
   // Load file list + skills for autocomplete
   useEffect(() => {
@@ -830,6 +842,18 @@ export function Chat() {
   // Connect WebSocket
   useEffect(() => {
     if (!convId) return;
+    let cancelled = false;
+    let sawDisconnect = false;
+    const resetLiveState = () => {
+      blocksRef.current = [];
+      setStreamBlocks([]);
+      setThinking(false);
+      setWaitingForModel(false);
+      activeAgentRef.current = null;
+      setActiveAgent(null);
+      setCurrentRunId(null);
+      setBusy(false);
+    };
     const ws = connectWs(convId);
     wsRef.current = ws;
 
@@ -844,6 +868,13 @@ export function Chat() {
       switch (data.type) {
         case "auth-ok":
           setConnected(true);
+          if (sawDisconnect) {
+            resetLiveState();
+            reloadConversation().catch((e) => {
+              if (!cancelled) setError(e.message);
+            });
+            sawDisconnect = false;
+          }
           flushPendingQueue();
           break;
         case "message-ack":
@@ -988,11 +1019,9 @@ export function Chat() {
     });
 
     ws.addEventListener("close", (event) => {
+      sawDisconnect = true;
       setConnected(false);
-      setBusy(false);
-      setWaitingForModel(false);
-      setThinking(false);
-      setCurrentRunId(null);
+      resetLiveState();
       if (event.code !== 1000 && event.code !== 4409) {
         reconnectTimer.current = window.setTimeout(
           () => setWsAttempt((a) => a + 1),
@@ -1001,18 +1030,17 @@ export function Chat() {
       }
     });
     ws.addEventListener("error", () => {
+      sawDisconnect = true;
       setConnected(false);
-      setBusy(false);
-      setWaitingForModel(false);
-      setThinking(false);
-      setCurrentRunId(null);
+      resetLiveState();
     });
 
     return () => {
+      cancelled = true;
       clearTimeout(reconnectTimer.current);
       ws.close();
     };
-  }, [convId, wsAttempt]);
+  }, [convId, wsAttempt, flushPendingQueue, reloadConversation, setCurrentRunId]);
 
   const startEdit = () => {
     setEditValue(title);

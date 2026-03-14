@@ -956,6 +956,10 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             await ws.close(code=4404, reason="Conversation not found")
             return
 
+        if convo.status == ConvoStatus.running and session.run is None:
+            await _update_conversation_status(convo_id, ConvoStatus.idle)
+            convo = storage.get_conversation(convo_id)
+
         project = storage.get_project(convo.project_id)
         if project is None:
             await ws.send_text(Error(message="Project not found").model_dump_json())
