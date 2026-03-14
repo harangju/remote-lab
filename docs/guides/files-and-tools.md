@@ -46,3 +46,9 @@ Remote Lab works best when chat and files reinforce each other:
 Tools are scoped to the current project directory.
 
 That means the agent can act on real files and real shells, but only within the project boundary configured for that project.
+
+The built-in `/share <path>` skill is a narrow exception: it reads a Markdown or HTML file from the current project, then publishes a copy into Remote Lab's global `public/` web directory. That lets you publish from any project without granting the agent general cross-project file access.
+
+Use a plain project-relative path such as `/share docs/page.html` or `/share slides/week1.md`. If you paste a file mention like `@slides/week1.md`, `/share` will ignore the leading `@`.
+
+`/share` first tries the exact path you gave. If that file does not exist, it will look for a unique matching Markdown or HTML file in the current project. If multiple matches exist, it returns a short list so you can disambiguate.

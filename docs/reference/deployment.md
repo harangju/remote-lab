@@ -102,10 +102,13 @@ Set at least:
 ```bash
 WS_TOKEN=<generate with: openssl rand -hex 32>
 ALLOWED_ORIGIN=https://lab.yourdomain.com
+PUBLIC_BASE_URL=https://docs.yourdomain.com
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...   # optional
 GOOGLE_API_KEY=AI...    # optional
 ```
+
+`PUBLIC_BASE_URL` is used by `/share` to report the published URL on the docs/public site instead of the lab app origin.
 
 ## 9. Set up Caddy
 

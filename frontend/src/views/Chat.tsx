@@ -120,6 +120,14 @@ function extractFilePath(name: string, input?: string): string | null {
   return pathMatch ? pathMatch[1] : input.trim();
 }
 
+function extractShareUrl(name: string, input?: string): string | null {
+  if (name !== "share" || !input) return null;
+  const mdMatch = input.match(/\((https?:\/\/[^)\s]+)\)/);
+  if (mdMatch) return mdMatch[1];
+  const plainMatch = input.match(/https?:\/\/\S+/);
+  return plainMatch ? plainMatch[0] : null;
+}
+
 function ToolChip({ tool, live, onOpenFile }: {
   tool: ToolCall;
   live?: boolean;
@@ -130,12 +138,19 @@ function ToolChip({ tool, live, onOpenFile }: {
   const hasDetail = !!(tool.input || tool.output);
   const summary = toolSummary(tool.name, tool.input);
   const filePath = extractFilePath(tool.name, tool.input);
+  const shareUrl = extractShareUrl(tool.name, tool.input) || extractShareUrl(tool.name, tool.output);
   const isFileOp = !!filePath;
-  const showStatusSlot = live || !!tool.output || (isFileOp && !!onOpenFile);
+  const isShareLink = !!shareUrl;
+  const showStatusSlot = live || !!tool.output || (isFileOp && !!onOpenFile) || isShareLink;
 
   const handleOpenFile = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (filePath && onOpenFile) onOpenFile(filePath);
+  };
+
+  const handleOpenShare = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (shareUrl) window.open(shareUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -186,6 +201,14 @@ function ToolChip({ tool, live, onOpenFile }: {
             }} />
           ) : tool.output ? (
             <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
+          ) : isShareLink ? (
+            <span
+              onClick={handleOpenShare}
+              style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
+              data-tooltip="Open published page"
+            >
+              <ExternalLink size={12} />
+            </span>
           ) : isFileOp && onOpenFile ? (
             <span
               onClick={handleOpenFile}

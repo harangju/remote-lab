@@ -80,6 +80,8 @@ async def _cancel_running_tasks():
 
 WS_TOKEN = os.getenv("WS_TOKEN", "")
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+PUBLIC_DIR = Path(__file__).parent.parent / "public"
 
 # ---------------------------------------------------------------------------
 # Run/session state — decouples agent runs from WebSocket lifecycle
@@ -789,6 +791,139 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sanitize_public_name(name: str) -> str:
+    cleaned = Path(name).name.strip().replace("\x00", "")
+    safe = "".join(ch if ch.isalnum() or ch in {".", "-", "_"} else "-" for ch in cleaned)
+    return safe or "shared-file"
+
+
+def _public_url_base(ws: WebSocket) -> str:
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL
+    origin = ws.headers.get("origin", "").strip().rstrip("/")
+    if origin:
+        return origin
+    host = ws.headers.get("host", "").strip()
+    if not host:
+        return ""
+    proto = "https" if ws.url.scheme == "wss" else "http"
+    return f"{proto}://{host}"
+
+
+def _share_output_name(output_name: str) -> str:
+    path = Path(output_name)
+    if path.suffix.lower() in {".html", ".md"}:
+        return path.stem
+    return output_name
+
+
+def _share_output(output_name: str, ws: WebSocket) -> str:
+    public_name = _share_output_name(output_name)
+    path = f"/{public_name}"
+    base = _public_url_base(ws)
+    if base:
+        full_url = f"{base}{path}"
+        return f"Shared to {full_url}"
+    return f"Shared to {path}"
+
+
+def _resolve_share_source(project_root: Path, raw_path: str) -> tuple[Path | None, str | None]:
+    rel_path = raw_path.strip()
+    if rel_path.startswith("@"):
+        rel_path = rel_path[1:]
+    rel_path = rel_path.strip()
+    if not rel_path:
+        return None, "Usage: /share <project-relative .md or .html file>"
+
+    direct = (project_root / rel_path).resolve()
+    if not str(direct).startswith(str(project_root)):
+        return None, "Source file must be inside the current project"
+    if direct.is_file() and direct.suffix.lower() in {".md", ".html"}:
+        return direct, None
+
+    search_terms: list[str] = []
+    if rel_path:
+        search_terms.append(rel_path)
+        rel_obj = Path(rel_path)
+        if rel_obj.suffix.lower() not in {".md", ".html"}:
+            search_terms.extend([f"{rel_path}.md", f"{rel_path}.html"])
+        name = rel_obj.name
+        if name and name not in search_terms:
+            search_terms.append(name)
+        if name and Path(name).suffix.lower() not in {".md", ".html"}:
+            search_terms.extend([f"{name}.md", f"{name}.html"])
+
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for file_path in project_root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in {".md", ".html"}:
+            continue
+        try:
+            rel = str(file_path.relative_to(project_root))
+        except ValueError:
+            continue
+        rel_lower = rel.lower()
+        name_lower = file_path.name.lower()
+        if any(rel_lower == term.lower() or name_lower == term.lower() for term in search_terms):
+            if rel not in seen:
+                seen.add(rel)
+                candidates.append(file_path)
+
+    if len(candidates) == 1:
+        return candidates[0], None
+    if len(candidates) > 1:
+        options = ", ".join(str(p.relative_to(project_root)) for p in sorted(candidates)[:5])
+        more = "" if len(candidates) <= 5 else f", ... ({len(candidates)} matches)"
+        return None, f"Multiple matching files found: {options}{more}"
+    return None, "No matching .md or .html file found"
+
+
+async def _handle_share(cmd_args: str, project_path: Path, ws: WebSocket) -> str:
+    project_root = project_path.resolve()
+    source, error = _resolve_share_source(project_root, cmd_args)
+    if error:
+        return error
+    assert source is not None
+
+    ext = source.suffix.lower()
+    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+
+    if ext == ".html":
+        output_name = _sanitize_public_name(source.name)
+        destination = (PUBLIC_DIR / output_name).resolve()
+        if destination.parent != PUBLIC_DIR.resolve():
+            return "Invalid destination"
+        destination.write_bytes(source.read_bytes())
+        return _share_output(output_name, ws)
+
+    content = source.read_text(errors="replace")
+    is_marp = content.lstrip().startswith("---") and "marp:" in content[:500]
+    if is_marp:
+        output_name = _sanitize_public_name(f"{source.stem}.html")
+        destination = (PUBLIC_DIR / output_name).resolve()
+        if destination.parent != PUBLIC_DIR.resolve():
+            return "Invalid destination"
+        proc = await asyncio.create_subprocess_exec(
+            "marp", "--html", str(source), "-o", str(destination),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode(errors="replace").strip()
+            return f"Marp build failed: {err or 'unknown error'}"
+        return _share_output(output_name, ws)
+
+    output_name = _sanitize_public_name(source.name)
+    destination = (PUBLIC_DIR / output_name).resolve()
+    if destination.parent != PUBLIC_DIR.resolve():
+        return "Invalid destination"
+    destination.write_text(content)
+    return _share_output(output_name, ws)
+
+
 @app.websocket("/api/ws/{convo_id}")
 async def ws_convo_chat(ws: WebSocket, convo_id: str):
     origin = ws.headers.get("origin", "")
@@ -968,6 +1103,10 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
                         aids_to_compact = [aid for aid, (h, _) in agent_histories.items() if h]
                         if not aids_to_compact:
+                            if message_id:
+                                processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                                await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                                message_id = None
                             await ws.send_text(Error(message="No message history to compact", recoverable=True).model_dump_json())
                         else:
                             compacted_any = False
@@ -987,8 +1126,16 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                         "timestamp": _iso_now(),
                                     })
                                     await _save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
+                                    if message_id:
+                                        processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                                        await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                                        message_id = None
                                     await ws.send_text(Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json())
                             if not compacted_any:
+                                if message_id:
+                                    processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                                    await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                                    message_id = None
                                 await ws.send_text(Error(message="Not enough history to compact", recoverable=True).model_dump_json())
                     elif skill.name == "model":
                         from backend.agents import active_model, _available, set_model
@@ -1016,7 +1163,22 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                             "input": output,
                             "timestamp": _iso_now(),
                         })
+                        if message_id:
+                            processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                            await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
                         await ws.send_text(SkillResult(skill="model", output=output).model_dump_json())
+                    elif skill.name == "share":
+                        output = await _handle_share(cmd_args, project_path, ws)
+                        await _append_message(convo_id, {
+                            "role": "tool",
+                            "name": "share",
+                            "input": output,
+                            "timestamp": _iso_now(),
+                        })
+                        if message_id:
+                            processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                            await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                        await ws.send_text(SkillResult(skill="share", output=output).model_dump_json())
                     continue
                 elif skill and skill.type == SkillType.prompt:
                     user_text = cmd_args.strip()

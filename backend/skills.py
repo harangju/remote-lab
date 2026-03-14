@@ -30,6 +30,7 @@ class Skill(BaseModel):
 BUILTIN_SKILLS: list[Skill] = [
     Skill(name="compact", type=SkillType.server, description="Compact conversation context"),
     Skill(name="model", type=SkillType.server, description="Show current model info"),
+    Skill(name="share", type=SkillType.server, description="Publish a markdown or HTML file: /share <path>"),
 ]
 
 # Global skills directory (alongside other data files)

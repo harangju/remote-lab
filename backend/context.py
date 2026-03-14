@@ -72,7 +72,10 @@ def build_project_instructions(project_path: Path, is_first_turn: bool) -> str |
     """
     sections: list[str] = []
 
-    sections.append(f"# Project Context\n\nWorking directory: {project_path}")
+    sections.append(
+        f"# Project Context\n\nWorking directory: {project_path}\n\n"
+        "Use `/share <path>` to publish a project markdown or HTML file into the app's public web directory."
+    )
 
     claude_md = read_claude_md(project_path)
     if claude_md:
