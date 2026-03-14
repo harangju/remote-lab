@@ -108,7 +108,7 @@ OPENAI_API_KEY=sk-...   # optional
 GOOGLE_API_KEY=AI...    # optional
 ```
 
-`PUBLIC_BASE_URL` is used by `/share` to report the published URL on the docs/public site instead of the lab app origin.
+`PUBLIC_BASE_URL` is used by `/share` and `/shares` to report published URLs on the docs/public site instead of the lab app origin.
 
 ## 9. Set up Caddy
 

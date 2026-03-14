@@ -819,14 +819,43 @@ def _share_output_name(output_name: str) -> str:
     return output_name
 
 
-def _share_output(output_name: str, ws: WebSocket) -> str:
+def _load_public_access() -> dict[str, list[str]]:
+    access_file = PUBLIC_DIR / ".access.json"
+    try:
+        data = json.loads(access_file.read_text())
+        if isinstance(data, dict):
+            return {str(k): [str(v) for v in values if isinstance(v, str)] for k, values in data.items() if isinstance(values, list)}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_public_access(rules: dict[str, list[str]]) -> None:
+    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+    access_file = PUBLIC_DIR / ".access.json"
+    access_file.write_text(json.dumps(rules, indent=2, sort_keys=True) + "\n")
+
+
+def _share_output(output_name: str, ws: WebSocket, token: str | None = None) -> str:
     public_name = _share_output_name(output_name)
     path = f"/{public_name}"
+    if token:
+        path = f"{path}?t={token}"
     base = _public_url_base(ws)
     if base:
         full_url = f"{base}{path}"
         return f"Shared to {full_url}"
     return f"Shared to {path}"
+
+
+def _share_url_for_slug(slug: str, ws: WebSocket, token: str | None = None) -> str:
+    path = f"/{slug}"
+    if token:
+        path = f"{path}?t={token}"
+    base = _public_url_base(ws)
+    if base:
+        return f"{base}{path}"
+    return path
 
 
 def _resolve_share_source(project_root: Path, raw_path: str) -> tuple[Path | None, str | None]:
@@ -882,11 +911,24 @@ def _resolve_share_source(project_root: Path, raw_path: str) -> tuple[Path | Non
     return None, "No matching .md or .html file found"
 
 
+def _parse_share_args(cmd_args: str) -> tuple[str, str | None]:
+    raw = cmd_args.strip()
+    if not raw:
+        return "", None
+    parts = raw.rsplit(None, 1)
+    if len(parts) == 2 and parts[1].strip():
+        candidate_path, candidate_token = parts[0].strip(), parts[1].strip()
+        if candidate_path:
+            return candidate_path, candidate_token
+    return raw, None
+
+
 async def _handle_share(cmd_args: str, project_path: Path, ws: WebSocket) -> str:
     project_root = project_path.resolve()
-    source, error = _resolve_share_source(project_root, cmd_args)
+    source_arg, token_arg = _parse_share_args(cmd_args)
+    source, error = _resolve_share_source(project_root, source_arg)
     if error:
-        return error
+        return "Usage: /share <project-relative .md or .html file> [token]"
     assert source is not None
 
     ext = source.suffix.lower()
@@ -898,32 +940,91 @@ async def _handle_share(cmd_args: str, project_path: Path, ws: WebSocket) -> str
         if destination.parent != PUBLIC_DIR.resolve():
             return "Invalid destination"
         destination.write_bytes(source.read_bytes())
-        return _share_output(output_name, ws)
+    else:
+        content = source.read_text(errors="replace")
+        is_marp = content.lstrip().startswith("---") and "marp:" in content[:500]
+        if is_marp:
+            output_name = _sanitize_public_name(f"{source.stem}.html")
+            destination = (PUBLIC_DIR / output_name).resolve()
+            if destination.parent != PUBLIC_DIR.resolve():
+                return "Invalid destination"
+            proc = await asyncio.create_subprocess_exec(
+                "marp", "--html", str(source), "-o", str(destination),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                err = stderr.decode(errors="replace").strip()
+                return f"Marp build failed: {err or 'unknown error'}"
+        else:
+            output_name = _sanitize_public_name(source.name)
+            destination = (PUBLIC_DIR / output_name).resolve()
+            if destination.parent != PUBLIC_DIR.resolve():
+                return "Invalid destination"
+            destination.write_text(content)
 
-    content = source.read_text(errors="replace")
-    is_marp = content.lstrip().startswith("---") and "marp:" in content[:500]
-    if is_marp:
-        output_name = _sanitize_public_name(f"{source.stem}.html")
-        destination = (PUBLIC_DIR / output_name).resolve()
-        if destination.parent != PUBLIC_DIR.resolve():
-            return "Invalid destination"
-        proc = await asyncio.create_subprocess_exec(
-            "marp", "--html", str(source), "-o", str(destination),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            err = stderr.decode(errors="replace").strip()
-            return f"Marp build failed: {err or 'unknown error'}"
-        return _share_output(output_name, ws)
+    slug = _share_output_name(output_name)
+    rules = _load_public_access()
+    existing_tokens = [t for t in rules.get(slug, []) if t]
+    token = token_arg or (existing_tokens[0] if existing_tokens else uuid4().hex[:12])
+    rules[slug] = [token]
+    _save_public_access(rules)
+    return _share_output(output_name, ws, token=token)
 
-    output_name = _sanitize_public_name(source.name)
-    destination = (PUBLIC_DIR / output_name).resolve()
-    if destination.parent != PUBLIC_DIR.resolve():
-        return "Invalid destination"
-    destination.write_text(content)
-    return _share_output(output_name, ws)
+
+def _resolve_unshare_target(public_root: Path, raw_path: str) -> str | None:
+    rel_path = raw_path.strip()
+    if rel_path.startswith("@"):
+        rel_path = rel_path[1:]
+    rel_path = rel_path.strip()
+    if not rel_path:
+        return None
+    direct = (public_root / rel_path).resolve()
+    if str(direct).startswith(str(public_root)) and direct.is_file() and direct.suffix.lower() in {".md", ".html"}:
+        return direct.stem
+    return Path(rel_path).stem or None
+
+
+async def _handle_shares(ws: WebSocket) -> str:
+    rules = _load_public_access()
+    public_root = PUBLIC_DIR.resolve()
+    shared_files: dict[str, str] = {}
+    if public_root.exists():
+        for file_path in sorted(public_root.iterdir()):
+            if not file_path.is_file() or file_path.name.startswith("."):
+                continue
+            if file_path.suffix.lower() not in {".md", ".html"}:
+                continue
+            shared_files[file_path.stem] = file_path.name
+
+    if not shared_files:
+        return "No shared files"
+
+    lines: list[str] = []
+    for slug, filename in shared_files.items():
+        tokens = [t for t in rules.get(slug, []) if t]
+        url = _share_url_for_slug(slug, ws, tokens[0] if tokens else None)
+        lines.append(f"{filename}: {url}")
+    return "\n".join(lines)
+
+
+async def _handle_unshare(cmd_args: str) -> str:
+    slug = _resolve_unshare_target(PUBLIC_DIR.resolve(), cmd_args)
+    if not slug:
+        return "Usage: /unshare <path-or-slug>"
+    removed_files: list[str] = []
+    for ext in (".html", ".md"):
+        target = (PUBLIC_DIR / f"{slug}{ext}").resolve()
+        if target.parent == PUBLIC_DIR.resolve() and target.is_file():
+            target.unlink()
+            removed_files.append(target.name)
+    rules = _load_public_access()
+    rules.pop(slug, None)
+    _save_public_access(rules)
+    if not removed_files:
+        return f"Nothing shared for {slug}"
+    return f"Unshared {', '.join(removed_files)}"
 
 
 @app.websocket("/api/ws/{convo_id}")
@@ -1209,6 +1310,46 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)
                             await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
                         await ws.send_text(SkillResult(skill="share", output=output).model_dump_json())
+                    elif skill.name == "shares":
+                        await _append_message(convo_id, {
+                            "role": "user",
+                            "content": prompt,
+                            "timestamp": _iso_now(),
+                            "server_command": True,
+                            **({"message_id": message_id} if message_id else {}),
+                        })
+                        _invalidate_message_cache()
+                        output = await _handle_shares(ws)
+                        await _append_message(convo_id, {
+                            "role": "tool",
+                            "name": "shares",
+                            "input": output,
+                            "timestamp": _iso_now(),
+                        })
+                        if message_id:
+                            processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                            await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                        await ws.send_text(SkillResult(skill="shares", output=output).model_dump_json())
+                    elif skill.name == "unshare":
+                        await _append_message(convo_id, {
+                            "role": "user",
+                            "content": prompt,
+                            "timestamp": _iso_now(),
+                            "server_command": True,
+                            **({"message_id": message_id} if message_id else {}),
+                        })
+                        _invalidate_message_cache()
+                        output = await _handle_unshare(cmd_args)
+                        await _append_message(convo_id, {
+                            "role": "tool",
+                            "name": "unshare",
+                            "input": output,
+                            "timestamp": _iso_now(),
+                        })
+                        if message_id:
+                            processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                            await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                        await ws.send_text(SkillResult(skill="unshare", output=output).model_dump_json())
                     continue
                 elif skill and skill.type == SkillType.prompt:
                     user_text = cmd_args.strip()

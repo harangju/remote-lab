@@ -74,7 +74,9 @@ def build_project_instructions(project_path: Path, is_first_turn: bool) -> str |
 
     sections.append(
         f"# Project Context\n\nWorking directory: {project_path}\n\n"
-        "Use `/share <path>` to publish a project markdown or HTML file into the app's public web directory."
+        "Use `/share <path> [token]` to publish a project markdown or HTML file into the app's public web directory and return a tokenized link. "
+        "Use `/shares` to list shared files and links. "
+        "Use `/unshare <path-or-slug>` to remove its access token requirement."
     )
 
     claude_md = read_claude_md(project_path)
