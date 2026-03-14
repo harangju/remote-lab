@@ -20,10 +20,11 @@ const outDir = resolve(import.meta.dir, "../dist");
 const publicDir = resolve(import.meta.dir, "../public");
 const jsFile = result.outputs.find((o) => o.path.endsWith(".js"));
 const scriptName = jsFile ? jsFile.path.split("/").pop()! : "main.js";
+const buildHash = Date.now().toString(36);
 const html = await Bun.file(resolve(publicDir, "index.html")).text();
 await Bun.write(
   resolve(outDir, "index.html"),
-  html.replace("/main.js", `/${scriptName}`),
+  html.replace("/main.js", `/${scriptName}?v=${buildHash}`),
 );
 
 // Copy all other public files (manifest, icons, sw.js, etc.)

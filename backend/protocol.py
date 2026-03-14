@@ -73,6 +73,15 @@ class ToolResult(BaseModel):
     agent_id: str | None = None
 
 
+class ToolOutput(BaseModel):
+    """Incremental output from a running tool (e.g., bash stdout chunks)."""
+    type: Literal["tool-output"] = "tool-output"
+    name: str
+    output: str
+    run_id: str
+    agent_id: str | None = None
+
+
 class FileChanged(BaseModel):
     """Sent when a file is created or updated on disk."""
     type: Literal["file-changed"] = "file-changed"

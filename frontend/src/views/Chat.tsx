@@ -18,13 +18,14 @@ interface ToolCall {
   name: string;
   input?: string;
   output?: string;
+  liveOutput?: string;
 }
 
 type ApprovalScope = "once" | "project";
 
 type StreamBlock =
   | { type: "text"; content: string }
-  | { type: "tool"; name: string; input?: string; output?: string }
+  | { type: "tool"; name: string; input?: string; output?: string; liveOutput?: string }
   | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
 
 interface DisplayMessage {
@@ -133,7 +134,8 @@ function ToolChip({ tool, live, onOpenFile }: {
   live?: boolean;
   onOpenFile?: (path: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const preRef = useRef<HTMLPreElement>(null);
   const Icon = toolIcons[tool.name] || Settings;
   const hasDetail = !!(tool.input || tool.output);
   const summary = toolSummary(tool.name, tool.input);
@@ -142,6 +144,16 @@ function ToolChip({ tool, live, onOpenFile }: {
   const isFileOp = !!filePath;
   const isShareLink = !!shareUrl;
   const showStatusSlot = live || !!tool.output || (isFileOp && !!onOpenFile) || isShareLink;
+  const isStreaming = !!(live && tool.liveOutput);
+  const open = isStreaming || manualOpen;
+  const displayContent = isStreaming ? tool.liveOutput : (tool.output || "");
+
+  // Auto-scroll to bottom during streaming
+  useEffect(() => {
+    if (isStreaming && preRef.current) {
+      preRef.current.scrollTop = preRef.current.scrollHeight;
+    }
+  }, [isStreaming, tool.liveOutput]);
 
   const handleOpenFile = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -156,7 +168,7 @@ function ToolChip({ tool, live, onOpenFile }: {
   return (
     <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0, maxWidth: "100%" }}>
       <button
-        onClick={() => hasDetail && setOpen(!open)}
+        onClick={() => hasDetail && setManualOpen(!manualOpen)}
         style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
@@ -223,8 +235,8 @@ function ToolChip({ tool, live, onOpenFile }: {
           {hasDetail && (open ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
         </span>
       </button>
-      {open && hasDetail && (
-        <pre style={{
+      {open && (hasDetail || isStreaming) && (
+        <pre ref={preRef} style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
           borderRadius: "6px",
@@ -235,11 +247,11 @@ function ToolChip({ tool, live, onOpenFile }: {
           overflowWrap: "anywhere",
           wordBreak: "break-word",
           maxWidth: "100%",
-          maxHeight: "200px",
+          maxHeight: isStreaming ? "5lh" : "200px",
           overflowX: "hidden",
           overflowY: "auto",
           color: "var(--text)",
-        }}>{tool.input}{tool.input && tool.output ? "\n---\n" : ""}{tool.output}</pre>
+        }}>{isStreaming ? displayContent : (tool.input ? tool.input + (tool.output ? "\n---\n" : "") : "") + (tool.output || "")}</pre>
       )}
     </div>
   );
@@ -942,6 +954,20 @@ export function Chat() {
           setStreamBlocks(blocksRef.current);
           break;
         }
+        case "tool-output": {
+          if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
+          const oBlocks = [...blocksRef.current];
+          for (let i = oBlocks.length - 1; i >= 0; i--) {
+            const b = oBlocks[i];
+            if (b.type === "tool" && b.name === data.name && !b.output) {
+              oBlocks[i] = { ...b, liveOutput: (b.liveOutput || "") + data.output };
+              break;
+            }
+          }
+          blocksRef.current = oBlocks;
+          setStreamBlocks(blocksRef.current);
+          break;
+        }
         case "tool-result": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(true);
@@ -949,7 +975,7 @@ export function Chat() {
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (b.type === "tool" && b.name === data.name && !b.output) {
-              blocks[i] = { ...b, output: data.output };
+              blocks[i] = { ...b, output: b.liveOutput || data.output, liveOutput: undefined };
               break;
             }
           }

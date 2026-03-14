@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -69,6 +70,20 @@ async def _notify_tool_result(name: str, output: str):
             pass
 
 
+async def _notify_tool_output(name: str, chunk: str):
+    """Send incremental tool output via the broadcast function, if set."""
+    fn = _broadcast_fn.get()
+    if fn:
+        try:
+            await fn(json.dumps({
+                "type": "tool-output",
+                "name": name,
+                "output": chunk,
+            }))
+        except Exception:
+            pass
+
+
 async def _notify_file_changed(path: str, change: str):
     """Send a file-changed event via the broadcast function, if set."""
     fn = _broadcast_fn.get()
@@ -93,11 +108,45 @@ async def _bash(ctx: RunContext, command: str) -> str:
         stderr=asyncio.subprocess.STDOUT,
         cwd=str(workdir),
         env=dict(os.environ),
+        start_new_session=True,
     )
-    stdout, _ = await proc.communicate()
-    output = stdout.decode(errors="replace")
-    if len(output) > 50_000:
-        output = output[:50_000] + "\n... (truncated)"
+
+    chunks: list[str] = []
+    total_len = 0
+    truncated = False
+
+    try:
+        assert proc.stdout is not None
+        while True:
+            chunk = await proc.stdout.read(4096)
+            if not chunk:
+                break
+            text = chunk.decode(errors="replace")
+            total_len += len(text)
+            if total_len > 50_000:
+                truncated = True
+                break
+            chunks.append(text)
+            await _notify_tool_output("bash", text)
+
+        await proc.wait()
+    except asyncio.CancelledError:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=3.0)
+        except asyncio.TimeoutError:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        raise
+
+    output = "".join(chunks)
+    if truncated:
+        output += "\n... (truncated)"
     result = f"exit {proc.returncode}\n{output}"
     await _notify_tool_result("bash", result)
     return result

@@ -1,5 +1,5 @@
 // Service worker — network-first for API/WS, cache-first for static assets
-const CACHE_NAME = "rl-v3";
+const CACHE_NAME = "rl-v5";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => {
