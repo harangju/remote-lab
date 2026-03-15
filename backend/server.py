@@ -832,6 +832,13 @@ def _share_output_name(output_name: str) -> str:
     return output_name
 
 
+def _shared_access_key(name: str) -> str:
+    path = Path(name)
+    if path.suffix.lower() in {".html", ".md"}:
+        return path.stem
+    return path.name
+
+
 def _load_public_access() -> dict[str, list[str]]:
     access_file = PUBLIC_DIR / ".access.json"
     try:
@@ -872,37 +879,38 @@ def _share_url_for_slug(slug: str, ws: WebSocket, token: str | None = None) -> s
 
 
 def _resolve_share_source(project_root: Path, raw_path: str) -> tuple[Path | None, str | None]:
+    allowed_exts = {".md", ".html", ".pdf"}
     rel_path = raw_path.strip()
     if rel_path.startswith("@"):
         rel_path = rel_path[1:]
     rel_path = rel_path.strip()
     if not rel_path:
-        return None, "Usage: /share <project-relative .md or .html file>"
+        return None, "Usage: /share <project-relative .md, .html, or .pdf file>"
 
     direct = (project_root / rel_path).resolve()
     if not str(direct).startswith(str(project_root)):
         return None, "Source file must be inside the current project"
-    if direct.is_file() and direct.suffix.lower() in {".md", ".html"}:
+    if direct.is_file() and direct.suffix.lower() in allowed_exts:
         return direct, None
 
     search_terms: list[str] = []
     if rel_path:
         search_terms.append(rel_path)
         rel_obj = Path(rel_path)
-        if rel_obj.suffix.lower() not in {".md", ".html"}:
-            search_terms.extend([f"{rel_path}.md", f"{rel_path}.html"])
+        if rel_obj.suffix.lower() not in allowed_exts:
+            search_terms.extend([f"{rel_path}.md", f"{rel_path}.html", f"{rel_path}.pdf"])
         name = rel_obj.name
         if name and name not in search_terms:
             search_terms.append(name)
-        if name and Path(name).suffix.lower() not in {".md", ".html"}:
-            search_terms.extend([f"{name}.md", f"{name}.html"])
+        if name and Path(name).suffix.lower() not in allowed_exts:
+            search_terms.extend([f"{name}.md", f"{name}.html", f"{name}.pdf"])
 
     candidates: list[Path] = []
     seen: set[str] = set()
     for file_path in project_root.rglob("*"):
         if not file_path.is_file():
             continue
-        if file_path.suffix.lower() not in {".md", ".html"}:
+        if file_path.suffix.lower() not in allowed_exts:
             continue
         try:
             rel = str(file_path.relative_to(project_root))
@@ -921,7 +929,7 @@ def _resolve_share_source(project_root: Path, raw_path: str) -> tuple[Path | Non
         options = ", ".join(str(p.relative_to(project_root)) for p in sorted(candidates)[:5])
         more = "" if len(candidates) <= 5 else f", ... ({len(candidates)} matches)"
         return None, f"Multiple matching files found: {options}{more}"
-    return None, "No matching .md or .html file found"
+    return None, "No matching .md, .html, or .pdf file found"
 
 
 def _parse_share_args(cmd_args: str) -> tuple[str, str | None]:
@@ -941,13 +949,13 @@ async def _handle_share(cmd_args: str, project_path: Path, ws: WebSocket) -> str
     source_arg, token_arg = _parse_share_args(cmd_args)
     source, error = _resolve_share_source(project_root, source_arg)
     if error:
-        return "Usage: /share <project-relative .md or .html file> [token]"
+        return error
     assert source is not None
 
     ext = source.suffix.lower()
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 
-    if ext == ".html":
+    if ext in {".html", ".pdf"}:
         output_name = _sanitize_public_name(source.name)
         destination = (PUBLIC_DIR / output_name).resolve()
         if destination.parent != PUBLIC_DIR.resolve():
@@ -977,11 +985,11 @@ async def _handle_share(cmd_args: str, project_path: Path, ws: WebSocket) -> str
                 return "Invalid destination"
             destination.write_text(content)
 
-    slug = _share_output_name(output_name)
+    access_key = _shared_access_key(output_name)
     rules = _load_public_access()
-    existing_tokens = [t for t in rules.get(slug, []) if t]
+    existing_tokens = [t for t in rules.get(access_key, []) if t]
     token = token_arg or (existing_tokens[0] if existing_tokens else uuid4().hex[:12])
-    rules[slug] = [token]
+    rules[access_key] = [token]
     _save_public_access(rules)
     return _share_output(output_name, ws, token=token)
 
@@ -994,9 +1002,9 @@ def _resolve_unshare_target(public_root: Path, raw_path: str) -> str | None:
     if not rel_path:
         return None
     direct = (public_root / rel_path).resolve()
-    if str(direct).startswith(str(public_root)) and direct.is_file() and direct.suffix.lower() in {".md", ".html"}:
-        return direct.stem
-    return Path(rel_path).stem or None
+    if str(direct).startswith(str(public_root)) and direct.is_file() and direct.suffix.lower() in {".md", ".html", ".pdf"}:
+        return _shared_access_key(direct.name)
+    return _shared_access_key(rel_path)
 
 
 async def _handle_shares(ws: WebSocket) -> str:
@@ -1007,9 +1015,9 @@ async def _handle_shares(ws: WebSocket) -> str:
         for file_path in sorted(public_root.iterdir()):
             if not file_path.is_file() or file_path.name.startswith("."):
                 continue
-            if file_path.suffix.lower() not in {".md", ".html"}:
+            if file_path.suffix.lower() not in {".md", ".html", ".pdf"}:
                 continue
-            shared_files[file_path.stem] = file_path.name
+            shared_files[_shared_access_key(file_path.name)] = file_path.name
 
     if not shared_files:
         return "No shared files"
@@ -1027,6 +1035,10 @@ async def _handle_unshare(cmd_args: str) -> str:
     if not slug:
         return "Usage: /unshare <path-or-slug>"
     removed_files: list[str] = []
+    pdf_target = (PUBLIC_DIR / slug).resolve()
+    if pdf_target.parent == PUBLIC_DIR.resolve() and pdf_target.is_file() and pdf_target.suffix.lower() == ".pdf":
+        pdf_target.unlink()
+        removed_files.append(pdf_target.name)
     for ext in (".html", ".md"):
         target = (PUBLIC_DIR / f"{slug}{ext}").resolve()
         if target.parent == PUBLIC_DIR.resolve() and target.is_file():

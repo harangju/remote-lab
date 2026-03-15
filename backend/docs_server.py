@@ -163,15 +163,15 @@ async def index(request: Request):
     docs = []
     if DOCS_DIR.exists():
         for f in sorted(DOCS_DIR.iterdir()):
-            if not f.name.endswith((".md", ".html")):
+            if not f.name.endswith((".md", ".html", ".pdf")):
                 continue
             resolved = _safe_resolve(DOCS_DIR, f.name)
             if not resolved or not resolved.is_file():
                 continue
-            slug = f.stem
+            slug = f.name if f.suffix.lower() == ".pdf" else f.stem
             if not _can_access(slug, token, rules):
                 continue
-            docs.append((slug, f.name.replace(".md", "").replace(".html", ""), resolved.stat().st_mtime))
+            docs.append((slug, f.name, resolved.stat().st_mtime))
 
     docs.sort(key=lambda x: x[2], reverse=True)
     items = "\n".join(
@@ -181,7 +181,7 @@ async def index(request: Request):
     body = (
         f'<h1>Documents</h1>\n<ul class="file-list">\n{items}\n</ul>'
         if docs
-        else '<h1>Documents</h1>\n<p>No markdown files found in <code>docs/</code>.</p>'
+        else '<h1>Documents</h1>\n<p>No markdown, HTML, or PDF files found in <code>docs/</code>.</p>'
     )
     return HTMLResponse(_layout("Documents", body))
 
@@ -199,6 +199,11 @@ async def doc_or_asset(path: str, request: Request):
     if ext in ASSET_TYPES:
         resolved = _safe_resolve(DOCS_DIR, path)
         if resolved and resolved.is_file():
+            rules = _load_access()
+            token = _get_token(request)
+            access_key = Path(path).name if ext == ".pdf" else Path(path).stem
+            if not _can_access(access_key, token, rules):
+                return Response("Unauthorized", status_code=401)
             data = resolved.read_bytes()
             return Response(data, media_type=ASSET_TYPES[ext], headers={"Cache-Control": "public, max-age=3600"})
         return Response("Not found", status_code=404)

@@ -30,7 +30,7 @@ class Skill(BaseModel):
 BUILTIN_SKILLS: list[Skill] = [
     Skill(name="compact", type=SkillType.server, description="Compact conversation context"),
     Skill(name="model", type=SkillType.server, description="Show current model info"),
-    Skill(name="share", type=SkillType.server, description="Publish a markdown or HTML file and return a tokenized link: /share <path> [token]"),
+    Skill(name="share", type=SkillType.server, description="Publish a markdown, HTML, or PDF file and return a tokenized link: /share <path> [token]"),
     Skill(name="shares", type=SkillType.server, description="List shared files and their tokenized links: /shares"),
     Skill(name="unshare", type=SkillType.server, description="Remove a shared file's access token requirement: /unshare <path-or-slug>"),
 ]
