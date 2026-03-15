@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMe
 import { useParams, Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic, ArrowUp } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment, type ConvoDetail } from "../api";
 import { input as inputStyle, btnPrimary } from "../styles";
 import { CodeBlock } from "../components/CodeBlock";
@@ -2177,26 +2177,62 @@ export function Chat() {
                   color: "var(--text)",
                   border: "1px solid color-mix(in srgb, var(--accent) 32%, var(--border))",
                   borderRadius: "999px",
-                  padding: "0 12px",
-                  minHeight: "34px",
+                  width: "34px",
+                  height: "34px",
+                  minWidth: "34px",
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: "6px",
+                  justifyContent: "center",
+                  padding: 0,
                   flexShrink: 0,
-                  fontWeight: 500,
                 }}
                 data-tooltip="Start voice input"
               >
-                <Mic size={15} /> Voice
+                <Mic size={15} />
               </button>
             )}
             {busy ? (
-              <button type="button" onClick={stop} style={{ ...btnPrimary, borderRadius: "8px", background: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-                <Square size={14} fill="currentColor" /> Stop
+              <button
+                type="button"
+                onClick={stop}
+                style={{
+                  ...btnPrimary,
+                  width: "34px",
+                  height: "34px",
+                  minWidth: "34px",
+                  borderRadius: "999px",
+                  background: "var(--text-muted)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+                data-tooltip="Stop"
+              >
+                <Square size={14} fill="currentColor" />
               </button>
             ) : (
-              <button type="submit" style={{ ...btnPrimary, opacity: !connected ? 0.5 : 1, borderRadius: "8px" }} disabled={!connected || (!input.trim() && composerAttachments.length === 0) || uploadingAttachments}>
-                Send
+              <button
+                type="submit"
+                style={{
+                  ...btnPrimary,
+                  width: "34px",
+                  height: "34px",
+                  minWidth: "34px",
+                  borderRadius: "999px",
+                  opacity: !connected || (!input.trim() && composerAttachments.length === 0) || uploadingAttachments ? 0.5 : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  flexShrink: 0,
+                }}
+                disabled={!connected || (!input.trim() && composerAttachments.length === 0) || uploadingAttachments}
+                data-tooltip="Send"
+              >
+                <ArrowUp size={16} />
               </button>
             )}
             </div>
