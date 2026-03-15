@@ -10,23 +10,26 @@ _EXCLUDED_DIRS = {
     ".next", "dist", "build", ".cache", ".mypy_cache", ".ruff_cache",
 }
 
-_MAX_CLAUDE_MD = 10_000
+_MAX_INSTRUCTIONS = 10_000
+
+_INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"]
 
 
-def read_claude_md(project_path: Path) -> str | None:
-    """Read CLAUDE.md from project root or .claude/ directory."""
-    for candidate in [
-        project_path / "CLAUDE.md",
-        project_path / ".claude" / "CLAUDE.md",
-    ]:
-        if candidate.is_file():
-            try:
-                text = candidate.read_text(errors="replace")
-                if len(text) > _MAX_CLAUDE_MD:
-                    text = text[:_MAX_CLAUDE_MD] + "\n... (truncated)"
-                return text
-            except Exception:
-                return None
+def read_instructions(project_path: Path) -> str | None:
+    """Read project instructions (AGENTS.md or CLAUDE.md) from project root or .claude/ directory."""
+    for name in _INSTRUCTION_FILES:
+        for candidate in [
+            project_path / name,
+            project_path / ".claude" / name,
+        ]:
+            if candidate.is_file():
+                try:
+                    text = candidate.read_text(errors="replace")
+                    if len(text) > _MAX_INSTRUCTIONS:
+                        text = text[:_MAX_INSTRUCTIONS] + "\n... (truncated)"
+                    return text
+                except Exception:
+                    return None
     return None
 
 
@@ -79,9 +82,9 @@ def build_project_instructions(project_path: Path, is_first_turn: bool) -> str |
         "Use `/unshare <path-or-slug>` to remove its access token requirement."
     )
 
-    claude_md = read_claude_md(project_path)
-    if claude_md:
-        sections.append(f"## Project Instructions (CLAUDE.md)\n\n{claude_md}")
+    instructions = read_instructions(project_path)
+    if instructions:
+        sections.append(f"## Project Instructions\n\n{instructions}")
 
     if is_first_turn:
         tree = get_directory_tree(project_path)

@@ -16,7 +16,7 @@ Key backend files:
 - `backend/server.py` — FastAPI app, WebSocket handler, REST API, static file serving
 - `backend/agents.py` — agent configuration, model fallback, system prompts
 - `backend/tools.py` — bash, file, search, and web tools
-- `backend/context.py` — injects project context such as `CLAUDE.md` and directory tree
+- `backend/context.py` — injects project context such as `AGENTS.md` and directory tree
 - `backend/compact.py` — summarizes older messages when context gets large
 - `backend/storage.py` — flat-file persistence for projects and conversations
 - `backend/models.py` — Pydantic models for REST API

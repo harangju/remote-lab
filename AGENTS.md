@@ -15,16 +15,19 @@ A web-based AI coding assistant with a chat UI, file editor, and agentic tool us
 
 - `uv run uvicorn backend.server:app` — start the server (use `uv run`, not bare python)
 - `cd frontend && bun run build` — build the frontend to `frontend/dist/`
-- `sudo systemctl restart remote-lab` — restart the service
+- `sudo systemctl restart remote-lab` — restart the main service
+- `sudo systemctl restart remote-lab-docs` — restart the docs service (port 3001)
+- `sudo systemctl restart remote-lab remote-lab-docs` — restart both
 
 ## Architecture
 
 ```
 backend/
-  server.py     — FastAPI app, WebSocket handler, REST API, static file serving
+  server.py      — FastAPI app, WebSocket handler, REST API, static file serving
+  docs_server.py — Docs site server (port 3001, systemd: remote-lab-docs)
   agents.py     — PydanticAI agent config, model fallback, system prompt
   tools.py      — Agent tools: bash, read_file, write_file, edit_file, glob, grep, web_search
-  context.py    — Project context injection (CLAUDE.md, directory tree)
+  context.py    — Project context injection (AGENTS.md, directory tree)
   compact.py    — Context window compaction via summarization
   storage.py    — JSON flat-file persistence for projects and conversations
   models.py     — Pydantic models for REST API
