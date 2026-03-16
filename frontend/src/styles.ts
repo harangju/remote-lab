@@ -70,7 +70,7 @@ export function injectTheme() {
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    [data-tooltip]:hover { position: relative; z-index: 99999; }
+    [data-tooltip]:hover { position: relative; }
     [data-tooltip]:hover::after {
       content: attr(data-tooltip);
       position: absolute;

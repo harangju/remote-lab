@@ -96,7 +96,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
           position: "fixed",
           inset: 0,
           background: "rgba(0,0,0,0.3)",
-          zIndex: 199,
+          zIndex: 1000,
         }}
       />
 
@@ -116,7 +116,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
           boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
           display: "flex",
           flexDirection: "column",
-          zIndex: 200,
+          zIndex: 1001,
           overflow: "hidden",
         }}
       >
