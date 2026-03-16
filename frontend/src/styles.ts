@@ -85,7 +85,7 @@ export function injectTheme() {
       white-space: nowrap;
       border-radius: 4px;
       pointer-events: none;
-      z-index: 1000;
+      z-index: 2147483647;
     }
     button {
       cursor: pointer;

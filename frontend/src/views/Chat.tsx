@@ -4,7 +4,20 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic, ArrowUp } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment, type ConvoDetail } from "../api";
-import { input as inputStyle, btnPrimary } from "../styles";
+import { input as inputStyle, btnPrimary, btnIcon } from "../styles";
+
+const headerIconBtnStyle: React.CSSProperties = {
+  ...btnIcon,
+  cursor: "pointer",
+};
+
+function headerHoverIn(e: React.MouseEvent<HTMLElement>) {
+  e.currentTarget.style.background = "color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 12%)";
+}
+
+function headerHoverOut(e: React.MouseEvent<HTMLElement>) {
+  e.currentTarget.style.background = "var(--bg-surface)";
+}
 import { CodeBlock } from "../components/CodeBlock";
 import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
@@ -62,6 +75,18 @@ interface MetaInfo {
 // ContextDonut — small SVG ring showing context window usage
 // ---------------------------------------------------------------------------
 
+function formatTokenCount(value: number, digits = 1): string {
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${parseFloat(millions.toFixed(digits))}m`;
+  }
+  if (value >= 1_000) {
+    const thousands = value / 1_000;
+    return `${parseFloat(thousands.toFixed(digits))}k`;
+  }
+  return `${value}`;
+}
+
 function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
   if (!limit) return null;
   const pct = Math.min(tokens / limit, 1);
@@ -72,7 +97,7 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
   return (
     <div
       style={{ display: "inline-flex", alignItems: "center", cursor: "default" }}
-      data-tooltip={`${(tokens / 1000).toFixed(1)}k / ${(limit / 1000).toFixed(0)}k tokens (${Math.round(pct * 100)}%)`}
+      data-tooltip={`${formatTokenCount(tokens)} / ${formatTokenCount(limit, 0)} tokens (${Math.round(pct * 100)}%)`}
     >
       <svg width="18" height="18" viewBox="0 0 18 18" style={{ transform: "rotate(-90deg)" }}>
         <circle cx="9" cy="9" r={r} fill="none" stroke="var(--border)" strokeWidth="2.5" />
@@ -1588,7 +1613,20 @@ export function Chat() {
         <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         <div style={{ padding: "12px 1.5rem", maxWidth: CHAT_HEADER_MAX_WIDTH, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-            <Link to={`/${projectId}`} style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.1rem" }} title="Conversations">&larr;</Link>
+            <Link
+              to={`/${projectId}`}
+              style={{
+                ...headerIconBtnStyle,
+                color: "var(--text-muted)",
+                textDecoration: "none",
+              }}
+              data-tooltip="Conversations"
+              aria-label="Conversations"
+              onMouseEnter={headerHoverIn}
+              onMouseLeave={headerHoverOut}
+            >
+              <span style={{ fontSize: "1rem", lineHeight: 1 }}>&larr;</span>
+            </Link>
             <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0, flexShrink: 1 }}>
               {editing ? (
                 <input
@@ -1650,18 +1688,17 @@ export function Chat() {
                 <button
                   onClick={toggleAutonomy}
                   disabled={savingAutonomy}
-                  data-tooltip={autonomousToolsEnabled ? "Disable autonomous tool mode for this conversation" : "Enable autonomous tool mode for this conversation"}
+                  data-tooltip={autonomousToolsEnabled ? "Disable auto mode" : "Enable auto mode"}
                   style={{
-                    background: autonomousToolsEnabled ? "rgba(77, 147, 117, 0.12)" : "none",
-                    border: autonomousToolsEnabled ? "1px solid rgba(77, 147, 117, 0.35)" : "1px solid transparent",
-                    borderRadius: "999px",
-                    padding: "2px",
+                    ...headerIconBtnStyle,
+                    background: autonomousToolsEnabled ? "rgba(77, 147, 117, 0.12)" : "var(--bg-surface)",
+                    border: autonomousToolsEnabled ? "1px solid rgba(77, 147, 117, 0.35)" : "1px solid var(--border)",
                     color: autonomousToolsEnabled ? "var(--accent)" : "var(--text-muted)",
-                    display: "inline-flex",
-                    alignItems: "center",
                     cursor: savingAutonomy ? "default" : "pointer",
                     opacity: savingAutonomy ? 0.6 : 1,
                   }}
+                  onMouseEnter={(e) => { if (!savingAutonomy && !autonomousToolsEnabled) headerHoverIn(e); }}
+                  onMouseLeave={(e) => { if (!autonomousToolsEnabled) headerHoverOut(e); }}
                 >
                   <Sparkles size={15} />
                 </button>
@@ -1669,14 +1706,11 @@ export function Chat() {
                   onClick={panel.file ? () => syncFileQuery(panel.file!.path, true) : panel.toggleFileFinder}
                   data-tooltip={panel.file ? "Open current file as primary view" : "Find file (⌘P)"}
                   style={{
-                    background: "none",
-                    border: "none",
-                    padding: "2px",
+                    ...headerIconBtnStyle,
                     color: "var(--text-muted)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    cursor: "pointer",
                   }}
+                  onMouseEnter={headerHoverIn}
+                  onMouseLeave={headerHoverOut}
                 >
                   <FolderOpen size={15} />
                 </button>

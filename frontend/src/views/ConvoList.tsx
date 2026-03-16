@@ -2,9 +2,22 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FileFinder } from "../components/FileFinder";
 import { listFiles } from "../api";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Archive, Pencil, Plus, Trash2, ChevronDown, ChevronUp, RotateCcw, FolderOpen, MessageSquare } from "lucide-react";
+import { Archive, Pencil, Plus, Trash2, ChevronDown, ChevronUp, RotateCcw, FolderOpen, MessageSquare, ArrowLeft } from "lucide-react";
 import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, listModels, type Project, type ConvoMeta, type AgentConfig } from "../api";
 import { container, card, btnPrimary, btnDanger, btnIcon, badge, input as inputStyle } from "../styles";
+
+const iconBtnStyle: React.CSSProperties = {
+  ...btnIcon,
+  cursor: "pointer",
+};
+
+function hoverIn(e: React.MouseEvent<HTMLElement>) {
+  e.currentTarget.style.background = "color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 12%)";
+}
+
+function hoverOut(e: React.MouseEvent<HTMLElement>) {
+  e.currentTarget.style.background = "var(--bg-surface)";
+}
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -163,6 +176,11 @@ export function ConvoList() {
     }
   };
 
+  const openProjectFile = (path: string) => {
+    if (!projectId) return;
+    navigate(`/${projectId}/file?path=${encodeURIComponent(path)}`);
+  };
+
   const startRename = (c: ConvoMeta) => {
     setEditingId(c.id);
     setEditValue(c.title || "Untitled");
@@ -319,8 +337,21 @@ export function ConvoList() {
   return (
     <div style={container}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
-          <Link to="/" style={{ color: "var(--text-muted)", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: "1.3rem" }} title="Projects">&larr;</Link>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
+          <Link
+            to="/"
+            style={{
+              ...iconBtnStyle,
+              color: "var(--text-muted)",
+              textDecoration: "none",
+            }}
+            data-tooltip="Projects"
+            aria-label="Projects"
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
+          >
+            <ArrowLeft size={16} />
+          </Link>
           {editingProject ? (
             <input
               autoFocus
@@ -372,15 +403,19 @@ export function ConvoList() {
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <button
             onClick={toggleFileFinder}
-            style={btnIcon}
+            style={iconBtnStyle}
             data-tooltip="Open file (⌘P)"
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
           >
             <FolderOpen size={16} />
           </button>
           <button
             onClick={handleNew}
-            style={btnIcon}
+            style={iconBtnStyle}
             data-tooltip="New conversation"
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
           >
             <MessageSquare size={16} />
           </button>

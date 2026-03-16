@@ -26,6 +26,7 @@
 - Those header icon buttons now opt out of the generic global press animation and use their own simpler hover treatment, with more spacing between buttons.
 - The apparent remaining "press bar" was tooltip clipping; the file-panel header now keeps normal downward tooltips, but the header layer is allowed to render visibly above the editor instead of clipping them.
 - Project-mode and file-panel icon buttons are now being normalized to the same shared visual size/style so the interaction language stays consistent.
+- The actual conversation page header (`Chat.tsx`) now uses the same icon-button language and hover treatment as the file and project surfaces, while keeping the back/title area as a page header.
 - File-panel header ordering is being adjusted so the edit/save/cancel cluster sits immediately to the right of the filename, while file/conversation/copy/close remain in the right-side utility cluster.
 - The file-view conversation action is being shifted from silent auto-match to an explicit anchored popover with "new conversation" plus recent conversations that used the file.
 - That conversation chooser is now shifting further toward the file explorer interaction model: modal overlay treatment, fallback to recent conversations when file-linked ones don't exist, and existing-conversation opens can prefill `@file` in chat.
@@ -35,3 +36,4 @@
 - File-only mode also had a redundant double-header (route shell + file panel header); the temporary shell header has been removed so only the real file-panel header remains once a file is open.
 - File finder overlay now uses a clearly top-layer z-index so its backdrop covers app chrome consistently.
 - Header button appearing above the file-finder dimmer was caused by the global tooltip hover rule forcing hovered `[data-tooltip]` elements to `z-index: 99999`; that z-index boost has been removed.
+- Tooltip bubbles themselves now render at an explicit top-layer z-index so they appear above app chrome when shown.
