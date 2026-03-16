@@ -76,13 +76,15 @@ The service runs as `www-data` under systemd. The agent's bash tool inherits the
 
 - **Git identity**: `/var/www/.gitconfig` — standard `~/.gitconfig` for the `www-data` user.
 - **SSH**: `/var/www/.ssh/id_ed25519` — default SSH key, used for `git push`, `git clone`, etc. The server also auto-converts HTTPS GitHub URLs to SSH for project cloning.
+- **GitHub CLI**: Authenticated via `gh auth login` as `www-data` (config at `/var/www/.config/gh/hosts.yml`). Do **not** set `GH_TOKEN` in `.env` — it overrides `gh`'s config and won't pick up scope changes from `gh auth refresh`.
 - **PATH**: Extended in the systemd unit (`/etc/systemd/system/remote-lab.service`) to include `/root/.bun/bin` since bun is not installed system-wide.
 
 To provision a new server:
 
 1. Set up `/var/www/.gitconfig` with agent's git identity
 2. Copy a GitHub-authorized SSH key to `/var/www/.ssh/id_ed25519` (owner `www-data`, mode `600`)
-3. Ensure the systemd unit's `Environment=PATH=...` includes paths for any user-installed CLI tools
+3. Authenticate `gh` CLI: `sudo -u www-data gh auth login` (add scopes as needed with `gh auth refresh -s <scope> --hostname github.com`)
+4. Ensure the systemd unit's `Environment=PATH=...` includes paths for any user-installed CLI tools
 
 ## File Permissions
 
