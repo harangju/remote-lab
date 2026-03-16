@@ -107,6 +107,13 @@ Source files use standard Markdown with `marp: true` front matter. Slides are se
 ## Conventions
 
 - **Align before acting** — understand the problem and agree on the approach before making changes. Ask questions, don't assume.
+- Use this workflow for changes:
+  1. **Mental model** — what is this really?
+  2. **Manifest** — what would that feel like in use?
+  3. **Desired state** — if that were true, what would the product look like?
+  4. **Delta from current state** — what is missing or misaligned today?
+  5. **Implementation** — once we are in sync on the first four steps, implementation can proceed and may be automated.
+- **Get in sync at each step** before moving to the next one. Do not jump straight to implementation for product-shaping work.
 - **When the goal and best option are clear, just do it** — don't ask the user to choose between options when one is obviously better. Only ask when there's genuine ambiguity or tradeoffs that depend on user preference.
 - **Be brief by default** — answer in the fewest words that still fully answer the question. Prefer short paragraphs and bullets over long explanations unless the user asks for detail.
 - Use `uv run` for Python, `bun` for frontend (never npm/npx)
