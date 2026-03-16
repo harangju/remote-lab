@@ -11,6 +11,7 @@ from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from types import SimpleNamespace
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -38,9 +39,9 @@ from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
 from backend.compact import compact, needs_compaction
 from backend.context import build_project_instructions
 from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, VoiceState, VoiceTranscript, Error, FileChanged
+from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, VoiceState, VoiceTranscript, Error, FileChanged, ToolResult, ToolOutput
 from backend.skills import get_skills, get_skill, SkillType
-from backend.permissions import is_tool_auto_allowed, add_project_rule, tool_is_always_confirmed
+from backend.permissions import is_tool_auto_allowed, add_project_rule, tool_is_always_confirmed, build_project_rule
 from backend.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoUpdate, ConvoDetail,
@@ -238,6 +239,112 @@ def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int
     if not lines:
         return ""
     return "\n".join(lines)
+
+
+async def _run_bash_command_task(run: RunState, command: str, convo_id: str) -> None:
+    async def _emit(msg_str: str):
+        try:
+            payload = json.loads(msg_str)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            payload.setdefault("run_id", run.run_id)
+            msg_str = json.dumps(payload)
+        run.events.append(msg_str)
+        await run.broadcast(msg_str)
+
+    async def _wait_for_approval(tool_call_id: str, command_input: dict[str, str]) -> bool:
+        convo_meta = storage._read_meta(convo_id)
+        convo_autonomous = bool(convo_meta.autonomous_tools_enabled) if convo_meta else False
+        if is_tool_auto_allowed(get_workdir(), convo_autonomous, "bash", command_input):
+            return True
+
+        run.pending_approvals = {tool_call_id}
+        run.pending_approval_details = {tool_call_id: {"name": "bash", "args": command_input}}
+        run.approval_decisions = {}
+        run.approval_event = asyncio.Event()
+        always_confirm = tool_is_always_confirmed("bash", command_input)
+        await _emit(ToolConfirm(
+            tool_call_id=tool_call_id,
+            name="bash",
+            run_id=run.run_id,
+            args=json.dumps(command_input),
+            can_allow_project=not always_confirm,
+        ).model_dump_json())
+        await run.approval_event.wait()
+        approved = bool(run.approval_decisions.get(tool_call_id, False))
+        run.pending_approvals.clear()
+        run.pending_approval_details.clear()
+        return approved
+
+    agent_tools.set_broadcast(_emit)
+    try:
+        command_input = {"command": command}
+        tool_call_id = f"bash-{uuid4().hex[:8]}"
+        await _emit(json.dumps({
+            "type": "tool-use",
+            "name": "bash",
+            "input": json.dumps(command_input),
+            "run_id": run.run_id,
+        }))
+        await _append_message(convo_id, {
+            "role": "tool",
+            "name": "bash",
+            "input": json.dumps(command_input),
+            "timestamp": _iso_now(),
+            "run_id": run.run_id,
+        })
+
+        approved = await _wait_for_approval(tool_call_id, command_input)
+        if not approved:
+            await _emit(Error(message="User denied this tool call", run_id=run.run_id, recoverable=True).model_dump_json())
+            run.status = "error"
+            await _update_conversation_status(convo_id, ConvoStatus.idle)
+            return
+
+        if build_project_rule("bash", command_input) is None:
+            await _emit(Error(message="Invalid bash command", run_id=run.run_id, recoverable=True).model_dump_json())
+            run.status = "error"
+            await _update_conversation_status(convo_id, ConvoStatus.error)
+            return
+
+        result = await agent_tools._bash(SimpleNamespace(), command)
+        await _emit(ToolResult(name="bash", output=result[:500] if result else "OK", run_id=run.run_id).model_dump_json())
+
+        meta_msg = {
+            "role": "assistant",
+            "content": "",
+            "timestamp": _iso_now(),
+            "turns": 0,
+            "context_tokens": 0,
+            "context_limit": 0,
+            "run_id": run.run_id,
+        }
+        await _append_message(convo_id, meta_msg)
+
+        done = Done(turns=0, run_id=run.run_id, context_tokens=0, context_limit=0)
+        run.done_event = done.model_dump()
+        run.status = "done"
+        await _emit(done.model_dump_json())
+        await _update_conversation_status(convo_id, ConvoStatus.done)
+    except asyncio.CancelledError:
+        run.status = "error"
+        await _update_conversation_status(convo_id, ConvoStatus.idle)
+        await _emit(Error(message="Run stopped", run_id=run.run_id, recoverable=True).model_dump_json())
+        raise
+    except Exception as e:
+        run.error_msg = str(e)
+        run.status = "error"
+        await _update_conversation_status(convo_id, ConvoStatus.error)
+        await _emit(Error(message=str(e), run_id=run.run_id, recoverable=True).model_dump_json())
+    finally:
+        agent_tools.clear_broadcast()
+        await asyncio.sleep(10)
+        session = sessions.get(convo_id)
+        if session and session.run is run:
+            session.run = None
+            if not session.subscribers and session.controller is None:
+                sessions.pop(convo_id, None)
 
 
 async def _run_agent_task(
@@ -1255,11 +1362,14 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                 run.approval_event.set()
                         continue
                     if ctrl.get("type") == "user-message":
-                        prompt = str(ctrl.get("text", "")).strip()
+                        raw_text = str(ctrl.get("text", ""))
+                        prompt = raw_text.strip()
                         message_id = str(ctrl.get("message_id", "")).strip() or None
                         raw_attachments = ctrl.get("attachments") or []
                         if isinstance(raw_attachments, list):
                             attachments = [a for a in raw_attachments if isinstance(a, dict) and a.get("path")]
+                        if raw_text.startswith("\\!"):
+                            prompt = raw_text[1:]
                         if not prompt:
                             await ws.send_text(Error(message="Empty message", recoverable=True).model_dump_json())
                             continue
@@ -1445,6 +1555,13 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     user_text = cmd_args.strip()
                     prompt = f"{skill.prompt}\n\n{user_text}" if user_text else skill.prompt
 
+            is_bash_mode = raw_message.startswith("!") or (isinstance(locals().get("raw_text"), str) and raw_text.startswith("!"))
+            bash_command = raw_text[1:] if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!") else ""
+            if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!"):
+                if not bash_command.strip():
+                    await ws.send_text(Error(message="Empty bash command", recoverable=True).model_dump_json())
+                    continue
+
             _invalidate_message_cache()
             await _append_message(convo_id, {
                 "role": "user",
@@ -1452,6 +1569,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 "timestamp": _iso_now(),
                 **({"message_id": message_id} if message_id else {}),
                 **({"attachments": attachments} if attachments else {}),
+                **({"bash_mode": True} if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!") else {}),
             })
             if message_id:
                 processed_message_ids.setdefault(convo_id, set()).add(message_id)
@@ -1459,7 +1577,10 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
             await _update_conversation_status(convo_id, ConvoStatus.running)
 
-            if project_agents:
+            if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!"):
+                target_agents = [None]
+                cleaned_prompt = prompt
+            elif project_agents:
                 target_agents, cleaned_prompt = parse_mentions(prompt, project_agents)
             else:
                 target_agents = [None]
@@ -1490,6 +1611,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             await ws.send_text(Running(run_id=run.run_id).model_dump_json())
 
             agent_tools.set_workdir(project_path)
+            if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!"):
+                run.task = asyncio.create_task(_run_bash_command_task(run, bash_command.strip(), convo_id))
+                continue
             if _cached_instructions is _UNSET:
                 _cached_instructions = await asyncio.to_thread(build_project_instructions, project_path, True)
                 _cached_instructions_subsequent = await asyncio.to_thread(build_project_instructions, project_path, False)

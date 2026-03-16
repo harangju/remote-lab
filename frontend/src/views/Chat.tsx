@@ -37,6 +37,7 @@ interface DisplayMessage {
   message_id?: string;
   pending?: boolean;
   attachments?: Attachment[];
+  bashMode?: boolean;
 }
 
 interface PendingMessage {
@@ -609,6 +610,7 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
         message_id: typeof mAny.message_id === "string" ? mAny.message_id : undefined,
         pending: false,
         attachments: Array.isArray(mAny.attachments) ? mAny.attachments : undefined,
+        bashMode: !!mAny.bash_mode,
       });
     } else if (m.role === "assistant") {
       const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
@@ -764,6 +766,7 @@ export function Chat() {
       message_id,
       pending: true,
       attachments,
+      bashMode: text.startsWith("!"),
     }]);
     setBusy(true);
     setWaitingForModel(true);
@@ -1474,7 +1477,7 @@ export function Chat() {
   const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
 
   // Styles
-  const msgBubble = useCallback((role: "user" | "assistant", agentColor?: string): React.CSSProperties => ({
+  const msgBubble = useCallback((role: "user" | "assistant", agentColor?: string, bashMode?: boolean): React.CSSProperties => ({
     maxWidth: MESSAGE_MAX_WIDTH,
     padding: "10px 14px",
     borderRadius: "12px",
@@ -1482,9 +1485,11 @@ export function Chat() {
     fontSize: "0.9rem",
     wordBreak: "break-word",
     alignSelf: role === "user" ? "flex-end" : "flex-start",
-    background: role === "user" ? "var(--bg-user)" : "var(--bg-surface)",
+    background: role === "user"
+      ? (bashMode ? "var(--bg-bash-user)" : "var(--bg-user)")
+      : "var(--bg-surface)",
     color: "var(--text)",
-    border: `1px solid ${role === "user" ? "var(--border-user)" : "var(--border)"}`,
+    border: `1px solid ${role === "user" ? (bashMode ? "var(--border-bash-user)" : "var(--border-user)") : "var(--border)"}`,
     ...(agentColor ? { borderLeft: `3px solid ${agentColor}` } : {}),
   }), []);
 
@@ -1517,6 +1522,7 @@ export function Chat() {
   const [panelWidth, setPanelWidth] = useState(500);
   const dragging = useRef(false);
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
+  const isBashMode = input.startsWith("!");
   const inputPlaceholder = busy || uploadingAttachments
     ? uploadingAttachments ? "Uploading attachments..." : "Waiting for response..."
     : isMobile
@@ -1795,7 +1801,7 @@ export function Chat() {
                         if (m.role === "user" && i === messages.length - 1) latestUserMessageRef.current = el;
                       }}
                       data-message-id={m.message_id}
-                      style={{ ...msgBubble(m.role, m.agent_color), opacity: m.pending ? 0.7 : 1 }}
+                      style={{ ...msgBubble(m.role, m.agent_color, m.bashMode), opacity: m.pending ? 0.7 : 1 }}
                     >
                       {m.attachments && m.attachments.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: b.content ? "8px" : 0 }}>
@@ -2136,8 +2142,10 @@ export function Chat() {
             display: "flex",
             gap: "8px",
             padding: "10px 14px",
-            background: dragActive ? "color-mix(in srgb, var(--bg-surface) 82%, var(--accent) 18%)" : "var(--bg-surface)",
-            border: `1px solid ${dragActive ? "var(--accent)" : "var(--border)"}`,
+            background: dragActive
+              ? "color-mix(in srgb, var(--bg-surface) 82%, var(--accent) 18%)"
+              : (isBashMode ? "var(--bg-bash-composer)" : "var(--bg-surface)"),
+            border: `1px solid ${dragActive ? "var(--accent)" : (isBashMode ? "var(--border-bash-composer)" : "var(--border)")}`,
             borderRadius: "12px",
             flexDirection: "column",
             boxShadow: dragActive ? "0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent)" : "none",
@@ -2209,9 +2217,15 @@ export function Chat() {
               </div>
             )}
             <div style={{ display: "flex", gap: "8px" }}>
-            <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: "none", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", cursor: "pointer", padding: "4px 2px" }} data-tooltip="Attach files">
-              <Paperclip size={16} />
-            </button>
+            {isBashMode ? (
+              <span data-tooltip="Bash mode" style={{ color: "var(--border-bash-composer)", display: "inline-flex", alignItems: "center", padding: "4px 2px", flexShrink: 0 }}>
+                <Terminal size={16} />
+              </span>
+            ) : (
+              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: "none", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", cursor: "pointer", padding: "4px 2px", flexShrink: 0 }} data-tooltip="Attach files">
+                <Paperclip size={16} />
+              </button>
+            )}
             <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { if (e.target.files?.length) addComposerFiles(e.target.files); e.currentTarget.value = ""; }} />
             <textarea
               ref={inputRef}

@@ -29,6 +29,10 @@ export function injectTheme() {
       --accent: #b4885d;
       --bg-user: #ede9e3;
       --border-user: #ddd9d3;
+      --bg-bash-user: #e7ece7;
+      --border-bash-user: #bccabb;
+      --bg-bash-composer: #eef3ee;
+      --border-bash-composer: #7d9b7b;
       --code-bg: rgba(0,0,0,0.05);
     }
     @media (prefers-color-scheme: dark) {
@@ -41,6 +45,10 @@ export function injectTheme() {
         --accent: #c9a57c;
         --bg-user: #2a2926;
         --border-user: #3a3835;
+        --bg-bash-user: #202723;
+        --border-bash-user: #395043;
+        --bg-bash-composer: #1d2620;
+        --border-bash-composer: #6f9678;
         --code-bg: rgba(255,255,255,0.07);
       }
     }
