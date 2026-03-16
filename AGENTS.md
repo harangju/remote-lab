@@ -109,7 +109,7 @@ Source files use standard Markdown with `marp: true` front matter. Slides are se
 - **Align before acting** — understand the problem and agree on the approach before making changes. Ask questions, don't assume.
 - Use this workflow for changes:
   1. **Mental model** — what is this really?
-  2. **Manifest** — what would that feel like in use?
+  2. **Manifest** — what would that feel like in use? Focus on the felt reality: what feels primary vs secondary, where attention naturally goes, and how the structure shows up experientially. This is not yet features, layouts, or implementation.
   3. **Desired state** — if that were true, what would the product look like?
   4. **Delta from current state** — what is missing or misaligned today?
   5. **Implementation** — once we are in sync on the first four steps, implementation can proceed and may be automated.
