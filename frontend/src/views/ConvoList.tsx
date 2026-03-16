@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { FileFinder } from "../components/FileFinder";
+import { listFiles } from "../api";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Archive, Pencil, Plus, Trash2, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
+import { Archive, Pencil, Plus, Trash2, ChevronDown, ChevronUp, RotateCcw, FolderOpen, MessageSquare } from "lucide-react";
 import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, listModels, type Project, type ConvoMeta, type AgentConfig } from "../api";
-import { container, card, btnPrimary, btnDanger, badge, input as inputStyle } from "../styles";
+import { container, card, btnPrimary, btnDanger, btnIcon, badge, input as inputStyle } from "../styles";
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -30,6 +32,9 @@ export function ConvoList() {
   const [showAgents, setShowAgents] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [showFileFinder, setShowFileFinder] = useState(false);
+  const [fileList, setFileList] = useState<string[] | null>(null);
+  const [fileListLoading, setFileListLoading] = useState(false);
   const agentsLoaded = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const convoPollInFlight = useRef(false);
@@ -40,8 +45,9 @@ export function ConvoList() {
 
     const loadInitial = async () => {
       setLoading(true);
+      setFileListLoading(true);
       try {
-        const [p, c, agentRes, m] = await Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId), listModels()]);
+        const [p, c, agentRes, m, fileRes] = await Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId), listModels(), listFiles(projectId)]);
         if (cancelled) return;
         setProject(p);
         setConvos(c);
@@ -49,17 +55,32 @@ export function ConvoList() {
         setAgents(agentRes.agents);
         setIsCustomAgents(agentRes.custom);
         setAvailableModels(m.models);
+        setFileList(fileRes.files);
         setError(null);
       } catch (e: any) {
         if (!cancelled) setError(e.message);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setFileListLoading(false);
+        }
       }
     };
 
     void loadInitial();
     return () => { cancelled = true; };
   }, [projectId]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        toggleFileFinder();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [fileList, fileListLoading, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -100,6 +121,18 @@ export function ConvoList() {
   }, [projectId]);
 
   const activeConvos = useMemo(() => convos.filter((c) => !c.archived_at), [convos]);
+
+  const toggleFileFinder = () => {
+    if (!fileList && !fileListLoading && projectId) {
+      setFileListLoading(true);
+      listFiles(projectId)
+        .then((res) => setFileList(res.files))
+        .catch(() => setFileList([]))
+        .finally(() => setFileListLoading(false));
+    }
+    setShowFileFinder((v) => !v);
+  };
+
   const archivedConvos = useMemo(() => convos.filter((c) => c.archived_at), [convos]);
 
   const startProjectRename = () => {
@@ -336,179 +369,25 @@ export function ConvoList() {
             </div>
           )}
         </div>
-        <button style={btnPrimary} onClick={handleNew}>New Conversation</button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            onClick={toggleFileFinder}
+            style={btnIcon}
+            data-tooltip="Open file (⌘P)"
+          >
+            <FolderOpen size={16} />
+          </button>
+          <button
+            onClick={handleNew}
+            style={btnIcon}
+            data-tooltip="New conversation"
+          >
+            <MessageSquare size={16} />
+          </button>
+        </div>
       </div>
 
       {error && <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>Error: {error}</p>}
-
-      <div style={{ marginBottom: "1.5rem" }}>
-        <button
-          onClick={() => setShowAgents(!showAgents)}
-          style={{
-            background: "none",
-            border: "none",
-            padding: 0,
-            color: "var(--text-muted)",
-            fontSize: "0.85rem",
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-          }}
-        >
-          {showAgents ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          Agents ({agents.length})
-        </button>
-
-        {showAgents && (
-          <div style={{ marginTop: "8px" }}>
-            {!isCustomAgents && agents.length > 0 && (
-              <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "8px" }}>
-                Using global agents. Edit here to create a project-specific override.
-              </div>
-            )}
-            {isCustomAgents && (
-              <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
-                Custom agents for this project.
-                <button
-                  onClick={revertToGlobal}
-                  style={{
-                    background: "none",
-                    border: "1px solid var(--border)",
-                    borderRadius: "4px",
-                    color: "var(--text-muted)",
-                    fontSize: "0.72rem",
-                    padding: "1px 6px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Revert to global
-                </button>
-              </div>
-            )}
-            {agents.map((a, i) => (
-              <div key={i} style={{
-                ...card,
-                flexDirection: "column",
-                alignItems: "stretch",
-                gap: "8px",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <input
-                    type="color"
-                    value={a.color || "#9b9a97"}
-                    onChange={(e) => updateAgent(i, { color: e.target.value })}
-                    style={{ width: 24, height: 24, border: "none", padding: 0, cursor: "pointer", background: "none" }}
-                  />
-                  <input
-                    value={a.id}
-                    onChange={(e) => updateAgent(i, { id: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })}
-                    placeholder="id"
-                    style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: "0.8rem" }}
-                  />
-                  <input
-                    value={a.name}
-                    onChange={(e) => updateAgent(i, { name: e.target.value })}
-                    placeholder="Display name"
-                    style={{ ...inputStyle, flex: 2 }}
-                  />
-                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "3px", whiteSpace: "nowrap" }}>
-                    <input
-                      type="checkbox"
-                      checked={a.is_default}
-                      onChange={(e) => updateAgent(i, { is_default: e.target.checked })}
-                    />
-                    default
-                  </label>
-                  <button
-                    onClick={() => removeAgent(i)}
-                    style={{ background: "none", border: "none", color: "var(--text-muted)", padding: "2px", display: "flex" }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-
-                <select
-                  value={a.model || ""}
-                  onChange={(e) => updateAgent(i, { model: e.target.value || undefined })}
-                  style={{ ...inputStyle, fontSize: "0.8rem", cursor: "pointer", paddingRight: "28px", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}
-                >
-                  <option value="">Global model (default)</option>
-                  {availableModels.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-
-                <textarea
-                  value={a.system_prompt || ""}
-                  onChange={(e) => updateAgent(i, { system_prompt: e.target.value || undefined })}
-                  placeholder="Additional system prompt (optional)"
-                  rows={2}
-                  style={{
-                    ...inputStyle,
-                    fontSize: "0.8rem",
-                    resize: "vertical",
-                    fontFamily: "inherit",
-                  }}
-                />
-
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginRight: "4px" }}>Tools:</span>
-                  {ALL_TOOLS.map((t) => {
-                    const enabled = a.tools === null || a.tools === undefined || a.tools.includes(t);
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => {
-                          if (a.tools === null || a.tools === undefined) {
-                            updateAgent(i, { tools: ALL_TOOLS.filter((x) => x !== t) });
-                          } else if (enabled) {
-                            const next = a.tools.filter((x) => x !== t);
-                            updateAgent(i, { tools: next.length === 0 ? [] : next });
-                          } else {
-                            const next = [...a.tools, t];
-                            updateAgent(i, { tools: next.length === ALL_TOOLS.length ? undefined : next });
-                          }
-                        }}
-                        style={{
-                          fontSize: "0.7rem",
-                          fontFamily: "monospace",
-                          padding: "2px 6px",
-                          borderRadius: "4px",
-                          border: `1px solid ${enabled ? (a.color || "var(--accent)") : "var(--border)"}`,
-                          background: enabled ? (a.color || "var(--accent)") + "22" : "transparent",
-                          color: enabled ? "var(--text)" : "var(--text-muted)",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {t}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-              <button
-                onClick={addAgent}
-                style={{
-                  ...btnPrimary,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  fontSize: "0.8rem",
-                  padding: "4px 10px",
-                  background: "var(--bg-surface)",
-                  color: "var(--text)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                <Plus size={14} /> Add Agent
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       {loading ? (
         <p style={{ color: "var(--text-muted)" }}>Loading...</p>
@@ -518,10 +397,10 @@ export function ConvoList() {
         activeConvos.map((c) => renderConvo(c))
       )}
 
-      {archivedConvos.length > 0 && (
-        <div style={{ marginTop: "1rem" }}>
+      <div style={{ marginTop: "1.75rem", display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div>
           <button
-            onClick={() => setShowArchived(!showArchived)}
+            onClick={() => setShowAgents(!showAgents)}
             style={{
               background: "none",
               border: "none",
@@ -531,14 +410,195 @@ export function ConvoList() {
               display: "flex",
               alignItems: "center",
               gap: "4px",
-              marginBottom: showArchived ? "8px" : 0,
             }}
           >
-            {showArchived ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            Archived Conversations ({archivedConvos.length})
+            {showAgents ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            Agents ({agents.length})
           </button>
-          {showArchived && archivedConvos.map((c) => renderConvo(c, true))}
+
+          {showAgents && (
+            <div style={{ marginTop: "8px" }}>
+              {!isCustomAgents && agents.length > 0 && (
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "8px" }}>
+                  Using global agents. Edit here to create a project-specific override.
+                </div>
+              )}
+              {isCustomAgents && (
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  Custom agents for this project.
+                  <button
+                    onClick={revertToGlobal}
+                    style={{
+                      background: "none",
+                      border: "1px solid var(--border)",
+                      borderRadius: "4px",
+                      color: "var(--text-muted)",
+                      fontSize: "0.72rem",
+                      padding: "1px 6px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Revert to global
+                  </button>
+                </div>
+              )}
+              {agents.map((a, i) => (
+                <div key={i} style={{
+                  ...card,
+                  flexDirection: "column",
+                  alignItems: "stretch",
+                  gap: "8px",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input
+                      type="color"
+                      value={a.color || "#9b9a97"}
+                      onChange={(e) => updateAgent(i, { color: e.target.value })}
+                      style={{ width: 24, height: 24, border: "none", padding: 0, cursor: "pointer", background: "none" }}
+                    />
+                    <input
+                      value={a.id}
+                      onChange={(e) => updateAgent(i, { id: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })}
+                      placeholder="id"
+                      style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: "0.8rem" }}
+                    />
+                    <input
+                      value={a.name}
+                      onChange={(e) => updateAgent(i, { name: e.target.value })}
+                      placeholder="Display name"
+                      style={{ ...inputStyle, flex: 2 }}
+                    />
+                    <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "3px", whiteSpace: "nowrap" }}>
+                      <input
+                        type="checkbox"
+                        checked={a.is_default}
+                        onChange={(e) => updateAgent(i, { is_default: e.target.checked })}
+                      />
+                      default
+                    </label>
+                    <button
+                      onClick={() => removeAgent(i)}
+                      style={{ background: "none", border: "none", color: "var(--text-muted)", padding: "2px", display: "flex" }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+
+                  <select
+                    value={a.model || ""}
+                    onChange={(e) => updateAgent(i, { model: e.target.value || undefined })}
+                    style={{ ...inputStyle, fontSize: "0.8rem", cursor: "pointer", paddingRight: "28px", appearance: "none", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}
+                  >
+                    <option value="">Global model (default)</option>
+                    {availableModels.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+
+                  <textarea
+                    value={a.system_prompt || ""}
+                    onChange={(e) => updateAgent(i, { system_prompt: e.target.value || undefined })}
+                    placeholder="Additional system prompt (optional)"
+                    rows={2}
+                    style={{
+                      ...inputStyle,
+                      fontSize: "0.8rem",
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                    }}
+                  />
+
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginRight: "4px" }}>Tools:</span>
+                    {ALL_TOOLS.map((t) => {
+                      const enabled = a.tools === null || a.tools === undefined || a.tools.includes(t);
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => {
+                            if (a.tools === null || a.tools === undefined) {
+                              updateAgent(i, { tools: ALL_TOOLS.filter((x) => x !== t) });
+                            } else if (enabled) {
+                              const next = a.tools.filter((x) => x !== t);
+                              updateAgent(i, { tools: next.length === 0 ? [] : next });
+                            } else {
+                              const next = [...a.tools, t];
+                              updateAgent(i, { tools: next.length === ALL_TOOLS.length ? undefined : next });
+                            }
+                          }}
+                          style={{
+                            fontSize: "0.7rem",
+                            fontFamily: "monospace",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            border: `1px solid ${enabled ? (a.color || "var(--accent)") : "var(--border)"}`,
+                            background: enabled ? (a.color || "var(--accent)") + "22" : "transparent",
+                            color: enabled ? "var(--text)" : "var(--text-muted)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                <button
+                  onClick={addAgent}
+                  style={{
+                    ...btnPrimary,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    fontSize: "0.8rem",
+                    padding: "4px 10px",
+                    background: "var(--bg-surface)",
+                    color: "var(--text)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <Plus size={14} /> Add Agent
+                </button>
+              </div>
+            </div>
+          )}
         </div>
+
+        {archivedConvos.length > 0 && (
+          <div>
+            <button
+              onClick={() => setShowArchived(!showArchived)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                color: "var(--text-muted)",
+                fontSize: "0.85rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                marginBottom: showArchived ? "8px" : 0,
+              }}
+            >
+              {showArchived ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              Archived Conversations ({archivedConvos.length})
+            </button>
+            {showArchived && archivedConvos.map((c) => renderConvo(c, true))}
+          </div>
+        )}
+      </div>
+
+      {showFileFinder && (
+        <FileFinder
+          files={fileList || []}
+          loading={fileListLoading}
+          touchedFiles={[]}
+          onSelect={(path) => { openProjectFile(path); setShowFileFinder(false); }}
+          onClose={toggleFileFinder}
+        />
       )}
     </div>
   );

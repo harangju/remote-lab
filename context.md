@@ -1,17 +1,37 @@
 # Current context
 
-- Conversation/event persistence was aligned more closely with the live tool UI.
-- Canonical persisted event types now include tool lifecycle and runtime/system events:
-  - `tool-call`
-  - `tool-output`
-  - `tool-result`
-  - `user-message`
-  - `assistant-message`
-  - `run-error`
-  - `system`
-- Frontend replay now reconstructs tool chips from canonical events and renders runtime/system events as centered system pills instead of assistant messages.
-- Duplicate persisted tool-call rows were traced to repeated upstream `FunctionToolCallEvent` emissions for the same `tool_call_id`; persistence now dedupes `tool-call` rows by semantic `tool_call_id`.
-- Shared/model-facing context now summarizes recent tool and system events more explicitly so the assistant is more likely to act on prior runtime/tool history.
-- Frontend live/replay reconciliation was improved so a running tool chip is less likely to be duplicated by a second completed chip when persisted history catches up.
-- Manual bash/sleep tests showed the live tool chip transitioning cleanly without leaving a duplicate completed copy.
-- Builds/compile pass after these changes.
+- Product-design workflow is now explicit in `AGENTS.md`: Mental model → Manifest → Desired state → Delta → Implementation.
+- `Manifest` is clarified as felt reality in use, not features/layout/implementation.
+- Current product-shaping discussion status:
+  - Step 1 (Mental model): aligned enough.
+  - Step 2 (Manifest): aligned around documents needing to feel inhabitable rather than auxiliary.
+  - Step 3 (Desired state): converging on a simple model:
+    - Project mode
+    - File-only mode
+    - Conversation mode
+  - Candidate desired state:
+    - Project mode can open files directly via explicit file entry (`Cmd+P` / folder icon / open file).
+    - File-only mode is a real surface, likely reusing/adapting the mobile file view.
+    - Conversation mode remains the unit of work, but can transition cleanly to file-only mode and back.
+    - Starting/opening a conversation from file-only mode should preserve the file as the current object.
+- Issue #36 tracks the first-principles document UX exploration.
+- In-progress implementation for #36 adds explicit file entry from project mode and a first standalone file-only route (`/:projectId/file`) that can open a file via `?path=` and start a conversation from that file.
+- Conversation mode now also reads and writes `?path=` so file-only → conversation preserves the active file, and conversation can cleanly promote the current file into a primary view.
+- `Cmd+P` / file picker is being shifted from flat command-palette results toward an explorer-like modal with folder structure and search-as-filter; folders now start collapsed.
+- Project mode no longer needs a lightweight Documents strip; explicit file entry is now carried by the file button / `Cmd+P` flow instead.
+- The project-page ellipsis affordance was a bad fit; secondary sections are now explicit collapsible sections instead of being hidden behind a second-layer reveal.
+- Those secondary sections are now placed below the main conversation list rather than in the primary top area.
+- File-only mode header actions are now folded into the actual file-panel header so there is one real header with file-picker and conversation actions, rather than a separate shell.
+- File-panel primary actions are being unified as larger icon buttons (no mixed text-button styling) to reduce visual weirdness and improve mobile tap targets.
+- Those header icon buttons now opt out of the generic global press animation and use their own simpler hover treatment, with more spacing between buttons.
+- The apparent remaining "press bar" was tooltip clipping; the file-panel header now keeps normal downward tooltips, but the header layer is allowed to render visibly above the editor instead of clipping them.
+- Project-mode and file-panel icon buttons are now being normalized to the same shared visual size/style so the interaction language stays consistent.
+- File-panel header ordering is being adjusted so the edit/save/cancel cluster sits immediately to the right of the filename, while file/conversation/copy/close remain in the right-side utility cluster.
+- The file-view conversation action is being shifted from silent auto-match to an explicit anchored popover with "new conversation" plus recent conversations that used the file.
+- That conversation chooser is now shifting further toward the file explorer interaction model: modal overlay treatment, fallback to recent conversations when file-linked ones don't exist, and existing-conversation opens can prefill `@file` in chat.
+- The chooser list is being simplified to reduce redundant message icons.
+- Chooser recency should reflect the last actual conversation event/message timestamp rather than blindly using `ConvoMeta.updated_at`, which can drift.
+- A single icon remains appropriate for the explicit "new conversation about this file" action; the redundancy was mainly in repeating the same message icon on every existing conversation row.
+- File-only mode also had a redundant double-header (route shell + file panel header); the temporary shell header has been removed so only the real file-panel header remains once a file is open.
+- File finder overlay now uses a clearly top-layer z-index so its backdrop covers app chrome consistently.
+- Header button appearing above the file-finder dimmer was caused by the global tooltip hover rule forcing hovered `[data-tooltip]` elements to `z-index: 99999`; that z-index boost has been removed.

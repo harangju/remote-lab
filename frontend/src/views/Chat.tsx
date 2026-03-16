@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic, ArrowUp } from "lucide-react";
@@ -554,6 +554,7 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
 
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamBlocks, setStreamBlocks] = useState<StreamBlock[]>([]);
   const [thinking, setThinking] = useState(false);
@@ -608,6 +609,14 @@ export function Chat() {
 
   // Panel hook
   const panel = usePanel(projectId);
+
+  const syncFileQuery = useCallback((path: string | null, replace = false) => {
+    if (!projectId || !convId) return;
+    const nextUrl = path
+      ? `/${projectId}/${convId}?path=${encodeURIComponent(path)}`
+      : `/${projectId}/${convId}`;
+    navigate(nextUrl, { replace });
+  }, [convId, navigate, projectId]);
 
   const pendingScrollMessageIdRef = useRef<string | null>(null);
   const initialScrollDoneRef = useRef(false);
@@ -725,13 +734,32 @@ export function Chat() {
     return Array.from(paths);
   }, [messages, streamBlocks]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const path = params.get("path");
+    const prefill = params.get("prefill");
+    if (path) {
+      if (!panel.file || panel.file.path !== path) panel.openFile(path);
+    } else if (panel.file && !panel.dirty) {
+      panel.forceClose();
+    }
+    if (prefill) {
+      setInput(prefill);
+      requestAnimationFrame(() => inputRef.current?.focus());
+      params.delete("prefill");
+      const nextUrl = params.toString() ? `/${projectId}/${convId}?${params.toString()}` : `/${projectId}/${convId}`;
+      navigate(nextUrl, { replace: true });
+    }
+  }, [panel, projectId, convId, navigate]);
+
   /** Open a file in the panel, with dirty guard. */
   const handleOpenFile = useCallback((path: string) => {
     if (panel.dirty) {
       if (!window.confirm("You have unsaved changes. Discard and open another file?")) return;
     }
+    syncFileQuery(path);
     panel.openFile(path);
-  }, [panel]);
+  }, [panel, syncFileQuery]);
 
   /** Open a code snippet in the panel (from inline code blocks). */
   const handleOpenSnippet = useCallback((code: string, language: string) => {
@@ -756,8 +784,9 @@ export function Chat() {
     if (panel.dirty) {
       if (!window.confirm("You have unsaved changes. Discard?")) return;
     }
+    syncFileQuery(null);
     panel.forceClose();
-  }, [panel]);
+  }, [panel, syncFileQuery]);
 
   /** Toggle edit mode with dirty guard when turning off. */
   const handleToggleEdit = useCallback(() => {
@@ -1348,7 +1377,7 @@ export function Chat() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [panel.toggleFileFinder]);
+  }, [panel]);
 
   // Global drag indicator for file drops anywhere in the window
   useEffect(() => {
@@ -1637,8 +1666,8 @@ export function Chat() {
                   <Sparkles size={15} />
                 </button>
                 <button
-                  onClick={panel.toggleFileFinder}
-                  data-tooltip="Find file (⌘P)"
+                  onClick={panel.file ? () => syncFileQuery(panel.file!.path, true) : panel.toggleFileFinder}
+                  data-tooltip={panel.file ? "Open current file as primary view" : "Find file (⌘P)"}
                   style={{
                     background: "none",
                     border: "none",
@@ -2276,6 +2305,7 @@ export function Chat() {
             onClose={handleClosePanel}
             onReload={panel.reloadFile}
             onDismissExternal={panel.dismissExternalChange}
+            onOpenFileFinder={panel.toggleFileFinder}
           />
         </div>
         </>

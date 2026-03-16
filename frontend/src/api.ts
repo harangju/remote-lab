@@ -20,6 +20,7 @@ export interface ConvoMeta {
   updated_at: string;
   archived_at?: string | null;
   autonomous_tools_enabled?: boolean;
+  last_event_at?: string;
 }
 
 export interface ConvoDetail extends ConvoMeta {

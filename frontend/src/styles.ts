@@ -85,6 +85,7 @@ export function injectTheme() {
       white-space: nowrap;
       border-radius: 4px;
       pointer-events: none;
+      z-index: 1000;
     }
     button {
       cursor: pointer;
@@ -180,6 +181,27 @@ export const btnPrimary: React.CSSProperties = {
   borderRadius: "6px",
   padding: "6px 14px",
   fontWeight: 500,
+};
+
+export const btnIcon: React.CSSProperties = {
+  background: "var(--bg-surface)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "34px",
+  height: "34px",
+  minWidth: "34px",
+  minHeight: "34px",
+  padding: 0,
+  borderRadius: "9px",
+  flexShrink: 0,
+  transition: "background 120ms ease, border-color 120ms ease, opacity 120ms ease",
+  transform: "none",
+  boxShadow: "none",
+  appearance: "none",
+  WebkitAppearance: "none",
 };
 
 export const btnDanger: React.CSSProperties = {

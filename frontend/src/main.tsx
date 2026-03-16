@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ProjectList } from "./views/ProjectList";
 import { ConvoList } from "./views/ConvoList";
 import { Chat } from "./views/Chat";
+import { ProjectFile } from "./views/ProjectFile";
 import { getToken, setToken } from "./api";
 import { injectTheme, container, input as inputStyle, btnPrimary } from "./styles";
 
@@ -53,6 +54,7 @@ function App() {
         <Routes>
           <Route path="/" element={<ProjectList />} />
           <Route path="/:projectId" element={<ConvoList />} />
+          <Route path="/:projectId/file" element={<ProjectFile />} />
           <Route path="/:projectId/:convId" element={<Chat />} />
         </Routes>
       </BrowserRouter>
