@@ -307,16 +307,20 @@ def get_conversation(convo_id: str) -> ConvoDetail | None:
     meta = _read_meta(convo_id)
     if meta is None:
         return None
-    messages = read_messages(convo_id)
-    # Extract last known context usage from the most recent assistant message
+    events = read_events(convo_id)
     context_tokens = 0
     context_limit = 0
-    for msg in reversed(messages):
-        if msg.get("role") == "assistant" and "context_tokens" in msg:
-            context_tokens = msg["context_tokens"]
-            context_limit = msg["context_limit"]
+    for event in reversed(events):
+        if event.get("type") == "assistant-message":
+            if "context_tokens" in event:
+                context_tokens = event["context_tokens"]
+                context_limit = event.get("context_limit", 0)
+                break
+        elif event.get("role") == "assistant" and "context_tokens" in event:
+            context_tokens = event["context_tokens"]
+            context_limit = event["context_limit"]
             break
-    return ConvoDetail(**meta.model_dump(), messages=messages, context_tokens=context_tokens, context_limit=context_limit)
+    return ConvoDetail(**meta.model_dump(), messages=events, context_tokens=context_tokens, context_limit=context_limit)
 
 
 def delete_conversation(convo_id: str) -> bool:
@@ -382,7 +386,7 @@ def update_conversation_autonomy(convo_id: str, enabled: bool) -> ConvoMeta | No
 # ---------------------------------------------------------------------------
 
 
-def append_message(convo_id: str, event: dict) -> None:
+def append_event(convo_id: str, event: dict) -> None:
     """Append a single JSON event as a line to the conversation JSONL file."""
     _ensure_dirs()
     p = _messages_path(convo_id)
@@ -391,6 +395,10 @@ def append_message(convo_id: str, event: dict) -> None:
     meta = _read_meta(convo_id)
     if meta is not None:
         touch_project(meta.project_id)
+
+
+def append_message(convo_id: str, event: dict) -> None:
+    append_event(convo_id, event)
 
 
 def _agent_history_path(convo_id: str, agent_id: str | None = None) -> Path:
@@ -416,14 +424,18 @@ def load_agent_history(convo_id: str, agent_id: str | None = None) -> bytes | No
     return p.read_bytes()
 
 
-def read_messages(convo_id: str) -> list[dict]:
-    """Read all message events from the conversation JSONL file."""
+def read_events(convo_id: str) -> list[dict]:
+    """Read all persisted conversation events from the JSONL file."""
     p = _messages_path(convo_id)
     if not p.exists():
         return []
-    messages: list[dict] = []
+    events: list[dict] = []
     for line in p.read_text().splitlines():
         line = line.strip()
         if line:
-            messages.append(json.loads(line))
-    return messages
+            events.append(json.loads(line))
+    return events
+
+
+def read_messages(convo_id: str) -> list[dict]:
+    return read_events(convo_id)

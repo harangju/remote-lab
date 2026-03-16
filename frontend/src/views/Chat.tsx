@@ -26,10 +26,10 @@ type ApprovalScope = "once" | "project";
 type StreamBlock =
   | { type: "text"; content: string }
   | { type: "tool"; name: string; input?: string; output?: string; liveOutput?: string; tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope }
-  | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
+  | { type: "system"; content: string; tone?: "error" | "info" };
 
 interface DisplayMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   blocks: StreamBlock[];
   agent_id?: string;
   agent_name?: string;
@@ -305,176 +305,6 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
 }
 
 // ---------------------------------------------------------------------------
-// ApprovalCard — inline approve/deny for tool calls requiring permission
-// ---------------------------------------------------------------------------
-
-function ApprovalCard({ block, onRespond }: {
-  block: Extract<StreamBlock, { type: "tool-confirm" }>;
-  onRespond: (toolCallId: string, approved: boolean, scope?: ApprovalScope) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const isPending = block.status === "pending";
-  const statusLabel =
-    block.status === "approved"
-      ? block.approvedScope === "project"
-        ? "Approved for project"
-        : "Approved once"
-      : block.status === "denied"
-        ? "Denied"
-        : "Approval required";
-
-  return (
-    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0, maxWidth: "85%", opacity: isPending ? 1 : 0.6 }}>
-      <div
-        style={{
-          background: "var(--bg-surface)",
-          border: `1px solid ${isPending ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: "6px",
-          padding: "4px 8px",
-          color: "var(--text-muted)",
-          fontSize: "0.78rem",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "6px",
-          whiteSpace: "nowrap",
-          minHeight: "28px",
-          maxWidth: "100%",
-        }}
-      >
-        <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          {isPending ? <ShieldCheck size={13} /> : block.status === "approved" ? <ShieldCheck size={13} /> : <ShieldX size={13} />}
-        </span>
-        <span style={{ fontFamily: "monospace" }}>{block.name}</span>
-        {!isPending && (
-          <span style={{
-            fontSize: "0.72rem",
-            color: block.status === "approved" ? "var(--text-muted)" : "#c4554d",
-            border: "1px solid var(--border)",
-            borderRadius: "999px",
-            padding: "1px 6px",
-            flexShrink: 0,
-          }}>{statusLabel}</span>
-        )}
-        {block.args && (
-          <span style={{
-            fontFamily: "monospace",
-            opacity: 0.7,
-            maxWidth: "200px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}>{toolSummary(block.name, block.args)}</span>
-        )}
-        <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", marginLeft: "auto", flexShrink: 0 }}>
-          {isPending ? (
-            <>
-              <button
-                onClick={() => onRespond(block.tool_call_id, true, "once")}
-                style={{
-                  background: "var(--accent)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "3px 10px",
-                  fontSize: "0.75rem",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "4px",
-                  minHeight: "22px",
-                  boxSizing: "border-box",
-                  flexShrink: 0,
-                }}
-              >
-                <ShieldCheck size={12} /> Allow once
-              </button>
-              {block.canAllowProject && (
-                <button
-                  onClick={() => onRespond(block.tool_call_id, true, "project")}
-                  style={{
-                    background: "transparent",
-                    color: "var(--text-muted)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "5px",
-                    padding: "3px 10px",
-                    fontSize: "0.75rem",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "4px",
-                    minHeight: "22px",
-                    boxSizing: "border-box",
-                    flexShrink: 0,
-                  }}
-                >
-                  <ShieldCheck size={12} /> Allow in project
-                </button>
-              )}
-              <button
-                onClick={() => onRespond(block.tool_call_id, false, "once")}
-                style={{
-                  background: "transparent",
-                  color: "var(--text-muted)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "5px",
-                  padding: "3px 10px",
-                  fontSize: "0.75rem",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "4px",
-                  minHeight: "22px",
-                  boxSizing: "border-box",
-                  flexShrink: 0,
-                }}
-              >
-                <ShieldX size={12} /> Deny
-              </button>
-            </>
-          ) : null}
-          <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: block.args ? 0.5 : 0 }}>
-            {block.args && (
-              <button
-                onClick={() => setExpanded(!expanded)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-muted)",
-                  padding: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-              </button>
-            )}
-          </span>
-        </div>
-      </div>
-      {expanded && block.args && (
-        <pre style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: "6px",
-          padding: "6px 10px",
-          marginTop: "6px",
-          fontSize: "0.75rem",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
-          maxHeight: "150px",
-          overflowY: "auto",
-          color: "var(--text)",
-        }}>{block.args}</pre>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Markdown wrapper with code block styling
 // ---------------------------------------------------------------------------
 
@@ -596,26 +426,85 @@ const MESSAGE_MAX_WIDTH = "92%";
 function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { messages: DisplayMessage[]; meta: MetaInfo | null; title: string; autonomousToolsEnabled: boolean } {
   const msgs: DisplayMessage[] = [];
   let pendingBlocks: StreamBlock[] = [];
+  const toolIndexById = new Map<string, number>();
+
+  const flushPending = () => {
+    if (pendingBlocks.length > 0) {
+      msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
+      pendingBlocks = [];
+      toolIndexById.clear();
+    }
+  };
 
   for (const m of detail.messages) {
     const mAny = m as any;
-    if (mAny.role === "tool") {
-      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input });
-    } else if (m.role === "user") {
-      if (pendingBlocks.length > 0) {
-        msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
-        pendingBlocks = [];
+    const type = mAny.type;
+
+    if (type === "tool-call") {
+      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, tool_call_id: mAny.tool_call_id || undefined });
+      if (mAny.tool_call_id) toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
+      continue;
+    }
+
+    if (type === "tool-output") {
+      if (!mAny.tool_call_id) continue;
+      const idx = toolIndexById.get(mAny.tool_call_id);
+      if (idx != null && pendingBlocks[idx]?.type === "tool") {
+        const existing = pendingBlocks[idx];
+        pendingBlocks[idx] = { ...existing, liveOutput: `${existing.liveOutput || ""}${mAny.output || ""}` };
       }
+      continue;
+    }
+
+    if (type === "tool-result") {
+      if (!mAny.tool_call_id) {
+        flushPending();
+        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output });
+        continue;
+      }
+      const idx = toolIndexById.get(mAny.tool_call_id);
+      if (idx != null && pendingBlocks[idx]?.type === "tool") {
+        const existing = pendingBlocks[idx];
+        pendingBlocks[idx] = { ...existing, output: mAny.output ?? existing.liveOutput ?? existing.output, input: mAny.input ?? existing.input, liveOutput: undefined };
+      } else {
+        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined });
+      }
+      continue;
+    }
+
+    if (type === "run-error" || type === "system") {
+      flushPending();
+      msgs.push({ role: "system", blocks: [{ type: "system", content: mAny.message || mAny.content || "", tone: type === "run-error" ? "error" : "info" }] });
+      continue;
+    }
+
+    if (type === "compacted") {
+      flushPending();
+      msgs.push({ role: "system", blocks: [{ type: "system", content: mAny.output || mAny.message || mAny.content || "Conversation compacted", tone: "info" }] });
+      continue;
+    }
+
+    if (type === "skill-result") {
+      flushPending();
+      msgs.push({ role: "system", blocks: [{ type: "system", content: mAny.output || "", tone: "info" }] });
+      continue;
+    }
+
+    if (type === "user-message" || mAny.role === "user") {
+      flushPending();
       msgs.push({
         role: "user",
-        blocks: [{ type: "text", content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+        blocks: [{ type: "text", content: typeof mAny.content === "string" ? mAny.content : JSON.stringify(mAny.content) }],
         message_id: typeof mAny.message_id === "string" ? mAny.message_id : undefined,
         pending: false,
         attachments: Array.isArray(mAny.attachments) ? mAny.attachments : undefined,
         bashMode: !!mAny.bash_mode,
       });
-    } else if (m.role === "assistant") {
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      continue;
+    }
+
+    if (type === "assistant-message" || mAny.role === "assistant") {
+      const content = typeof mAny.content === "string" ? mAny.content : JSON.stringify(mAny.content);
       const blocks: StreamBlock[] = [...pendingBlocks];
       if (content) blocks.push({ type: "text", content });
       if (blocks.length > 0) {
@@ -629,12 +518,17 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
         });
       }
       pendingBlocks = [];
+      toolIndexById.clear();
+      continue;
+    }
+
+    if (mAny.role === "tool") {
+      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined });
+      if (mAny.tool_call_id) toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
     }
   }
 
-  if (pendingBlocks.length > 0) {
-    msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
-  }
+  flushPending();
 
   return {
     messages: msgs,
@@ -1003,7 +897,7 @@ export function Chat() {
           let matched = false;
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
-            if (b.type === "tool" && b.name === data.name && !b.output) {
+            if (b.type === "tool" && (data.tool_call_id ? b.tool_call_id === data.tool_call_id : b.name === data.name) && !b.output) {
               blocks[i] = {
                 ...b,
                 input: data.input ?? b.input,
@@ -1015,7 +909,7 @@ export function Chat() {
             }
           }
           if (!matched) {
-            blocks.push({ type: "tool", name: data.name, input: data.input });
+            blocks.push({ type: "tool", name: data.name, input: data.input, tool_call_id: data.tool_call_id });
           }
           blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
@@ -1026,7 +920,7 @@ export function Chat() {
           const oBlocks = [...blocksRef.current];
           for (let i = oBlocks.length - 1; i >= 0; i--) {
             const b = oBlocks[i];
-            if (b.type === "tool" && b.name === data.name && !b.output) {
+            if (b.type === "tool" && (data.tool_call_id ? b.tool_call_id === data.tool_call_id : b.name === data.name) && !b.output) {
               oBlocks[i] = { ...b, liveOutput: (b.liveOutput || "") + data.output };
               break;
             }
@@ -1041,7 +935,7 @@ export function Chat() {
           const blocks = [...blocksRef.current];
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
-            if (b.type === "tool" && b.name === data.name && !b.output) {
+            if (b.type === "tool" && (data.tool_call_id ? b.tool_call_id === data.tool_call_id : b.name === data.name) && !b.output) {
               blocks[i] = { ...b, output: b.liveOutput || data.output, liveOutput: undefined };
               break;
             }
@@ -1773,13 +1667,13 @@ export function Chat() {
                 </div>
               )}
               {m.blocks.map((b, j) => (
-                b.type === "tool-confirm" ? (
-                  <div key={j} style={{ alignSelf: "flex-start", margin: "4px 0 2px" }}>
-                    <ApprovalCard block={b} onRespond={handleToolApproval} />
-                  </div>
-                ) : b.type === "tool" ? (
+                b.type === "tool" ? (
                   <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
                     <ToolChip tool={b} defaultOpen={!!m.defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
+                  </div>
+                ) : b.type === "system" ? (
+                  <div key={j} style={{ alignSelf: "center", fontSize: "0.8rem", color: b.tone === "error" ? "#c4554d" : "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", padding: "6px 10px", margin: "6px 0", maxWidth: "100%" }}>
+                    {b.content}
                   </div>
                 ) : b.type === "text" && b.content ? (
                   m.role === "assistant" ? (
@@ -1954,13 +1848,13 @@ export function Chat() {
                   </div>
                 )}
                 {m.blocks.map((b, j) => (
-                  b.type === "tool-confirm" ? (
-                    <div key={j} style={{ alignSelf: "flex-start", margin: "4px 0 2px" }}>
-                      <ApprovalCard block={b} onRespond={handleToolApproval} />
-                    </div>
-                  ) : b.type === "tool" ? (
+                  b.type === "tool" ? (
                     <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
                       <ToolChip tool={b} live={!!(m as any).live && !b.output} defaultOpen={!!(m as any).defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
+                    </div>
+                  ) : b.type === "system" ? (
+                    <div key={j} style={{ alignSelf: "center", fontSize: "0.8rem", color: b.tone === "error" ? "#c4554d" : "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", padding: "6px 10px", margin: "6px 0", maxWidth: "100%" }}>
+                      {b.content}
                     </div>
                   ) : b.type === "text" && b.content ? (
                     <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>

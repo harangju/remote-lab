@@ -37,8 +37,14 @@ export interface Attachment {
 }
 
 export interface Message {
-  role: "user" | "assistant";
-  content: string;
+  type?: string;
+  role?: "user" | "assistant" | "tool";
+  content?: string;
+  name?: string;
+  input?: string;
+  output?: string;
+  tool_call_id?: string;
+  message?: string;
   agent_id?: string;
   attachments?: Attachment[];
   [key: string]: unknown;
@@ -234,9 +240,9 @@ export type WsEvent =
   | { type: "agent-start"; run_id: string; agent_id: string; agent_name: string; agent_color?: string }
   | { type: "thinking-delta"; run_id: string; delta: string; agent_id?: string }
   | { type: "text-delta"; run_id: string; delta: string; agent_id?: string }
-  | { type: "tool-use"; run_id: string; name: string; input?: string; agent_id?: string }
-  | { type: "tool-result"; run_id: string; name: string; output: string; agent_id?: string }
-  | { type: "tool-output"; run_id: string; name: string; output: string; agent_id?: string }
+  | { type: "tool-use"; run_id: string; name: string; input?: string; tool_call_id?: string; agent_id?: string }
+  | { type: "tool-result"; run_id: string; name: string; output: string; tool_call_id?: string; agent_id?: string }
+  | { type: "tool-output"; run_id: string; name: string; output: string; tool_call_id?: string; agent_id?: string }
   | { type: "file-changed"; run_id: string; path: string; change: "created" | "updated"; agent_id?: string }
   | { type: "tool-confirm"; run_id: string; tool_call_id: string; name: string; args?: string; agent_id?: string; can_allow_project?: boolean }
   | { type: "done"; run_id: string; turns: number; context_tokens: number; context_limit: number; agent_id?: string }

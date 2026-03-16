@@ -152,9 +152,76 @@ def _get_convo_lock(convo_id: str) -> asyncio.Lock:
     return lock
 
 
-async def _append_message(convo_id: str, event: dict) -> None:
+_seen_tool_call_ids: dict[str, set[str]] = {}
+
+
+async def _append_event(convo_id: str, event: dict) -> None:
+    event_type = str(event.get("type", ""))
+    if event_type == "tool-call":
+        tool_call_id = str(event.get("tool_call_id", ""))
+        if tool_call_id:
+            seen = _seen_tool_call_ids.setdefault(convo_id, set())
+            if tool_call_id in seen:
+                return
+            seen.add(tool_call_id)
     async with _get_convo_lock(convo_id):
-        storage.append_message(convo_id, event)
+        storage.append_event(convo_id, event)
+
+
+async def _append_message(convo_id: str, event: dict) -> None:
+    await _append_event(convo_id, event)
+
+
+def _user_event(content: str, message_id: str | None = None, attachments: list[dict[str, Any]] | None = None, *, server_command: bool = False, bash_mode: bool = False) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "type": "user-message",
+        "role": "user",
+        "content": content,
+        "timestamp": _iso_now(),
+    }
+    if message_id:
+        event["message_id"] = message_id
+    if attachments:
+        event["attachments"] = attachments
+    if server_command:
+        event["server_command"] = True
+    if bash_mode:
+        event["bash_mode"] = True
+    return event
+
+
+def _tool_event(name: str, *, event_type: str = "tool-result", input: str | None = None, output: str | None = None, run_id: str | None = None, agent_id: str | None = None, tool_call_id: str | None = None) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "type": event_type,
+        "role": "tool",
+        "name": name,
+        "timestamp": _iso_now(),
+    }
+    if input is not None:
+        event["input"] = input
+    if output is not None:
+        event["output"] = output
+    if run_id:
+        event["run_id"] = run_id
+    if agent_id:
+        event["agent_id"] = agent_id
+    if tool_call_id:
+        event["tool_call_id"] = tool_call_id
+    return event
+
+
+def _system_event(content: str, *, event_type: str = "system", run_id: str | None = None, recoverable: bool | None = None) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "type": event_type,
+        "content": content,
+        "message": content,
+        "timestamp": _iso_now(),
+    }
+    if run_id:
+        event["run_id"] = run_id
+    if recoverable is not None:
+        event["recoverable"] = recoverable
+    return event
 
 
 async def _update_conversation_status(convo_id: str, status: ConvoStatus) -> None:
@@ -206,35 +273,84 @@ async def _auto_title(convo_id: str, user_message: str, run: RunState):
 
 
 def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int = 50, cached_messages: list[dict] | None = None) -> str:
-    messages = cached_messages if cached_messages is not None else storage.read_messages(convo_id)
-    if not messages:
+    events = cached_messages if cached_messages is not None else storage.read_events(convo_id)
+    if not events:
         return ""
 
-    recent = messages[-max_messages:]
+    recent = events[-max_messages:]
     lines: list[str] = []
-    for msg in recent:
-        role = msg.get("role", "")
-        if role == "user":
-            if msg.get("server_command"):
+    tool_calls: dict[str, dict[str, Any]] = {}
+    tool_order: list[str] = []
+
+    def _append_tool_summary(tc_id: str) -> None:
+        item = tool_calls.get(tc_id)
+        if not item:
+            return
+        aid = item.get("agent_id")
+        name = item.get("name", "")
+        inp = item.get("input", "")
+        out = item.get("output", "")
+        prefix = f"[@{aid}] " if aid and aid != agent_id else ""
+        summary = f"{prefix}Tool {name}"
+        if inp:
+            summary += f" input={inp}"
+        if out:
+            summary += f" output={out}"
+        lines.append(summary)
+
+    for event in recent:
+        event_type = event.get("type")
+        role = event.get("role", "")
+        if event_type == "tool-call":
+            tc_id = event.get("tool_call_id") or uuid4().hex
+            tool_calls[tc_id] = {
+                "agent_id": event.get("agent_id"),
+                "name": event.get("name", ""),
+                "input": event.get("input", ""),
+                "output": "",
+            }
+            tool_order.append(tc_id)
+            continue
+        if event_type == "tool-output":
+            tc_id = event.get("tool_call_id")
+            if tc_id and tc_id in tool_calls:
+                tool_calls[tc_id]["output"] = f"{tool_calls[tc_id].get('output', '')}{event.get('output', '')}"
+            continue
+        if event_type == "tool-result":
+            tc_id = event.get("tool_call_id")
+            if tc_id and tc_id in tool_calls:
+                tool_calls[tc_id]["output"] = event.get("output", "")
+                _append_tool_summary(tc_id)
+                tool_calls.pop(tc_id, None)
+                if tc_id in tool_order:
+                    tool_order.remove(tc_id)
+            else:
+                name = event.get("name", "")
+                out = event.get("output", "")
+                lines.append(f"Tool {name} output={out}")
+            continue
+        if event_type == "user-message" or role == "user":
+            if event.get("server_command"):
                 continue
-            lines.append(f"User: {msg.get('content', '')}")
-        elif role == "assistant":
-            content = msg.get("content", "")
+            lines.append(f"User: {event.get('content', '')}")
+        elif event_type == "assistant-message" or role == "assistant":
+            content = event.get("content", "")
             if not content:
                 continue
-            aid = msg.get("agent_id")
+            aid = event.get("agent_id")
             if aid and aid != agent_id:
                 lines.append(f"[@{aid}]: {content}")
             elif aid == agent_id:
                 lines.append(f"You (earlier): {content}")
             else:
                 lines.append(f"Assistant: {content}")
-        elif role == "tool":
-            aid = msg.get("agent_id")
-            name = msg.get("name", "")
-            inp = msg.get("input", "")
-            if aid and aid != agent_id:
-                lines.append(f"[@{aid} used {name}]: {inp}")
+        elif event_type in {"system", "run-error"}:
+            content = event.get("content") or event.get("message", "")
+            if content:
+                lines.append(f"System: {content}")
+
+    for tc_id in list(tool_order):
+        _append_tool_summary(tc_id)
 
     if not lines:
         return ""
@@ -249,6 +365,14 @@ async def _run_bash_command_task(run: RunState, command: str, convo_id: str) -> 
             payload = None
         if isinstance(payload, dict):
             payload.setdefault("run_id", run.run_id)
+            if payload.get("type") == "tool-output":
+                await _append_event(convo_id, {
+                    "type": "tool-output",
+                    "name": payload.get("name", ""),
+                    "output": payload.get("output", ""),
+                    "timestamp": _iso_now(),
+                    "run_id": payload.get("run_id"),
+                })
             msg_str = json.dumps(payload)
         run.events.append(msg_str)
         await run.broadcast(msg_str)
@@ -281,37 +405,50 @@ async def _run_bash_command_task(run: RunState, command: str, convo_id: str) -> 
     try:
         command_input = {"command": command}
         tool_call_id = f"bash-{uuid4().hex[:8]}"
-        await _emit(json.dumps({
-            "type": "tool-use",
-            "name": "bash",
-            "input": json.dumps(command_input),
-            "run_id": run.run_id,
-        }))
-        await _append_message(convo_id, {
+        tool_call_event = {
+            "type": "tool-call",
             "role": "tool",
             "name": "bash",
             "input": json.dumps(command_input),
+            "tool_call_id": tool_call_id,
             "timestamp": _iso_now(),
             "run_id": run.run_id,
-        })
+        }
+        await _append_event(convo_id, tool_call_event)
+        await _emit(json.dumps({**tool_call_event, "type": "tool-use"}))
 
         approved = await _wait_for_approval(tool_call_id, command_input)
         if not approved:
-            await _emit(Error(message="User denied this tool call", run_id=run.run_id, recoverable=True).model_dump_json())
+            event = _system_event("User denied this tool call", event_type="run-error", run_id=run.run_id, recoverable=True)
+            await _append_event(convo_id, event)
+            await _emit(json.dumps({**event, "type": "error"}))
             run.status = "error"
             await _update_conversation_status(convo_id, ConvoStatus.idle)
             return
 
         if build_project_rule("bash", command_input) is None:
-            await _emit(Error(message="Invalid bash command", run_id=run.run_id, recoverable=True).model_dump_json())
+            event = _system_event("Invalid bash command", event_type="run-error", run_id=run.run_id, recoverable=True)
+            await _append_event(convo_id, event)
+            await _emit(json.dumps({**event, "type": "error"}))
             run.status = "error"
             await _update_conversation_status(convo_id, ConvoStatus.error)
             return
 
         result = await agent_tools._bash(SimpleNamespace(), command)
-        await _emit(ToolResult(name="bash", output=result[:500] if result else "OK", run_id=run.run_id).model_dump_json())
+        output = result[:500] if result else "OK"
+        await _append_event(convo_id, {
+            "type": "tool-result",
+            "role": "tool",
+            "name": "bash",
+            "output": output,
+            "tool_call_id": tool_call_id,
+            "timestamp": _iso_now(),
+            "run_id": run.run_id,
+        })
+        await _emit(ToolResult(name="bash", output=output, run_id=run.run_id).model_dump_json())
 
         meta_msg = {
+            "type": "assistant-message",
             "role": "assistant",
             "content": "",
             "timestamp": _iso_now(),
@@ -330,13 +467,17 @@ async def _run_bash_command_task(run: RunState, command: str, convo_id: str) -> 
     except asyncio.CancelledError:
         run.status = "error"
         await _update_conversation_status(convo_id, ConvoStatus.idle)
-        await _emit(Error(message="Run stopped", run_id=run.run_id, recoverable=True).model_dump_json())
+        event = _system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=True)
+        await _append_event(convo_id, event)
+        await _emit(json.dumps({**event, "type": "error"}))
         raise
     except Exception as e:
         run.error_msg = str(e)
         run.status = "error"
         await _update_conversation_status(convo_id, ConvoStatus.error)
-        await _emit(Error(message=str(e), run_id=run.run_id, recoverable=True).model_dump_json())
+        event = _system_event(str(e), event_type="run-error", run_id=run.run_id, recoverable=True)
+        await _append_event(convo_id, event)
+        await _emit(json.dumps({**event, "type": "error"}))
     finally:
         agent_tools.clear_broadcast()
         await asyncio.sleep(10)
@@ -364,6 +505,15 @@ async def _run_agent_task(
             payload.setdefault("run_id", run.run_id)
             if agent_id and payload.get("agent_id") is None:
                 payload["agent_id"] = agent_id
+            if payload.get("type") == "tool-output":
+                await _append_event(convo_id, {
+                    "type": "tool-output",
+                    "name": payload.get("name", ""),
+                    "output": payload.get("output", ""),
+                    "timestamp": _iso_now(),
+                    "run_id": payload.get("run_id"),
+                    **({"agent_id": agent_id} if agent_id else {}),
+                })
             msg_str = json.dumps(payload)
         run.events.append(msg_str)
         await run.broadcast(msg_str)
@@ -405,6 +555,7 @@ async def _run_agent_task(
                                         await _emit(ThinkingDelta(delta=event.delta.content_delta or "", run_id=run.run_id, agent_id=agent_id).model_dump_json())
                         if segment_text:
                             msg: dict = {
+                                "type": "assistant-message",
                                 "role": "assistant",
                                 "content": segment_text,
                                 "timestamp": _iso_now(),
@@ -417,35 +568,33 @@ async def _run_agent_task(
                         async with node.stream(agent_run.ctx) as tool_stream:
                             async for event in tool_stream:
                                 if isinstance(event, FunctionToolCallEvent):
+                                    tool_call_id = getattr(event.part, "tool_call_id", "") or ""
                                     ev = {
-                                        "type": "tool-use",
-                                        "name": event.part.tool_name,
-                                        "input": str(event.part.args)[:200],
-                                        "run_id": run.run_id,
-                                    }
-                                    if agent_id:
-                                        ev["agent_id"] = agent_id
-                                    await _emit(json.dumps(ev))
-                                    persisted = {
+                                        "type": "tool-call",
                                         "role": "tool",
                                         "name": event.part.tool_name,
                                         "input": str(event.part.args)[:200],
+                                        "tool_call_id": tool_call_id,
                                         "timestamp": _iso_now(),
                                         "run_id": run.run_id,
                                     }
                                     if agent_id:
-                                        persisted["agent_id"] = agent_id
-                                    await _append_message(convo_id, persisted)
+                                        ev["agent_id"] = agent_id
+                                    await _append_event(convo_id, ev)
+                                    await _emit(json.dumps({**ev, "type": "tool-use"}))
                                 elif isinstance(event, FunctionToolResultEvent):
                                     output = str(event.content)[:500] if event.content else "OK"
                                     ev = {
                                         "type": "tool-result",
                                         "name": event.result.tool_name if hasattr(event.result, "tool_name") else "",
                                         "output": output,
+                                        "tool_call_id": getattr(event.result, "tool_call_id", "") or "",
+                                        "timestamp": _iso_now(),
                                         "run_id": run.run_id,
                                     }
                                     if agent_id:
                                         ev["agent_id"] = agent_id
+                                    await _append_event(convo_id, ev)
                                     await _emit(json.dumps(ev))
 
                 usage = agent_run.usage()
@@ -506,6 +655,7 @@ async def _run_agent_task(
         )
 
         meta_msg = {
+            "type": "assistant-message",
             "role": "assistant",
             "content": "",
             "timestamp": _iso_now(),
@@ -531,13 +681,17 @@ async def _run_agent_task(
     except asyncio.CancelledError:
         run.status = "error"
         await _update_conversation_status(convo_id, ConvoStatus.idle)
-        await _emit(Error(message="Run stopped", run_id=run.run_id, recoverable=True).model_dump_json())
+        event = _system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=True)
+        await _append_event(convo_id, event)
+        await _emit(json.dumps({**event, "type": "error"}))
         raise
     except Exception as e:
         run.error_msg = str(e)
         run.status = "error"
         await _update_conversation_status(convo_id, ConvoStatus.error)
-        await _emit(Error(message=str(e), run_id=run.run_id, recoverable=True).model_dump_json())
+        event = _system_event(str(e), event_type="run-error", run_id=run.run_id, recoverable=True)
+        await _append_event(convo_id, event)
+        await _emit(json.dumps({**event, "type": "error"}))
     finally:
         agent_tools.clear_broadcast()
         await asyncio.sleep(10)
@@ -1206,7 +1360,9 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
         if convo.status == ConvoStatus.running and session.run is None:
             await _update_conversation_status(convo_id, ConvoStatus.error)
-            await ws.send_text(Error(message="Server restarted during run", recoverable=True).model_dump_json())
+            restart_event = _system_event("Server restarted during run", event_type="run-error", recoverable=True)
+            await _append_event(convo_id, restart_event)
+            await ws.send_text(json.dumps(restart_event | {"type": "error"}))
             convo = storage.get_conversation(convo_id)
 
         project_agents = storage.load_project_agents(project.id)
@@ -1220,7 +1376,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
         def _get_cached_messages() -> list[dict]:
             nonlocal _cached_messages
             if _cached_messages is None:
-                _cached_messages = storage.read_messages(convo_id)
+                _cached_messages = storage.read_events(convo_id)
             return _cached_messages
 
         def _invalidate_message_cache():
@@ -1403,13 +1559,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
                 if skill and skill.type == SkillType.server:
                     if skill.name == "compact":
-                        await _append_message(convo_id, {
-                            "role": "user",
-                            "content": prompt,
-                            "timestamp": _iso_now(),
-                            "server_command": True,
-                            **({"message_id": message_id} if message_id else {}),
-                        })
+                        await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
                         for p in storage.CONVOS_DIR.glob(f"{convo_id}.agent*.json"):
                             parts = p.stem.replace(f"{convo_id}.agent", "")
@@ -1434,12 +1584,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                     est_tokens = sum(len(str(m)) for m in hist) // 4
                                     agent_histories[aid] = (hist, est_tokens)
                                     label = f"@{aid} " if aid else ""
-                                    await _append_message(convo_id, {
-                                        "role": "tool",
-                                        "name": "compact",
-                                        "input": f"{label}{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens",
-                                        "timestamp": _iso_now(),
-                                    })
+                                    await _append_message(convo_id, _tool_event("compact", event_type="compacted", output=f"{label}{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens"))
                                     await _save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
                                     if message_id:
                                         processed_message_ids.setdefault(convo_id, set()).add(message_id)
@@ -1453,13 +1598,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                     message_id = None
                                 await ws.send_text(Error(message="Not enough history to compact", recoverable=True).model_dump_json())
                     elif skill.name == "model":
-                        await _append_message(convo_id, {
-                            "role": "user",
-                            "content": prompt,
-                            "timestamp": _iso_now(),
-                            "server_command": True,
-                            **({"message_id": message_id} if message_id else {}),
-                        })
+                        await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
                         from backend.agents import active_model, _available, set_model
                         if cmd_args.strip():
@@ -1480,72 +1619,34 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                                         name = name[len("claude-"):]
                                     return name
                                 output += "\nSwitch: " + ", ".join(f"/model {_short(m)}" for m in others)
-                        await _append_message(convo_id, {
-                            "role": "tool",
-                            "name": "model",
-                            "input": output,
-                            "timestamp": _iso_now(),
-                        })
+                        await _append_message(convo_id, _tool_event("model", event_type="skill-result", output=output))
                         if message_id:
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)
                             await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
                         await ws.send_text(SkillResult(skill="model", output=output).model_dump_json())
                     elif skill.name == "share":
-                        await _append_message(convo_id, {
-                            "role": "user",
-                            "content": prompt,
-                            "timestamp": _iso_now(),
-                            "server_command": True,
-                            **({"message_id": message_id} if message_id else {}),
-                        })
+                        await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
                         output = await _handle_share(cmd_args, project_path, ws)
-                        await _append_message(convo_id, {
-                            "role": "tool",
-                            "name": "share",
-                            "input": output,
-                            "timestamp": _iso_now(),
-                        })
+                        await _append_message(convo_id, _tool_event("share", event_type="skill-result", output=output))
                         if message_id:
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)
                             await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
                         await ws.send_text(SkillResult(skill="share", output=output).model_dump_json())
                     elif skill.name == "shares":
-                        await _append_message(convo_id, {
-                            "role": "user",
-                            "content": prompt,
-                            "timestamp": _iso_now(),
-                            "server_command": True,
-                            **({"message_id": message_id} if message_id else {}),
-                        })
+                        await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
                         output = await _handle_shares(ws)
-                        await _append_message(convo_id, {
-                            "role": "tool",
-                            "name": "shares",
-                            "input": output,
-                            "timestamp": _iso_now(),
-                        })
+                        await _append_message(convo_id, _tool_event("shares", event_type="skill-result", output=output))
                         if message_id:
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)
                             await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
                         await ws.send_text(SkillResult(skill="shares", output=output).model_dump_json())
                     elif skill.name == "unshare":
-                        await _append_message(convo_id, {
-                            "role": "user",
-                            "content": prompt,
-                            "timestamp": _iso_now(),
-                            "server_command": True,
-                            **({"message_id": message_id} if message_id else {}),
-                        })
+                        await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
                         output = await _handle_unshare(cmd_args)
-                        await _append_message(convo_id, {
-                            "role": "tool",
-                            "name": "unshare",
-                            "input": output,
-                            "timestamp": _iso_now(),
-                        })
+                        await _append_message(convo_id, _tool_event("unshare", event_type="skill-result", output=output))
                         if message_id:
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)
                             await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
@@ -1563,14 +1664,15 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     continue
 
             _invalidate_message_cache()
-            await _append_message(convo_id, {
-                "role": "user",
-                "content": prompt,
-                "timestamp": _iso_now(),
-                **({"message_id": message_id} if message_id else {}),
-                **({"attachments": attachments} if attachments else {}),
-                **({"bash_mode": True} if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!") else {}),
-            })
+            await _append_message(
+                convo_id,
+                _user_event(
+                    prompt,
+                    message_id=message_id,
+                    attachments=attachments or None,
+                    bash_mode=bool(isinstance(locals().get("raw_text"), str) and raw_text.startswith("!")),
+                ),
+            )
             if message_id:
                 processed_message_ids.setdefault(convo_id, set()).add(message_id)
                 await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
@@ -1645,13 +1747,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                             if summary:
                                 est_tokens = sum(len(str(m)) for m in hist) // 4
                                 agent_histories[aid] = (hist, est_tokens)
-                                await _append_message(convo_id, {
-                                    "role": "tool",
-                                    "name": "compact",
-                                    "input": f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)",
-                                    "timestamp": _iso_now(),
-                                    "run_id": run_context.run_id,
-                                })
+                                await _append_message(convo_id, _tool_event("compact", event_type="compacted", output=f"{old_tokens / 1000:.1f}k → {est_tokens / 1000:.1f}k tokens (auto)", run_id=run_context.run_id))
                                 await _save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
                                 await run_context.broadcast(Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json())
 
