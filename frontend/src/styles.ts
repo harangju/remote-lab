@@ -90,6 +90,26 @@ export function injectTheme() {
       cursor: pointer;
       font-family: inherit;
       font-size: 0.875rem;
+      transition: filter 140ms ease, transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+    button:hover:not(:disabled) {
+      filter: brightness(0.97);
+    }
+    button:active:not(:disabled) {
+      filter: brightness(0.92);
+      transform: translateY(1px);
+    }
+    @media (prefers-color-scheme: dark) {
+      button:hover:not(:disabled) {
+        filter: brightness(1.04);
+      }
+      button:active:not(:disabled) {
+        filter: brightness(1.08);
+        transform: translateY(1px);
+      }
+    }
+    button:disabled {
+      cursor: default;
     }
     input, textarea {
       font-family: inherit;
