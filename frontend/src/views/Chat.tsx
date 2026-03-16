@@ -38,6 +38,7 @@ interface DisplayMessage {
   pending?: boolean;
   attachments?: Attachment[];
   bashMode?: boolean;
+  defaultExpandedTools?: boolean;
 }
 
 interface PendingMessage {
@@ -145,13 +146,14 @@ function extractShareUrl(name: string, input?: string): string | null {
   return plainMatch ? plainMatch[0] : null;
 }
 
-function ToolChip({ tool, live, onOpenFile, onRespond }: {
+function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
   tool: ToolCall & { tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
   live?: boolean;
+  defaultOpen?: boolean;
   onOpenFile?: (path: string) => void;
   onRespond?: (toolCallId: string, approved: boolean, scope?: ApprovalScope) => void;
 }) {
-  const [manualOpen, setManualOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(defaultOpen);
   const preRef = useRef<HTMLPreElement>(null);
   const Icon = toolIcons[tool.name] || Settings;
   const hasDetail = !!(tool.input || tool.output);
@@ -1074,12 +1076,14 @@ export function Chat() {
           const finalBlocks = blocksRef.current;
           if (finalBlocks.length > 0) {
             const ag = activeAgentRef.current;
+            const onlyBashOutput = finalBlocks.length > 0 && finalBlocks.every((b) => b.type === "tool" && b.name === "bash" && !!b.output);
             setMessages((msgs) => [...msgs, {
               role: "assistant",
               blocks: [...finalBlocks],
               agent_id: data.agent_id || ag?.id,
               agent_name: ag?.name,
               agent_color: ag?.color,
+              defaultExpandedTools: onlyBashOutput,
             }]);
           }
           blocksRef.current = [];
@@ -1775,7 +1779,7 @@ export function Chat() {
                   </div>
                 ) : b.type === "tool" ? (
                   <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                    <ToolChip tool={b} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
+                    <ToolChip tool={b} defaultOpen={!!m.defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
                   </div>
                 ) : b.type === "text" && b.content ? (
                   m.role === "assistant" ? (
@@ -1956,7 +1960,7 @@ export function Chat() {
                     </div>
                   ) : b.type === "tool" ? (
                     <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                      <ToolChip tool={b} live={!!(m as any).live && !b.output} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
+                      <ToolChip tool={b} live={!!(m as any).live && !b.output} defaultOpen={!!(m as any).defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
                     </div>
                   ) : b.type === "text" && b.content ? (
                     <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
