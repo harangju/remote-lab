@@ -42,34 +42,6 @@ def clear_broadcast():
     _broadcast_fn.set(None)
 
 
-async def _notify_tool(name: str, input_summary: str):
-    """Send a tool-use event via the broadcast function, if set."""
-    fn = _broadcast_fn.get()
-    if fn:
-        try:
-            await fn(json.dumps({
-                "type": "tool-use",
-                "name": name,
-                "input": input_summary[:200],
-            }))
-        except Exception:
-            pass
-
-
-async def _notify_tool_result(name: str, output: str):
-    """Send a tool-result event via the broadcast function, if set."""
-    fn = _broadcast_fn.get()
-    if fn:
-        try:
-            await fn(json.dumps({
-                "type": "tool-result",
-                "name": name,
-                "output": output[:500],
-            }))
-        except Exception:
-            pass
-
-
 async def _notify_tool_output(name: str, chunk: str):
     """Send incremental tool output via the broadcast function, if set."""
     fn = _broadcast_fn.get()
@@ -100,7 +72,6 @@ async def _notify_file_changed(path: str, change: str):
 
 async def _bash(ctx: RunContext, command: str) -> str:
     """Run a shell command and return stdout+stderr. Use for git, python, npm, etc."""
-    await _notify_tool("bash", command)
     workdir = get_workdir()
     proc = await asyncio.create_subprocess_shell(
         command,
@@ -148,83 +119,68 @@ async def _bash(ctx: RunContext, command: str) -> str:
     if truncated:
         output += "\n... (truncated)"
     result = f"exit {proc.returncode}\n{output}"
-    await _notify_tool_result("bash", result)
     return result
 
 
 async def _read_file(ctx: RunContext, path: str) -> str:
     """Read a file's contents. Path is relative to the working directory."""
-    await _notify_tool("read_file", path)
     workdir = get_workdir()
     p = (workdir / path).resolve()
     if not str(p).startswith(str(workdir)):
         result = "Error: path outside working directory"
-        await _notify_tool_result("read_file", result)
         return result
     try:
         text = p.read_text(errors="replace")
         if len(text) > 100_000:
             text = text[:100_000] + "\n... (truncated)"
-        await _notify_tool_result("read_file", f"{len(text)} chars")
         return text
     except Exception as e:
         result = f"Error: {e}"
-        await _notify_tool_result("read_file", result)
         return result
 
 
 async def _write_file(ctx: RunContext, path: str, content: str) -> str:
     """Write content to a file. Creates parent directories if needed."""
-    await _notify_tool("write_file", path)
     workdir = get_workdir()
     p = (workdir / path).resolve()
     if not str(p).startswith(str(workdir)):
         result = "Error: path outside working directory"
-        await _notify_tool_result("write_file", result)
         return result
     try:
         existed = p.exists()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
         result = f"Wrote {len(content)} bytes to {path}"
-        await _notify_tool_result("write_file", result)
         await _notify_file_changed(path, "updated" if existed else "created")
         return result
     except Exception as e:
         result = f"Error: {e}"
-        await _notify_tool_result("write_file", result)
         return result
 
 
 async def _edit_file(ctx: RunContext, path: str, old_string: str, new_string: str) -> str:
     """Replace the first occurrence of old_string with new_string in a file."""
-    await _notify_tool("edit_file", path)
     workdir = get_workdir()
     p = (workdir / path).resolve()
     if not str(p).startswith(str(workdir)):
         result = "Error: path outside working directory"
-        await _notify_tool_result("edit_file", result)
         return result
     try:
         text = p.read_text()
         if old_string not in text:
             result = "Error: old_string not found in file"
-            await _notify_tool_result("edit_file", result)
             return result
         text = text.replace(old_string, new_string, 1)
         p.write_text(text)
-        await _notify_tool_result("edit_file", "OK")
         await _notify_file_changed(path, "updated")
         return "OK"
     except Exception as e:
         result = f"Error: {e}"
-        await _notify_tool_result("edit_file", result)
         return result
 
 
 async def _glob(ctx: RunContext, pattern: str) -> str:
     """Find files matching a glob pattern (e.g. '**/*.py'). Returns newline-separated paths."""
-    await _notify_tool("glob", pattern)
     workdir = get_workdir()
     matches = sorted(workdir.glob(pattern))
     results = []
@@ -232,13 +188,11 @@ async def _glob(ctx: RunContext, pattern: str) -> str:
         if str(m.resolve()).startswith(str(workdir)):
             results.append(str(m.relative_to(workdir)))
     result = "\n".join(results) if results else "No matches"
-    await _notify_tool_result("glob", f"{len(results)} matches")
     return result
 
 
 async def _grep(ctx: RunContext, pattern: str, path: str = ".", include: str = "") -> str:
     """Search file contents with ripgrep. Returns matching lines with file:line format."""
-    await _notify_tool("grep", pattern)
     workdir = get_workdir()
     cmd = ["rg", "--no-heading", "--line-number", "--max-count=50", pattern]
     if include:
@@ -255,7 +209,6 @@ async def _grep(ctx: RunContext, pattern: str, path: str = ".", include: str = "
     if len(output) > 30_000:
         output = output[:30_000] + "\n... (truncated)"
     result = output or "No matches"
-    await _notify_tool_result("grep", result)
     return result
 
 
@@ -264,7 +217,6 @@ _brave_key = os.environ.get("BRAVE_API_KEY")
 
 async def _web_search(ctx: RunContext, query: str, count: int = 5) -> str:
     """Search the web using Brave Search. Returns top results with title, URL, and description."""
-    await _notify_tool("web_search", query)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -279,12 +231,10 @@ async def _web_search(ctx: RunContext, query: str, count: int = 5) -> str:
             data = resp.json()
     except httpx.HTTPError as e:
         result = f"Error: {e}"
-        await _notify_tool_result("web_search", result)
         return result
 
     results = data.get("web", {}).get("results", [])
     if not results:
-        await _notify_tool_result("web_search", "No results")
         return "No results found."
 
     lines = []
@@ -295,7 +245,6 @@ async def _web_search(ctx: RunContext, query: str, count: int = 5) -> str:
         lines.append("")
 
     output = "\n".join(lines)
-    await _notify_tool_result("web_search", f"{len(results)} results")
     return output
 
 
