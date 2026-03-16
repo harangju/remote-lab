@@ -109,7 +109,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/srv/remote-lab
 EnvironmentFile=/srv/remote-lab/.env
-ExecStart=/usr/local/bin/uv run uvicorn backend.server:app --host 0.0.0.0 --port 3000
+ExecStart=/usr/local/bin/uv run uvicorn backend.server:app --host 127.0.0.1 --port 3000
 Restart=always
 
 [Install]
