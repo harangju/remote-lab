@@ -81,10 +81,12 @@ class ConvoMeta(BaseModel):
 
 
 class ConvoDetail(ConvoMeta):
-    """Conversation metadata plus the full message log."""
+    """Conversation metadata plus a window into the message log."""
     messages: list[dict] = Field(default_factory=list)
     context_tokens: int = 0
     context_limit: int = 0
+    has_more: bool = False
+    next_before: int | None = None
 
 
 class UploadResult(Attachment):

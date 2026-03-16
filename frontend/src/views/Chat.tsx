@@ -447,6 +447,8 @@ const CHAT_HEADER_MAX_WIDTH = "64rem";
 const CHAT_MESSAGES_MAX_WIDTH = "64rem";
 const CHAT_INPUT_MAX_WIDTH = "64rem";
 const MESSAGE_MAX_WIDTH = "92%";
+const INITIAL_HISTORY_PAGE_SIZE = 100;
+const OLDER_HISTORY_PAGE_SIZE = 100;
 
 function blockIdentity(block: StreamBlock): string {
   if (block.type === "tool") return `tool:${block.tool_call_id || block.name}:${block.input || ""}:${block.output || ""}`;
@@ -605,6 +607,9 @@ export function Chat() {
   // Track active agent info during streaming (for multi-agent labeling)
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [historyCursor, setHistoryCursor] = useState<number | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -645,6 +650,7 @@ export function Chat() {
 
   const pendingScrollMessageIdRef = useRef<string | null>(null);
   const initialScrollDoneRef = useRef(false);
+  const prependScrollRestoreRef = useRef<number | null>(null);
 
   const getUserMessageTopOffsetPx = useCallback(() => {
     const viewportOffset = window.innerHeight * USER_MESSAGE_TOP_OFFSET_VH;
@@ -731,6 +737,14 @@ export function Chat() {
   }, []);
 
   useLayoutEffect(() => {
+    if (prependScrollRestoreRef.current != null && messageListRef.current) {
+      const container = messageListRef.current;
+      const prevHeight = prependScrollRestoreRef.current;
+      const nextHeight = container.scrollHeight;
+      container.scrollTop += nextHeight - prevHeight;
+      prependScrollRestoreRef.current = null;
+      return;
+    }
     if (!pendingScrollMessageIdRef.current) return;
     const messageEl = lastSentMessageRef.current;
     if (!messageEl || messageEl.dataset.messageId !== pendingScrollMessageIdRef.current) return;
@@ -840,7 +854,7 @@ export function Chat() {
   const reloadConversation = useCallback(async () => {
     if (!convId || !projectId) return;
     const [detail, agentRes] = await Promise.all([
-      getConvo(convId),
+      getConvo(convId, { limit: INITIAL_HISTORY_PAGE_SIZE }),
       listProjectAgents(projectId),
     ]);
     const agentList = agentRes.agents;
@@ -848,6 +862,8 @@ export function Chat() {
     const rebuilt = buildDisplayMessages(detail, agentList);
     setTitle(rebuilt.title);
     setAutonomousToolsEnabled(rebuilt.autonomousToolsEnabled);
+    setHasMoreHistory(detail.has_more);
+    setHistoryCursor(detail.next_before);
     setMessages((prev) => {
       const rebuiltIds = new Set(rebuilt.messages.map(messageIdentity));
       const pendingOnly = prev.filter((msg) => msg.pending || !rebuiltIds.has(messageIdentity(msg)));
@@ -858,7 +874,29 @@ export function Chat() {
     setStreamBlocks([]);
     activeAgentRef.current = null;
     setActiveAgent(null);
+    initialScrollDoneRef.current = false;
   }, [convId, projectId]);
+
+  const loadOlderHistory = useCallback(async () => {
+    if (!convId || loadingOlder || !hasMoreHistory || historyCursor == null) return;
+    setLoadingOlder(true);
+    try {
+      const detail = await getConvo(convId, { before: historyCursor, limit: OLDER_HISTORY_PAGE_SIZE });
+      const rebuilt = buildDisplayMessages(detail, agents);
+      if (messageListRef.current) prependScrollRestoreRef.current = messageListRef.current.scrollHeight;
+      setMessages((prev) => {
+        const prevIds = new Set(prev.map(messageIdentity));
+        const olderOnly = rebuilt.messages.filter((msg) => !prevIds.has(messageIdentity(msg)));
+        return [...olderOnly, ...prev];
+      });
+      setHasMoreHistory(detail.has_more);
+      setHistoryCursor(detail.next_before);
+    } catch (e: any) {
+      setError(e.message || "Failed to load older messages");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [convId, loadingOlder, hasMoreHistory, historyCursor, agents]);
 
   // Load agent configs + existing messages together so agent labels resolve
   useEffect(() => {
@@ -1723,6 +1761,27 @@ export function Chat() {
         {/* Messages */}
         <div ref={messageListRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "4px", maxWidth: CHAT_MESSAGES_MAX_WIDTH, width: "100%", margin: "0 auto", flex: 1 }}>
+          {hasMoreHistory && (
+            <div style={{ alignSelf: "center", marginBottom: "8px" }}>
+              <button
+                type="button"
+                onClick={() => { void loadOlderHistory(); }}
+                disabled={loadingOlder}
+                style={{
+                  background: "var(--bg-surface)",
+                  color: "var(--text-muted)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "999px",
+                  padding: "6px 12px",
+                  fontSize: "0.8rem",
+                  cursor: loadingOlder ? "default" : "pointer",
+                  opacity: loadingOlder ? 0.7 : 1,
+                }}
+              >
+                {loadingOlder ? "Loading older messages…" : "Load older messages"}
+              </button>
+            </div>
+          )}
           {messages.map((m, i) => (
             <React.Fragment key={i}>
               {m.role === "assistant" && m.agent_name && (

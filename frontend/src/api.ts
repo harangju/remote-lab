@@ -27,6 +27,8 @@ export interface ConvoDetail extends ConvoMeta {
   messages: Message[];
   context_tokens: number;
   context_limit: number;
+  has_more: boolean;
+  next_before: number | null;
 }
 
 export interface Attachment {
@@ -140,8 +142,12 @@ export function createConvo(projectId: string, title?: string): Promise<ConvoMet
   });
 }
 
-export function getConvo(convoId: string): Promise<ConvoDetail> {
-  return request(`/convos/${convoId}`);
+export function getConvo(convoId: string, opts?: { before?: number; limit?: number }): Promise<ConvoDetail> {
+  const params = new URLSearchParams();
+  if (typeof opts?.before === "number") params.set("before", String(opts.before));
+  if (typeof opts?.limit === "number") params.set("limit", String(opts.limit));
+  const query = params.toString();
+  return request(`/convos/${convoId}${query ? `?${query}` : ""}`);
 }
 
 export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null; autonomous_tools_enabled?: boolean }): Promise<ConvoMeta> {

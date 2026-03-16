@@ -15,6 +15,9 @@
     - Conversation mode remains the unit of work, but can transition cleanly to file-only mode and back.
     - Starting/opening a conversation from file-only mode should preserve the file as the current object.
 - Issue #36 tracks the first-principles document UX exploration.
+- Diagnosed long-conversation performance: chat currently loads and renders the full event history with no pagination/virtualization. Likely frontend memory/render cost, not backend storage size.
+- Agreed next step: design the minimal paginated conversation history shape before implementation.
+- Implemented minimal conversation pagination: backend `GET /api/convos/{id}` now supports `limit` and `before`, returns `has_more` and `next_before`; chat loads recent history first and can prepend older messages via a top "Load older messages" button with scroll preservation.
 - In-progress implementation for #36 adds explicit file entry from project mode and a first standalone file-only route (`/:projectId/file`) that can open a file via `?path=` and start a conversation from that file.
 - Conversation mode now also reads and writes `?path=` so file-only → conversation preserves the active file, and conversation can cleanly promote the current file into a primary view.
 - `Cmd+P` / file picker is being shifted from flat command-palette results toward an explorer-like modal with folder structure and search-as-filter; folders now start collapsed.

@@ -792,8 +792,8 @@ async def api_create_convo(project_id: str, body: ConvoCreate):
 
 
 @api.get("/convos/{convo_id}", response_model=ConvoDetail)
-async def api_get_convo(convo_id: str):
-    convo = storage.get_conversation(convo_id)
+async def api_get_convo(convo_id: str, before: int | None = None, limit: int | None = None):
+    convo = storage.get_conversation(convo_id, before=before, limit=limit)
     if not convo:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return convo

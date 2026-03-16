@@ -303,11 +303,18 @@ def create_conversation(project_id: str, title: str | None = None) -> ConvoMeta:
     return meta
 
 
-def get_conversation(convo_id: str) -> ConvoDetail | None:
+def get_conversation(convo_id: str, before: int | None = None, limit: int | None = None) -> ConvoDetail | None:
     meta = _read_meta(convo_id)
     if meta is None:
         return None
     events = read_events(convo_id)
+    total = len(events)
+    end = total if before is None else max(0, min(before, total))
+    if limit is None or limit <= 0:
+        start = 0
+    else:
+        start = max(0, end - limit)
+    window = events[start:end]
     context_tokens = 0
     context_limit = 0
     for event in reversed(events):
@@ -320,7 +327,14 @@ def get_conversation(convo_id: str) -> ConvoDetail | None:
             context_tokens = event["context_tokens"]
             context_limit = event["context_limit"]
             break
-    return ConvoDetail(**meta.model_dump(), messages=events, context_tokens=context_tokens, context_limit=context_limit)
+    return ConvoDetail(
+        **meta.model_dump(),
+        messages=window,
+        context_tokens=context_tokens,
+        context_limit=context_limit,
+        has_more=start > 0,
+        next_before=start if start > 0 else None,
+    )
 
 
 def delete_conversation(convo_id: str) -> bool:
