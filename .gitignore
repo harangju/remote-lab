@@ -12,3 +12,4 @@ frontend/bun.lock
 public/*
 !public/example.md
 !public/.access.example.json
+.claude/settings.local.json
