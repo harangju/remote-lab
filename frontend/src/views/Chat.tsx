@@ -423,6 +423,16 @@ const CHAT_MESSAGES_MAX_WIDTH = "64rem";
 const CHAT_INPUT_MAX_WIDTH = "64rem";
 const MESSAGE_MAX_WIDTH = "92%";
 
+function blockIdentity(block: StreamBlock): string {
+  if (block.type === "tool") return `tool:${block.tool_call_id || block.name}:${block.input || ""}:${block.output || ""}`;
+  if (block.type === "text") return `text:${block.content}`;
+  return `system:${block.tone || "info"}:${block.content}`;
+}
+
+function messageIdentity(message: DisplayMessage): string {
+  return `${message.role}:${message.agent_id || ""}:${message.blocks.map(blockIdentity).join("|")}`;
+}
+
 function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { messages: DisplayMessage[]; meta: MetaInfo | null; title: string; autonomousToolsEnabled: boolean } {
   const msgs: DisplayMessage[] = [];
   let pendingBlocks: StreamBlock[] = [];
@@ -784,7 +794,11 @@ export function Chat() {
     const rebuilt = buildDisplayMessages(detail, agentList);
     setTitle(rebuilt.title);
     setAutonomousToolsEnabled(rebuilt.autonomousToolsEnabled);
-    setMessages(rebuilt.messages);
+    setMessages((prev) => {
+      const rebuiltIds = new Set(rebuilt.messages.map(messageIdentity));
+      const pendingOnly = prev.filter((msg) => msg.pending || !rebuiltIds.has(messageIdentity(msg)));
+      return [...rebuilt.messages, ...pendingOnly.filter((msg) => msg.pending)];
+    });
     setMeta(rebuilt.meta);
     blocksRef.current = [];
     setStreamBlocks([]);
@@ -971,14 +985,15 @@ export function Chat() {
           if (finalBlocks.length > 0) {
             const ag = activeAgentRef.current;
             const onlyBashOutput = finalBlocks.length > 0 && finalBlocks.every((b) => b.type === "tool" && b.name === "bash" && !!b.output);
-            setMessages((msgs) => [...msgs, {
+            const finalMessage: DisplayMessage = {
               role: "assistant",
               blocks: [...finalBlocks],
               agent_id: data.agent_id || ag?.id,
               agent_name: ag?.name,
               agent_color: ag?.color,
               defaultExpandedTools: onlyBashOutput,
-            }]);
+            };
+            setMessages((msgs) => msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]);
           }
           blocksRef.current = [];
           setStreamBlocks([]);
@@ -1024,7 +1039,8 @@ export function Chat() {
           if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);
           if (blocksRef.current.length > 0) {
-            setMessages((msgs) => [...msgs, { role: "assistant", blocks: [...blocksRef.current] }]);
+            const finalMessage: DisplayMessage = { role: "assistant", blocks: [...blocksRef.current] };
+            setMessages((msgs) => msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]);
           }
           blocksRef.current = [];
           setStreamBlocks([]);
