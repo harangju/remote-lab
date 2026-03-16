@@ -25,7 +25,7 @@ type ApprovalScope = "once" | "project";
 
 type StreamBlock =
   | { type: "text"; content: string }
-  | { type: "tool"; name: string; input?: string; output?: string; liveOutput?: string }
+  | { type: "tool"; name: string; input?: string; output?: string; liveOutput?: string; tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope }
   | { type: "tool-confirm"; tool_call_id: string; name: string; args?: string; status: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
 
 interface DisplayMessage {
@@ -98,18 +98,31 @@ const toolIcons: Record<string, React.FC<{ size?: number }>> = {
 };
 
 /** Extract a short summary from tool input for display in the chip. */
+function parseToolInput(input?: string): Record<string, any> | null {
+  if (!input) return null;
+  try {
+    const parsed = JSON.parse(input);
+    if (parsed && typeof parsed === "object") return parsed as Record<string, any>;
+  } catch {}
+  return null;
+}
+
 function toolSummary(name: string, input?: string): string | null {
   if (!input) return null;
+  const parsed = parseToolInput(input);
   if (["read_file", "write_file", "edit_file"].includes(name)) {
+    const path = typeof parsed?.path === "string" ? parsed.path : undefined;
     const pathMatch = input.match(/['"]?path['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
-    return pathMatch ? pathMatch[1] : input.slice(0, 60);
+    return path || (pathMatch ? pathMatch[1] : input.slice(0, 60));
   }
   if (name === "bash") {
-    return input.length > 60 ? input.slice(0, 57) + "..." : input;
+    const command = typeof parsed?.command === "string" ? parsed.command : input;
+    return command.length > 60 ? command.slice(0, 57) + "..." : command;
   }
   if (name === "glob" || name === "grep") {
+    const pattern = typeof parsed?.pattern === "string" ? parsed.pattern : undefined;
     const patMatch = input.match(/['"]?pattern['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
-    return patMatch ? patMatch[1] : input.slice(0, 60);
+    return pattern || (patMatch ? patMatch[1] : input.slice(0, 60));
   }
   return input.length > 60 ? input.slice(0, 57) + "..." : input;
 }
@@ -117,6 +130,8 @@ function toolSummary(name: string, input?: string): string | null {
 /** Extract file path from tool input. */
 function extractFilePath(name: string, input?: string): string | null {
   if (!input || !["read_file", "write_file", "edit_file"].includes(name)) return null;
+  const parsed = parseToolInput(input);
+  if (typeof parsed?.path === "string") return parsed.path;
   const pathMatch = input.match(/['"]?path['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
   return pathMatch ? pathMatch[1] : input.trim();
 }
@@ -129,10 +144,11 @@ function extractShareUrl(name: string, input?: string): string | null {
   return plainMatch ? plainMatch[0] : null;
 }
 
-function ToolChip({ tool, live, onOpenFile }: {
-  tool: ToolCall;
+function ToolChip({ tool, live, onOpenFile, onRespond }: {
+  tool: ToolCall & { tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
   live?: boolean;
   onOpenFile?: (path: string) => void;
+  onRespond?: (toolCallId: string, approved: boolean, scope?: ApprovalScope) => void;
 }) {
   const [manualOpen, setManualOpen] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
@@ -143,7 +159,10 @@ function ToolChip({ tool, live, onOpenFile }: {
   const shareUrl = extractShareUrl(tool.name, tool.input) || extractShareUrl(tool.name, tool.output);
   const isFileOp = !!filePath;
   const isShareLink = !!shareUrl;
-  const showStatusSlot = live || !!tool.output || (isFileOp && !!onOpenFile) || isShareLink;
+  const approvalPending = !!tool.awaitingApproval && tool.approvalStatus !== "approved" && tool.approvalStatus !== "denied";
+  const approvalDenied = tool.approvalStatus === "denied";
+  const approvalApproved = tool.approvalStatus === "approved";
+  const showStatusSlot = live || !!tool.output || approvalPending || approvalDenied || approvalApproved || (isFileOp && !!onOpenFile) || isShareLink;
   const isStreaming = !!(live && tool.liveOutput);
   const open = isStreaming || manualOpen;
   const displayContent = isStreaming ? tool.liveOutput : (tool.output || "");
@@ -213,6 +232,12 @@ function ToolChip({ tool, live, onOpenFile }: {
             }} />
           ) : tool.output ? (
             <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
+          ) : approvalPending ? (
+            <span style={{ opacity: 0.7, lineHeight: 1, color: "var(--accent)" }} title="Waiting for approval">!</span>
+          ) : approvalDenied ? (
+            <span style={{ opacity: 0.7, lineHeight: 1, color: "#c4554d" }} title="Denied">×</span>
+          ) : approvalApproved ? (
+            <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
           ) : isShareLink ? (
             <span
               onClick={handleOpenShare}
@@ -235,6 +260,25 @@ function ToolChip({ tool, live, onOpenFile }: {
           {hasDetail && (open ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
         </span>
       </button>
+      {approvalPending && tool.tool_call_id && onRespond && (
+        <div style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "6px",
+          padding: "6px 10px",
+          marginTop: "4px",
+          display: "flex",
+          gap: "6px",
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}>
+          <button onClick={() => onRespond(tool.tool_call_id!, true, "once")} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "4px 8px", borderRadius: "6px" }}>Allow once</button>
+          {tool.canAllowProject && (
+            <button onClick={() => onRespond(tool.tool_call_id!, true, "project")} style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}>Allow in project</button>
+          )}
+          <button onClick={() => onRespond(tool.tool_call_id!, false, "once")} style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}>Deny</button>
+        </div>
+      )}
       {open && (hasDetail || isStreaming) && (
         <pre ref={preRef} style={{
           background: "var(--bg-surface)",
@@ -951,13 +995,21 @@ export function Chat() {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(false);
           const blocks = [...blocksRef.current];
-          const last = blocks[blocks.length - 1];
-          if (last && last.type === "tool" && last.name === data.name && !last.output) {
-            blocks[blocks.length - 1] = {
-              ...last,
-              input: data.input ?? last.input,
-            };
-          } else {
+          let matched = false;
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const b = blocks[i];
+            if (b.type === "tool" && b.name === data.name && !b.output) {
+              blocks[i] = {
+                ...b,
+                input: data.input ?? b.input,
+                awaitingApproval: false,
+                approvalStatus: b.approvalStatus === "denied" ? b.approvalStatus : undefined,
+              };
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
             blocks.push({ type: "tool", name: data.name, input: data.input });
           }
           blocksRef.current = blocks;
@@ -1000,14 +1052,17 @@ export function Chat() {
         case "tool-confirm": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(false);
-          blocksRef.current = [...blocksRef.current, {
-            type: "tool-confirm" as const,
+          const blocks = [...blocksRef.current];
+          blocks.push({
+            type: "tool",
             tool_call_id: data.tool_call_id,
             name: data.name,
-            args: data.args,
-            status: "pending" as const,
+            input: data.args,
+            awaitingApproval: true,
+            approvalStatus: "pending",
             canAllowProject: data.can_allow_project !== false,
-          }];
+          });
+          blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
           break;
         }
@@ -1307,10 +1362,14 @@ export function Chat() {
     if (ws && ws.readyState === WebSocket.OPEN && runId) {
       ws.send(JSON.stringify({ type: "tool-confirm-response", run_id: runId, tool_call_id: toolCallId, approved, scope }));
     }
-    // Update the block status
     const blocks = blocksRef.current.map((b) =>
-      b.type === "tool-confirm" && b.tool_call_id === toolCallId
-        ? { ...b, status: approved ? "approved" as const : "denied" as const, approvedScope: approved ? scope : undefined }
+      b.type === "tool" && b.tool_call_id === toolCallId
+        ? {
+            ...b,
+            approvalStatus: approved ? "approved" as const : "denied" as const,
+            approvedScope: approved ? scope : undefined,
+            awaitingApproval: approved ? false : true,
+          }
         : b
     );
     blocksRef.current = blocks;
@@ -1710,7 +1769,7 @@ export function Chat() {
                   </div>
                 ) : b.type === "tool" ? (
                   <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                    <ToolChip tool={b} onOpenFile={handleOpenFile} />
+                    <ToolChip tool={b} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
                   </div>
                 ) : b.type === "text" && b.content ? (
                   m.role === "assistant" ? (
@@ -1891,7 +1950,7 @@ export function Chat() {
                     </div>
                   ) : b.type === "tool" ? (
                     <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                      <ToolChip tool={b} live={!!(m as any).live && !b.output} onOpenFile={handleOpenFile} />
+                      <ToolChip tool={b} live={!!(m as any).live && !b.output} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
                     </div>
                   ) : b.type === "text" && b.content ? (
                     <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
