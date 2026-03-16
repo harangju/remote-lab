@@ -950,7 +950,17 @@ export function Chat() {
         case "tool-use": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(false);
-          blocksRef.current = [...blocksRef.current, { type: "tool", name: data.name, input: data.input }];
+          const blocks = [...blocksRef.current];
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "tool" && last.name === data.name && !last.output) {
+            blocks[blocks.length - 1] = {
+              ...last,
+              input: data.input ?? last.input,
+            };
+          } else {
+            blocks.push({ type: "tool", name: data.name, input: data.input });
+          }
+          blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
           break;
         }
@@ -2153,7 +2163,7 @@ export function Chat() {
                 background: "transparent",
                 border: "none",
                 resize: "none",
-                overflowY: "hidden",
+                overflowY: "auto",
                 lineHeight: "1.5",
                 minHeight: "24px",
                 maxHeight: "200px",
