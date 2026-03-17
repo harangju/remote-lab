@@ -1741,8 +1741,8 @@ export function Chat() {
                   <Sparkles size={15} />
                 </button>
                 <button
-                  onClick={panel.file ? () => syncFileQuery(panel.file!.path, true) : panel.toggleFileFinder}
-                  data-tooltip={panel.file ? "Open current file as primary view" : "Find file (⌘P)"}
+                  onClick={panel.toggleFileFinder}
+                  data-tooltip="Find file (⌘P)"
                   style={{
                     ...headerIconBtnStyle,
                     color: "var(--text-muted)",
@@ -1752,6 +1752,20 @@ export function Chat() {
                 >
                   <FolderOpen size={15} />
                 </button>
+                {panel.file && (
+                  <button
+                    onClick={() => navigate(`/${projectId}/file?path=${encodeURIComponent(panel.file!.path)}`)}
+                    data-tooltip="File only"
+                    style={{
+                      ...headerIconBtnStyle,
+                      color: "var(--text-muted)",
+                    }}
+                    onMouseEnter={headerHoverIn}
+                    onMouseLeave={headerHoverOut}
+                  >
+                    <FileText size={15} />
+                  </button>
+                )}
               </div>
             </div>
           </div>

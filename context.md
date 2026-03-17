@@ -40,3 +40,4 @@
 - File finder overlay now uses a clearly top-layer z-index so its backdrop covers app chrome consistently.
 - Header button appearing above the file-finder dimmer was caused by the global tooltip hover rule forcing hovered `[data-tooltip]` elements to `z-index: 99999`; that z-index boost has been removed.
 - Tooltip bubbles themselves now render at an explicit top-layer z-index so they appear above app chrome when shown.
+- Agreed chat→file-only transition should be a mode-switch action, not a second back action: `Chat.tsx` keeps the existing folder button for browsing files within chat, and adds a separate file icon in the right-side utility cluster to open the current file in standalone file-only mode.
