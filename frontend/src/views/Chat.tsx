@@ -1491,6 +1491,8 @@ export function Chat() {
     fontSize: "0.9rem",
     wordBreak: "break-word",
     alignSelf: role === "user" ? "flex-end" : "flex-start",
+    position: "relative",
+    zIndex: 0,
     background: role === "user"
       ? (bashMode ? "var(--bg-bash-user)" : "var(--bg-user)")
       : "var(--bg-surface)",
