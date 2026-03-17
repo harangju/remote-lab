@@ -44,3 +44,5 @@
 - Global tooltip anchors now always establish `position: relative` (not only on `:hover`), which avoids pseudo-element stacking glitches on other surfaces like project/conversation cards and code blocks.
 - The real issue for the chat-header tooltips was header/message layering, not tooltip direction: the chat header now establishes its own higher stacking layer above the scrollable message region, and header controls go back to normal downward tooltips.
 - Agreed chat→file-only transition should be a mode-switch action, not a second back action: `Chat.tsx` keeps the existing folder button for browsing files within chat, and adds a separate file icon in the right-side utility cluster to open the current file in standalone file-only mode.
+- File-panel header now includes a direct download action alongside copy/close so file view supports saving the currently open file locally.
+- `AGENTS.md` now explicitly requires rebuilding the frontend after frontend changes before reporting completion.

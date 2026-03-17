@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3 } from "lucide-react";
+import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download } from "lucide-react";
 import type { PanelFile } from "../hooks/usePanel";
 import { btnIcon } from "../styles";
 import { ListModal } from "./ListModal";
@@ -119,6 +119,18 @@ export function FilePanel({
     navigator.clipboard.writeText(file.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const download = () => {
+    const blob = new Blob([file.content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.path.split("/").pop() || "file";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -370,6 +382,10 @@ export function FilePanel({
             )}
           </div>
         )}
+
+        <button onClick={download} style={iconBtnStyle} data-tooltip="Download file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+          <Download size={15} />
+        </button>
 
         <button onClick={copy} style={iconBtnStyle} data-tooltip={copied ? "Copied!" : "Copy"} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
           {copied ? <Check size={15} /> : <Copy size={15} />}
