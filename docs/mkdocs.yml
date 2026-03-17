@@ -15,6 +15,7 @@ nav:
       - Slides: guides/slides.md
   - Reference:
       - Deployment: reference/deployment.md
+      - Tailscale: reference/tailscale.md
       - Architecture: reference/architecture.md
       - Operations: reference/operations.md
 
