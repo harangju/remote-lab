@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from backend.protocol import FileChanged
+from backend.skills import get_skill
 
 import httpx
 from pydantic_ai import RunContext
@@ -248,6 +249,44 @@ async def _web_search(ctx: RunContext, query: str, count: int = 5) -> str:
     return output
 
 
+async def _activate_skill(ctx: RunContext, name: str) -> str:
+    """Load a packaged agent skill by name and return structured instructions plus resource listings."""
+    workdir = get_workdir()
+    skill = get_skill(name, workdir if workdir.is_dir() else None)
+    if not skill or skill.type != "prompt" or not skill.location:
+        return f"Error: skill not found: {name}"
+
+    skill_file = Path(skill.location).resolve()
+    skill_dir = skill_file.parent
+    try:
+        relative_skill_dir = skill_dir.relative_to(workdir)
+        skill_dir_display = relative_skill_dir.as_posix()
+    except ValueError:
+        skill_dir_display = str(skill_dir)
+
+    resources: list[str] = []
+    for subdir in ("scripts", "references", "assets"):
+        base = skill_dir / subdir
+        if not base.is_dir():
+            continue
+        for file in sorted(p for p in base.rglob("*") if p.is_file())[:200]:
+            resources.append(file.relative_to(skill_dir).as_posix())
+
+    resource_block = ""
+    if resources:
+        resource_lines = "\n".join(f"<file>{path}</file>" for path in resources)
+        resource_block = f"\n\n<skill_resources>\n{resource_lines}\n</skill_resources>"
+
+    return (
+        f"<skill_content name=\"{skill.name}\">\n"
+        f"{skill.prompt}\n\n"
+        f"Skill directory: {skill_dir_display}\n"
+        "Relative paths in this skill are relative to the skill directory."
+        f"{resource_block}\n"
+        f"</skill_content>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
@@ -260,6 +299,7 @@ ALL_TOOLS: dict[str, tuple] = {
     "edit_file": (_edit_file,),
     "glob": (_glob,),
     "grep": (_grep,),
+    "activate_skill": (_activate_skill,),
 }
 
 if _brave_key:

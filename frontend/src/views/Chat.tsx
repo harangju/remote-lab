@@ -423,6 +423,12 @@ function extractTextContent(children: any): string {
   return "";
 }
 
+function compactSkillDescription(description: string, maxLength = 72): string {
+  const singleLine = description.replace(/\s+/g, " ").trim();
+  if (singleLine.length <= maxLength) return singleLine;
+  return `${singleLine.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
 function MdContent({ text, onOpenSnippet }: { text: string; onOpenSnippet?: (code: string, language: string) => void }) {
   const components = useMemo(() => makeMdComponents(onOpenSnippet), [onOpenSnippet]);
   return (
@@ -1263,8 +1269,8 @@ export function Chat() {
       setMentionQuery(null);
     }
 
-    // Detect /slash command at start of input
-    const slashMatch = val.match(/^\/(\w*)$/);
+    // Detect /slash command token before cursor
+    const slashMatch = before.match(/(?:^|\s)\/(\w*)$/);
     if (slashMatch) {
       setSlashQuery(slashMatch[1]);
       setSlashIdx(0);
@@ -1286,9 +1292,22 @@ export function Chat() {
   };
 
   const insertSlashCommand = (skill: Skill) => {
-    setInput(`/${skill.name} `);
+    const pos = inputRef.current?.selectionStart ?? input.length;
+    const before = input.slice(0, pos);
+    const after = input.slice(pos);
+    const slashMatch = before.match(/(?:^|\s)\/(\w*)$/);
+    if (!slashMatch) return;
+    const slashToken = slashMatch[0];
+    const prefix = before.slice(0, before.length - slashToken.length);
+    const spacer = slashToken.startsWith(" ") ? " " : "";
+    const newVal = `${prefix}${spacer}/${skill.name} ${after}`;
+    setInput(newVal);
     setSlashQuery(null);
-    inputRef.current?.focus();
+    requestAnimationFrame(() => {
+      const cursor = prefix.length + spacer.length + skill.name.length + 2;
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(cursor, cursor);
+    });
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -2099,7 +2118,7 @@ export function Chat() {
                   }}
                 >
                   <span style={{ fontWeight: 600, fontFamily: "monospace" }}>/{s.name}</span>
-                  <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{s.description}</span>
+                  <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: "1 1 auto" }}>{compactSkillDescription(s.description)}</span>
                 </div>
               ))}
             </div>

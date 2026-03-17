@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response
 import mimetypes
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -881,8 +881,10 @@ async def api_list_skills(project_id: str):
     return [s.model_dump() for s in skills]
 
 
-@api.get("/projects/{project_id}/file/raw")
-async def api_read_file_raw(project_id: str, path: str):
+@api.get("/projects/{project_id}/file/raw", dependencies=[])
+async def api_read_file_raw(project_id: str, path: str, token: str = Query("")):
+    if not check_token(token):
+        raise HTTPException(status_code=401, detail="Invalid token")
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1654,7 +1656,14 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     continue
                 elif skill and skill.type == SkillType.prompt:
                     user_text = cmd_args.strip()
-                    prompt = f"{skill.prompt}\n\n{user_text}" if user_text else skill.prompt
+                    prompt = f"Activate the `{skill.name}` skill with the activate_skill tool, then use it to help with this request."
+                    if user_text:
+                        prompt = f"{prompt}\n\nUser request:\n{user_text}"
+                    if message_id:
+                        processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                        await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+                        message_id = None
+                    await ws.send_text(SkillResult(skill=skill.name, output=f"Queued activation for {skill.name}").model_dump_json())
 
             is_bash_mode = raw_message.startswith("!") or (isinstance(locals().get("raw_text"), str) and raw_text.startswith("!"))
             bash_command = raw_text[1:] if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!") else ""

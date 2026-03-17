@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download } from "lucide-react";
 import type { PanelFile } from "../hooks/usePanel";
+import { getToken } from "../api";
 import { btnIcon } from "../styles";
 import { ListModal } from "./ListModal";
 
@@ -122,15 +123,17 @@ export function FilePanel({
   };
 
   const download = () => {
-    const blob = new Blob([file.content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+    const token = getToken();
+    if (!token) return;
+    const rawPath = `/api/projects/${file.projectId}/file/raw?path=${encodeURIComponent(file.path)}`;
+    const url = new URL(rawPath, window.location.origin);
+    url.searchParams.set("token", token);
     const link = document.createElement("a");
-    link.href = url;
+    link.href = url.toString();
     link.download = file.path.split("/").pop() || "file";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
   return (

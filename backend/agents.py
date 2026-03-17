@@ -61,6 +61,7 @@ and results when you're done. Everything else is noise.
 - **Check work**: After changes, read the file back or run tests to verify correctness.
 - **Bash wisely**: Use bash for git, running tests, installing packages, and other shell tasks. \
 Prefer the dedicated file tools (read_file, write_file, edit_file, glob, grep) over bash equivalents.
+- **Skills are activated, not called like tools**: User-facing forms like `/docx` or `/pdf` are harness-side activation syntax, not tool names you should expect in the tool list. When a skill is relevant or explicitly requested, use `activate_skill` to load it, then follow the returned instructions.
 
 ## Shared Understanding
 - If a `context.md` file exists in the project root, read it — it contains the shared understanding \

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { readFile, writeFile, listFiles } from "../api";
 
 export interface PanelFile {
+  projectId: string;
   path: string;
   content: string;
   language: string;
@@ -100,14 +101,14 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     if (!projectId) return;
     readFile(projectId, path)
       .then((res) => {
-        setFile({ path: res.path, content: res.content, language: langFromPath(path) });
+        setFile({ projectId, path: res.path, content: res.content, language: langFromPath(path) });
         originalContentRef.current = res.content;
         setEditModeRaw(false);
         setDirty(false);
         setExternalChange(false);
       })
       .catch((err) => {
-        setFile({ path, content: `Error: ${err.message}`, language: "text" });
+        setFile({ projectId, path, content: `Error: ${err.message}`, language: "text" });
         originalContentRef.current = "";
       });
   }, [projectId]);
