@@ -64,25 +64,77 @@ Do **not** use Flexible — it causes redirect loops with Caddy.
 
 Only after step 5 works, restrict port `443` on the VPS to Cloudflare IPs only. This prevents anyone from bypassing Cloudflare and hitting your origin directly.
 
+Keep your current SSH session open while doing this.
+
+### Allow Cloudflare IPs
+
+These are [Cloudflare's published IP ranges](https://www.cloudflare.com/ips/) — global edge IPs, not account-specific.
+
 ```bash
-# Remove the open 443 rule
+# IPv4
+sudo ufw allow proto tcp from 173.245.48.0/20 to any port 443
+sudo ufw allow proto tcp from 103.21.244.0/22 to any port 443
+sudo ufw allow proto tcp from 103.22.200.0/22 to any port 443
+sudo ufw allow proto tcp from 103.31.4.0/22 to any port 443
+sudo ufw allow proto tcp from 141.101.64.0/18 to any port 443
+sudo ufw allow proto tcp from 108.162.192.0/18 to any port 443
+sudo ufw allow proto tcp from 190.93.240.0/20 to any port 443
+sudo ufw allow proto tcp from 188.114.96.0/20 to any port 443
+sudo ufw allow proto tcp from 197.234.240.0/22 to any port 443
+sudo ufw allow proto tcp from 198.41.128.0/17 to any port 443
+sudo ufw allow proto tcp from 162.158.0.0/15 to any port 443
+sudo ufw allow proto tcp from 104.16.0.0/13 to any port 443
+sudo ufw allow proto tcp from 104.24.0.0/14 to any port 443
+sudo ufw allow proto tcp from 172.64.0.0/13 to any port 443
+sudo ufw allow proto tcp from 131.0.72.0/22 to any port 443
+
+# IPv6
+sudo ufw allow proto tcp from 2400:cb00::/32 to any port 443
+sudo ufw allow proto tcp from 2606:4700::/32 to any port 443
+sudo ufw allow proto tcp from 2803:f800::/32 to any port 443
+sudo ufw allow proto tcp from 2405:b500::/32 to any port 443
+sudo ufw allow proto tcp from 2405:8100::/32 to any port 443
+sudo ufw allow proto tcp from 2a06:98c0::/29 to any port 443
+sudo ufw allow proto tcp from 2c0f:f248::/32 to any port 443
+```
+
+### Remove broad public 443 rules
+
+```bash
+# Remove all broad allow rules for 443
 sudo ufw delete allow 443
+sudo ufw delete allow 443/tcp
 
-# Allow 443 from Cloudflare IPv4 ranges only
-for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
-    sudo ufw allow from "$ip" to any port 443 proto tcp
-done
-
+# Deny 443 generally (Cloudflare-specific allows take precedence)
+sudo ufw deny 443/tcp
 sudo ufw reload
 ```
 
-Verify with:
+If the `delete` commands fail (rule not found), use numbered rules instead:
+
+```bash
+sudo ufw status numbered
+sudo ufw delete <number>
+```
+
+### Verify
 
 ```bash
 sudo ufw status verbose
 ```
 
-You should see a list of `ALLOW IN` rules for 443, each from a Cloudflare CIDR block.
+The desired final state:
+
+- `22/tcp on tailscale0` — allow
+- `22/tcp` — deny
+- `443/tcp` — allow from each Cloudflare CIDR only
+- `443/tcp` — deny generally
+- **No** `443 ALLOW IN Anywhere` rules
+
+Then test:
+
+- `https://lab.yourdomain.com` → **should work** (traffic goes through Cloudflare)
+- `https://<vps-public-ip>` → **should fail** (direct origin access blocked)
 
 ### Shortest safe order
 
@@ -90,4 +142,5 @@ You should see a list of `ALLOW IN` rules for 443, each from a Cloudflare CIDR b
 2. Add proxied `lab` + `docs` DNS records
 3. Change nameservers
 4. Verify both URLs work
-5. **Then** firewall 443 to Cloudflare-only
+5. Set SSL mode to Full (strict)
+6. **Then** firewall 443 to Cloudflare-only
