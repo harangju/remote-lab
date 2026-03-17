@@ -1650,7 +1650,7 @@ export function Chat() {
         minWidth: 0,
       }}>
         {/* Header */}
-        <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0, position: "relative", zIndex: 2 }}>
         <div style={{ padding: "8px 1.5rem", minHeight: "51px", maxWidth: CHAT_HEADER_MAX_WIDTH, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
             <Link

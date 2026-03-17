@@ -42,4 +42,5 @@
 - Tooltip bubbles themselves now render at an explicit top-layer z-index so they appear above app chrome when shown.
 - Chat message bubbles now establish their own local stacking context (`position: relative; z-index: 0`) so hovered tooltip pseudo-elements paint above adjacent messages instead of being visually occluded by neighboring bubbles.
 - Global tooltip anchors now always establish `position: relative` (not only on `:hover`), which avoids pseudo-element stacking glitches on other surfaces like project/conversation cards and code blocks.
+- The real issue for the chat-header tooltips was header/message layering, not tooltip direction: the chat header now establishes its own higher stacking layer above the scrollable message region, and header controls go back to normal downward tooltips.
 - Agreed chat→file-only transition should be a mode-switch action, not a second back action: `Chat.tsx` keeps the existing folder button for browsing files within chat, and adds a separate file icon in the right-side utility cluster to open the current file in standalone file-only mode.

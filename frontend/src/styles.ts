@@ -87,6 +87,12 @@ export function injectTheme() {
       pointer-events: none;
       z-index: 2147483647;
     }
+    [data-tooltip][data-tooltip-pos="top"]:hover::after {
+      top: auto;
+      bottom: 100%;
+      margin-top: 0;
+      margin-bottom: 4px;
+    }
     button {
       cursor: pointer;
       font-family: inherit;
