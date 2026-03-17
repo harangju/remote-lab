@@ -16,6 +16,7 @@ nav:
   - Reference:
       - Deployment: reference/deployment.md
       - Tailscale: reference/tailscale.md
+      - Cloudflare: reference/cloudflare.md
       - Architecture: reference/architecture.md
       - Operations: reference/operations.md
 
