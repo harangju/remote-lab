@@ -981,10 +981,10 @@ async def api_upload_files(project_id: str, files: list[UploadFile] = File(...))
         content = await upload.read()
         size = len(content)
         total_size += size
-        if size > 10 * 1024 * 1024:
+        if size > 50 * 1024 * 1024:
             raise HTTPException(status_code=400, detail=f"File too large: {upload.filename}")
-        if total_size > 20 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Total upload size exceeds 20 MB")
+        if total_size > 100 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Total upload size exceeds 100 MB")
         safe_name = _sanitize_upload_name(upload.filename or "upload")
         stored_name = f"{uuid4().hex[:12]}-{safe_name}"
         target = (upload_dir / stored_name).resolve()
