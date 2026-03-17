@@ -45,7 +45,9 @@
 - The real issue for the chat-header tooltips was header/message layering, not tooltip direction: the chat header now establishes its own higher stacking layer above the scrollable message region, and header controls go back to normal downward tooltips.
 - Agreed chat→file-only transition should be a mode-switch action, not a second back action: `Chat.tsx` keeps the existing folder button for browsing files within chat, and adds a separate file icon in the right-side utility cluster to open the current file in standalone file-only mode.
 - File-panel header now includes a direct download action alongside copy/close so file view supports saving the currently open file locally.
-- That download action now targets the backend raw-file endpoint with auth so it downloads the actual on-disk bytes (including binary files like `.docx`) rather than serializing the editor text.
+- That download action now targets the backend raw-file endpoint so it downloads the actual on-disk bytes (including binary files like `.docx`) rather than serializing the editor text.
+- Passing auth via a tokenized download URL was unreliable in the browser save flow; the file-view download now uses an authenticated `fetch` for the raw bytes and then saves the returned blob locally instead.
+- The fetch-based download must include the normal bearer auth header; omitting it made the button appear inert because the raw-file endpoint still sits behind API auth.
 - `AGENTS.md` now explicitly requires rebuilding the frontend after frontend changes before reporting completion.
 - Added global prompt skills in `data/skills/` for `docx`, `pdf`, `xlsx`, and `pptx`, sourced from Anthropic's public `skills` repo so these slash skills are now available across projects.
 - Fixed prompt skill loading to parse YAML front matter in `data/skills/*.md` files; without that, imported Anthropic skills were loaded with names/descriptions embedded in the prompt body instead of exposing the intended slash commands like `/docx`.

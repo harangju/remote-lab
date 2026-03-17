@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, Response
 import mimetypes
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -881,10 +881,8 @@ async def api_list_skills(project_id: str):
     return [s.model_dump() for s in skills]
 
 
-@api.get("/projects/{project_id}/file/raw", dependencies=[])
-async def api_read_file_raw(project_id: str, path: str, token: str = Query("")):
-    if not check_token(token):
-        raise HTTPException(status_code=401, detail="Invalid token")
+@api.get("/projects/{project_id}/file/raw")
+async def api_read_file_raw(project_id: str, path: str):
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")

@@ -122,18 +122,32 @@ export function FilePanel({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const download = () => {
+  const download = async () => {
     const token = getToken();
-    if (!token) return;
-    const rawPath = `/api/projects/${file.projectId}/file/raw?path=${encodeURIComponent(file.path)}`;
-    const url = new URL(rawPath, window.location.origin);
-    url.searchParams.set("token", token);
-    const link = document.createElement("a");
-    link.href = url.toString();
-    link.download = file.path.split("/").pop() || "file";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (!token) {
+      console.error("Download failed: missing auth token");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/projects/${file.projectId}/file/raw?path=${encodeURIComponent(file.path)}`, {
+        headers: {
+          Accept: "application/octet-stream",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.path.split("/").pop() || "file";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (

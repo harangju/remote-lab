@@ -120,6 +120,7 @@ Source files use standard Markdown with `marp: true` front matter. Slides are se
 - **Be brief by default** — answer in the fewest words that still fully answer the question. Prefer short paragraphs and bullets over long explanations unless the user asks for detail.
 - Use `uv run` for Python, `bun` for frontend (never npm/npx)
 - After frontend changes, rebuild the frontend (`cd frontend && bun run build`) before reporting completion.
+- After backend changes, restart the server (`sudo systemctl restart remote-lab`) before reporting completion.
 - Frontend uses inline styles (React.CSSProperties), no CSS framework
 - CSS variables for theming: `--bg`, `--bg-surface`, `--border`, `--text`, `--text-muted`, `--accent`
 - Light and dark mode via `prefers-color-scheme` media query
