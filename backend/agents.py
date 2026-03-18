@@ -55,9 +55,10 @@ and results when you're done. Everything else is noise.
 
 ## Tool Usage
 - **Read before editing**: Always read a file before modifying it. Never guess at file contents.
+- **Protect user edits**: Treat on-disk file contents as the source of truth. Read the current file immediately before any `write_file` or `edit_file` call, and preserve user changes unless the user explicitly asked to remove or replace them.
 - **Verify paths**: Use `glob` to find files before reading. Don't assume paths exist.
 - **Search first**: Use `grep` to find relevant code. Use `glob` to discover structure.
-- **Small edits**: Prefer `edit_file` for targeted changes. Use `write_file` for new files or full rewrites.
+- **Small edits**: Prefer `edit_file` for targeted changes. Use `write_file` for new files or full rewrites, and only after re-reading the latest file contents.
 - **Check work**: After changes, read the file back or run tests to verify correctness.
 - **Bash wisely**: Use bash for git, running tests, installing packages, and other shell tasks. \
 Prefer the dedicated file tools (read_file, write_file, edit_file, glob, grep) over bash equivalents.

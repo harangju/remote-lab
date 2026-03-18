@@ -1654,7 +1654,10 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     continue
                 elif skill and skill.type == SkillType.prompt:
                     user_text = cmd_args.strip()
-                    prompt = f"Activate the `{skill.name}` skill with the activate_skill tool, then use it to help with this request."
+                    prompt = (
+                        f"Activate the `{skill.name}` skill with the activate_skill tool, then use it to help with this request. "
+                        "Before changing any existing file, read the current file immediately before editing and preserve any user edits unless the user explicitly asked to remove them."
+                    )
                     if user_text:
                         prompt = f"{prompt}\n\nUser request:\n{user_text}"
                     if message_id:
