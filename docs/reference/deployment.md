@@ -83,7 +83,26 @@ sudo chown -R www-data:www-data /srv/projects
 
 Projects typically live under `/srv/projects/`. If files are later created by `root` or another user, the agent may lose write access.
 
-## 7. Allow the agent to restart itself
+## 7. Configure git for the agent
+
+The agent needs a git identity and GitHub credentials to work with project repositories.
+
+```bash
+sudo chown www-data:www-data /var/www
+sudo -u www-data git config --global user.name "Remote Lab Agent"
+sudo -u www-data git config --global user.email "you@example.com"
+```
+
+If projects use HTTPS remotes, set up a credential helper so the agent can authenticate. With `gh` installed:
+
+```bash
+sudo -u www-data gh auth login
+sudo -u www-data git config --global credential.https://github.com.helper '!/usr/bin/gh auth git-credential'
+```
+
+`/var/www` must be owned by `www-data` so git can write its global config and lock files there.
+
+## 8. Allow the agent to restart itself
 
 ```bash
 echo 'www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart remote-lab' | sudo tee /etc/sudoers.d/remote-lab
@@ -91,7 +110,7 @@ echo 'www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart remote-lab' | sudo
 
 This allows the bash tool to restart the app after backend changes.
 
-## 8. Configure environment
+## 9. Configure environment
 
 ```bash
 cp .env.example .env
@@ -113,7 +132,7 @@ GOOGLE_API_KEY=AI...    # optional
 
 If `DEEPGRAM_API_KEY` is configured, users can start **voice input** from the chat composer. Browser microphone audio is streamed to the backend, proxied to Deepgram's realtime API (`nova-3`), and partial/final transcripts are inserted into the draft without auto-sending.
 
-## 9. Set up Caddy
+## 10. Set up Caddy
 
 Edit `/etc/caddy/Caddyfile`:
 
@@ -133,7 +152,7 @@ Then reload:
 systemctl reload caddy
 ```
 
-## 10. Create systemd services
+## 11. Create systemd services
 
 `/etc/systemd/system/remote-lab.service`:
 
@@ -181,7 +200,7 @@ systemctl enable --now remote-lab
 systemctl enable --now remote-lab-docs
 ```
 
-## 11. Verify
+## 12. Verify
 
 Open `https://lab.yourdomain.com` and enter your token.
 

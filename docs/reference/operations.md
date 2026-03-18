@@ -42,8 +42,7 @@ The service runs as `www-data` under systemd.
 
 Practical implications:
 
-- git identity should be configured for the `www-data` user
-- SSH keys used for git operations should live under that user's home
+- git identity and credentials must be configured for `www-data` (see [Deployment step 7](deployment.md#7-configure-git-for-the-agent))
 - PATH may need to be extended in the systemd unit for tools installed outside standard system paths
 
 ## Reconnect behavior
