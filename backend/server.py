@@ -244,7 +244,26 @@ async def _update_conversation_title(convo_id: str, title: str) -> None:
         storage.update_conversation_title(convo_id, title)
 
 
-async def _auto_title(convo_id: str, user_message: str, run: RunState):
+async def _broadcast_conversation_event(convo_id: str, msg_str: str) -> None:
+    session = sessions.get(convo_id)
+    if not session:
+        return
+
+    dead: set[WebSocket] = set()
+    for ws in session.subscribers:
+        try:
+            await ws.send_text(msg_str)
+        except Exception:
+            dead.add(ws)
+    session.subscribers -= dead
+
+    run = session.run
+    if run is not None:
+        run.subscribers -= dead
+        run.events.append(msg_str)
+
+
+async def _auto_title(convo_id: str, user_message: str):
     from pydantic_ai import Agent as _Agent
     from backend.agents import _available
 
@@ -264,9 +283,7 @@ async def _auto_title(convo_id: str, user_message: str, run: RunState):
         title = str(result.output).strip().strip('"\'')
         if title:
             await _update_conversation_title(convo_id, title)
-            event = TitleUpdated(title=title).model_dump_json()
-            run.events.append(event)
-            await run.broadcast(event)
+            await _broadcast_conversation_event(convo_id, TitleUpdated(title=title).model_dump_json())
     except Exception as e:
         import logging
         logging.getLogger("remote-lab").warning("Auto-title failed: %s", e, exc_info=True)
@@ -1689,8 +1706,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
             current_meta = storage._read_meta(convo_id)
             if current_meta and current_meta.title == "Untitled":
-                title_run = session.run or RunState(convo_id=convo_id, run_id=_new_run_id())
-                asyncio.create_task(_auto_title(convo_id, prompt, title_run))
+                asyncio.create_task(_auto_title(convo_id, prompt))
 
             await _update_conversation_status(convo_id, ConvoStatus.running)
 
