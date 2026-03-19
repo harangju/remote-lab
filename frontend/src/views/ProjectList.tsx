@@ -2,7 +2,20 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Archive, Pencil, Plus, Trash2, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
 import { listProjects, createProject, updateProject, deleteProject, listGlobalAgents, saveGlobalAgents, listModels, type Project, type AgentConfig } from "../api";
-import { container, card, btnPrimary, btnDanger, input as inputStyle } from "../styles";
+import { container, card, btnPrimary, btnIcon, input as inputStyle } from "../styles";
+
+const iconBtnStyle: React.CSSProperties = {
+  ...btnIcon,
+  cursor: "pointer",
+};
+
+function hoverIn(e: React.MouseEvent<HTMLElement>) {
+  e.currentTarget.style.background = "color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 12%)";
+}
+
+function hoverOut(e: React.MouseEvent<HTMLElement>) {
+  e.currentTarget.style.background = "var(--bg-surface)";
+}
 
 export function ProjectList() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -183,16 +196,27 @@ export function ProjectList() {
       </div>
       <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
         <button
-          style={btnDanger}
+          style={iconBtnStyle}
           onClick={() => handleArchiveToggle(p, !archivedView)}
           title={archivedView ? "Restore project" : "Archive project"}
+          aria-label={archivedView ? "Restore project" : "Archive project"}
+          data-tooltip={archivedView ? "Restore project" : "Archive project"}
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
         >
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-            {archivedView ? <RotateCcw size={13} /> : <Archive size={13} />}
-            {archivedView ? "Restore" : "Archive"}
-          </span>
+          {archivedView ? <RotateCcw size={16} /> : <Archive size={16} />}
         </button>
-        {archivedView && <button style={btnDanger} onClick={() => handleDelete(p.id)}>Delete</button>}
+        <button
+          style={iconBtnStyle}
+          onClick={() => handleDelete(p.id)}
+          title="Delete project"
+          aria-label="Delete project"
+          data-tooltip="Delete project"
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
+        >
+          <Trash2 size={16} />
+        </button>
       </div>
     </div>
   );
