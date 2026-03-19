@@ -86,14 +86,33 @@ export function ConvoList() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "p") {
+      if (e.metaKey && e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === "m") {
+        const target = e.target as HTMLElement | null;
+        const tagName = target?.tagName?.toLowerCase();
+        const isEditable = !!target && (target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select");
+        if (isEditable) return;
         e.preventDefault();
-        toggleFileFinder();
+        if (!projectId) return;
+        createConvo(projectId)
+          .then((c) => navigate(`/${projectId}/${c.id}`))
+          .catch((err: any) => setError(err.message));
+        return;
+      }
+      if (e.metaKey && !e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        if (!fileList && !fileListLoading && projectId) {
+          setFileListLoading(true);
+          listFiles(projectId, { hidden: true })
+            .then((res) => setFileList(res.files))
+            .catch(() => setFileList([]))
+            .finally(() => setFileListLoading(false));
+        }
+        setShowFileFinder((v) => !v);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fileList, fileListLoading, projectId]);
+  }, [fileList, fileListLoading, navigate, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -135,21 +154,21 @@ export function ConvoList() {
 
   const activeConvos = useMemo(() => convos.filter((c) => !c.archived_at), [convos]);
 
-  const refreshFileList = () => {
+  const refreshFileList = React.useCallback(() => {
     if (!projectId) return;
     setFileListLoading(true);
     listFiles(projectId, { hidden: true })
       .then((res) => setFileList(res.files))
       .catch(() => setFileList([]))
       .finally(() => setFileListLoading(false));
-  };
+  }, [projectId]);
 
-  const toggleFileFinder = () => {
+  const toggleFileFinder = React.useCallback(() => {
     if (!fileList && !fileListLoading && projectId) {
       refreshFileList();
     }
     setShowFileFinder((v) => !v);
-  };
+  }, [fileList, fileListLoading, projectId, refreshFileList]);
 
   useEffect(() => {
     if (showFileFinder) refreshFileList();
@@ -175,7 +194,7 @@ export function ConvoList() {
     setEditingProject(false);
   };
 
-  const handleNew = async () => {
+  const handleNew = React.useCallback(async () => {
     if (!projectId) return;
     try {
       const c = await createConvo(projectId);
@@ -183,7 +202,7 @@ export function ConvoList() {
     } catch (err: any) {
       setError(err.message);
     }
-  };
+  }, [navigate, projectId]);
 
   const openProjectFile = (path: string) => {
     if (!projectId) return;
@@ -422,7 +441,7 @@ export function ConvoList() {
           <button
             onClick={handleNew}
             style={iconBtnStyle}
-            data-tooltip="New conversation"
+            data-tooltip="New conversation (⌘⇧M)"
             onMouseEnter={hoverIn}
             onMouseLeave={hoverOut}
           >
