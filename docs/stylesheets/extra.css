@@ -28,38 +28,3 @@ code {
   overflow-x: auto;
   max-width: 100%;
 }
-
-/* Per-code-block copy button */
-div.codehilite {
-  position: relative;
-}
-
-.rl-code-copy-btn {
-  position: absolute;
-  top: 0.65rem;
-  right: 0.65rem;
-  z-index: 2;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
-  color: var(--text-muted);
-  border-radius: 0.45rem;
-  padding: 0.25rem 0.55rem;
-  font-size: 0.75rem;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.rl-code-copy-btn:hover {
-  background: var(--bg-surface);
-  color: var(--text);
-}
-
-.rl-code-copy-btn.is-copied {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.codehilite pre {
-  padding-top: 2.25rem;
-}
