@@ -47,3 +47,4 @@ extra_css:
 extra_javascript:
   - https://unpkg.com/lucide@latest/dist/umd/lucide.min.js
   - javascripts/icons.js
+  - javascripts/code-copy.js
