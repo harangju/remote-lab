@@ -2,8 +2,7 @@ site_name: Remote Lab Docs
 site_url: https://yourname.github.io/remote-lab/
 repo_url: https://github.com/harangju/remote-lab
 
-docs_dir: docs
-site_dir: ../public/docs
+docs_dir: .
 
 nav:
   - Overview: index.md
