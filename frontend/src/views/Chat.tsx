@@ -171,6 +171,143 @@ function extractShareUrl(name: string, input?: string): string | null {
   return plainMatch ? plainMatch[0] : null;
 }
 
+function countLines(text: string): number {
+  if (!text) return 0;
+  return text.split("\n").length;
+}
+
+type DiffToken = { text: string; kind: "equal" | "add" | "remove" };
+type DiffLine = {
+  type: "add" | "remove";
+  lineNumber: number | null;
+  tokens: DiffToken[];
+};
+
+type EditDiffPreview = {
+  summary: string | null;
+  lines: DiffLine[];
+  additions: number;
+  deletions: number;
+  truncated: boolean;
+};
+
+function diffWords(oldLine: string, newLine: string): { removed: DiffToken[]; added: DiffToken[] } {
+  const tokenize = (value: string) => value.match(/\s+|[^\s]+/g) || [];
+  const oldTokens = tokenize(oldLine);
+  const newTokens = tokenize(newLine);
+  let start = 0;
+  while (start < oldTokens.length && start < newTokens.length && oldTokens[start] === newTokens[start]) start += 1;
+
+  let oldEnd = oldTokens.length - 1;
+  let newEnd = newTokens.length - 1;
+  while (oldEnd >= start && newEnd >= start && oldTokens[oldEnd] === newTokens[newEnd]) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+
+  const removed: DiffToken[] = [];
+  const added: DiffToken[] = [];
+
+  for (let i = 0; i < start; i += 1) {
+    removed.push({ text: oldTokens[i], kind: "equal" });
+    added.push({ text: newTokens[i], kind: "equal" });
+  }
+  for (let i = start; i <= oldEnd; i += 1) removed.push({ text: oldTokens[i], kind: "remove" });
+  for (let i = start; i <= newEnd; i += 1) added.push({ text: newTokens[i], kind: "add" });
+  for (let i = oldEnd + 1, j = newEnd + 1; i < oldTokens.length && j < newTokens.length; i += 1, j += 1) {
+    removed.push({ text: oldTokens[i], kind: "equal" });
+    added.push({ text: newTokens[j], kind: "equal" });
+  }
+
+  return { removed, added };
+}
+
+function buildEditDiffPreview(input?: string): EditDiffPreview | null {
+  const parsed = parseToolInput(input);
+  if (!parsed) return null;
+  const oldString = typeof parsed.old_string === "string" ? parsed.old_string : null;
+  const newString = typeof parsed.new_string === "string" ? parsed.new_string : null;
+  if (oldString == null || newString == null) return null;
+
+  const oldLines = oldString.split("\n");
+  const newLines = newString.split("\n");
+  const additions = Math.max(0, countLines(newString) - countLines(oldString));
+  const deletions = Math.max(0, countLines(oldString) - countLines(newString));
+  const maxRenderedRows = 40;
+  const lines: DiffLine[] = [];
+  let truncated = false;
+  let oldIdx = 0;
+  let newIdx = 0;
+
+  while (oldIdx < oldLines.length || newIdx < newLines.length) {
+    if (lines.length >= maxRenderedRows) {
+      truncated = true;
+      break;
+    }
+
+    const oldLine = oldLines[oldIdx];
+    const newLine = newLines[newIdx];
+
+    if (oldLine === newLine) {
+      oldIdx += 1;
+      newIdx += 1;
+      continue;
+    }
+
+    const nextOld = oldIdx + 1 < oldLines.length ? oldLines[oldIdx + 1] : null;
+    const nextNew = newIdx + 1 < newLines.length ? newLines[newIdx + 1] : null;
+
+    if (nextOld !== null && nextOld === newLine) {
+      lines.push({ type: "remove", lineNumber: oldIdx + 1, tokens: [{ text: oldLine, kind: "remove" }] });
+      oldIdx += 1;
+      continue;
+    }
+
+    if (nextNew !== null && oldLine === nextNew) {
+      lines.push({ type: "add", lineNumber: newIdx + 1, tokens: [{ text: newLine, kind: "add" }] });
+      newIdx += 1;
+      continue;
+    }
+
+    if (oldLine != null && newLine != null) {
+      const tokenDiff = diffWords(oldLine, newLine);
+      lines.push({ type: "remove", lineNumber: oldIdx + 1, tokens: tokenDiff.removed });
+      if (lines.length >= maxRenderedRows) {
+        truncated = true;
+        break;
+      }
+      lines.push({ type: "add", lineNumber: newIdx + 1, tokens: tokenDiff.added });
+      oldIdx += 1;
+      newIdx += 1;
+      continue;
+    }
+
+    if (oldLine != null) {
+      lines.push({ type: "remove", lineNumber: oldIdx + 1, tokens: [{ text: oldLine, kind: "remove" }] });
+      oldIdx += 1;
+      continue;
+    }
+
+    if (newLine != null) {
+      lines.push({ type: "add", lineNumber: newIdx + 1, tokens: [{ text: newLine, kind: "add" }] });
+      newIdx += 1;
+    }
+  }
+
+  if (lines.length === 0) {
+    return { summary: "no visible line change", lines: [], additions, deletions, truncated: false };
+  }
+
+  const addedRows = lines.filter((line) => line.type === "add").length;
+  const removedRows = lines.filter((line) => line.type === "remove").length;
+  const summaryBits: string[] = [];
+  if (addedRows > 0) summaryBits.push(`+${addedRows}`);
+  if (removedRows > 0) summaryBits.push(`-${removedRows}`);
+  const summary = summaryBits.length > 0 ? summaryBits.join(" ") : "edited";
+
+  return { summary, lines, additions, deletions, truncated };
+}
+
 function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
   tool: ToolCall & { tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
   live?: boolean;
@@ -181,8 +318,10 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
   const [manualOpen, setManualOpen] = useState(defaultOpen);
   const preRef = useRef<HTMLPreElement>(null);
   const Icon = toolIcons[tool.name] || Settings;
-  const hasDetail = !!(tool.input || tool.output);
-  const summary = toolSummary(tool.name, tool.input);
+  const editDiff = tool.name === "edit_file" ? buildEditDiffPreview(tool.input) : null;
+  const hasDiffPreview = !!editDiff && editDiff.lines.length > 0;
+  const hasDetail = !!(tool.input || tool.output || hasDiffPreview);
+  const summary = editDiff?.summary ? `${toolSummary(tool.name, tool.input) || tool.name} (${editDiff.summary})` : toolSummary(tool.name, tool.input);
   const filePath = extractFilePath(tool.name, tool.input);
   const shareUrl = extractShareUrl(tool.name, tool.input) || extractShareUrl(tool.name, tool.output);
   const isFileOp = !!filePath;
@@ -192,7 +331,7 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
   const approvalApproved = tool.approvalStatus === "approved";
   const showStatusSlot = live || !!tool.output || approvalPending || approvalDenied || approvalApproved || (isFileOp && !!onOpenFile) || isShareLink;
   const isStreaming = !!(live && tool.liveOutput);
-  const open = isStreaming || manualOpen;
+  const open = isStreaming || (tool.name === "edit_file" ? true : manualOpen);
   const displayContent = isStreaming ? tool.liveOutput : (tool.output || "");
 
   // Auto-scroll to bottom during streaming
@@ -215,78 +354,159 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
   return (
     <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0, maxWidth: "100%" }}>
       <button
-        onClick={() => hasDetail && setManualOpen(!manualOpen)}
+        onClick={() => tool.name !== "edit_file" && hasDetail && setManualOpen(!manualOpen)}
         style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
           borderRadius: "6px",
-          padding: "4px 8px",
-          cursor: hasDetail ? "pointer" : "default",
+          padding: tool.name === "edit_file" && hasDiffPreview ? "0" : "4px 8px",
+          cursor: tool.name !== "edit_file" && hasDetail ? "pointer" : "default",
           color: "var(--text-muted)",
           fontSize: "0.78rem",
           display: "inline-flex",
-          alignItems: "center",
-          gap: "6px",
+          alignItems: tool.name === "edit_file" && hasDiffPreview ? "stretch" : "center",
+          gap: tool.name === "edit_file" && hasDiffPreview ? "0" : "6px",
           flexWrap: "nowrap",
           maxWidth: "100%",
           minWidth: 0,
           overflow: "hidden",
           textAlign: "left",
-          minHeight: "28px",
+          minHeight: tool.name === "edit_file" && hasDiffPreview ? undefined : "28px",
+          width: tool.name === "edit_file" && hasDiffPreview ? "100%" : undefined,
         }}
       >
-        <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Icon size={13} />
-        </span>
-        <span style={{ fontFamily: "monospace", flexShrink: 0 }}>{tool.name}</span>
-        {summary && (
-          <span style={{
-            fontFamily: "monospace",
-            opacity: 0.7,
-            flex: "1 1 auto",
-            minWidth: 0,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}>{summary}</span>
+        {tool.name === "edit_file" && hasDiffPreview && editDiff ? (
+          <div style={{ width: "100%" }}>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "4px 8px",
+              borderBottom: "1px solid var(--border)",
+              minWidth: 0,
+            }}>
+              <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Icon size={13} />
+              </span>
+              <span style={{ fontFamily: "monospace", flexShrink: 0 }}>{tool.name}</span>
+              {summary && (
+                <span style={{
+                  fontFamily: "monospace",
+                  opacity: 0.7,
+                  flex: "1 1 auto",
+                  minWidth: 0,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}>{summary}</span>
+              )}
+              <span style={{ width: 12, height: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {tool.output ? (
+                  <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
+                ) : isFileOp && onOpenFile ? (
+                  <span
+                    onClick={handleOpenFile}
+                    style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
+                    data-tooltip="Open in panel"
+                  >
+                    <ExternalLink size={12} />
+                  </span>
+                ) : null}
+              </span>
+            </div>
+            <div style={{
+              maxHeight: "220px",
+              overflowY: "auto",
+              fontFamily: "monospace",
+              fontSize: "0.75rem",
+            }}>
+              {editDiff.lines.map((line, idx) => {
+                const rowBg = line.type === "add" ? "rgba(77, 147, 117, 0.12)" : "rgba(196, 85, 77, 0.12)";
+                const tokenBg = line.type === "add" ? "rgba(77, 147, 117, 0.28)" : "rgba(196, 85, 77, 0.28)";
+                return (
+                  <div key={`${line.type}-${line.lineNumber}-${idx}`} style={{
+                    display: "grid",
+                    gridTemplateColumns: "34px 12px minmax(0, 1fr)",
+                    alignItems: "start",
+                    columnGap: "6px",
+                    padding: "1px 8px",
+                    background: rowBg,
+                    color: "var(--text)",
+                  }}>
+                    <span style={{ color: "var(--text-muted)", textAlign: "right", userSelect: "none" }}>{line.lineNumber ?? ""}</span>
+                    <span style={{ color: line.type === "add" ? "#4d9375" : "#c4554d", userSelect: "none" }}>{line.type === "add" ? "+" : "-"}</span>
+                    <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", textIndent: 0, paddingLeft: 0, marginLeft: 0 }}>
+                      {line.tokens.map((token, tokenIdx) => (
+                        <span key={tokenIdx} style={token.kind === "equal" ? undefined : {
+                          background: tokenBg,
+                          borderRadius: "3px",
+                        }}>{token.text}</span>
+                      ))}
+                    </span>
+                  </div>
+                );
+              })}
+              {editDiff.truncated && (
+                <div style={{ padding: "4px 8px", color: "var(--text-muted)", fontSize: "0.72rem" }}>… diff truncated</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Icon size={13} />
+            </span>
+            <span style={{ fontFamily: "monospace", flexShrink: 0 }}>{tool.name}</span>
+            {summary && (
+              <span style={{
+                fontFamily: "monospace",
+                opacity: 0.7,
+                flex: "1 1 auto",
+                minWidth: 0,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}>{summary}</span>
+            )}
+            <span style={{ width: 12, height: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              {live ? (
+                <span style={{
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: "#d9a754",
+                  display: "inline-block",
+                  animation: "pulse 1.5s infinite",
+                }} />
+              ) : tool.output ? (
+                <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
+              ) : approvalPending ? (
+                <span style={{ opacity: 0.7, lineHeight: 1, color: "var(--accent)" }} title="Waiting for approval">!</span>
+              ) : approvalDenied ? (
+                <span style={{ opacity: 0.7, lineHeight: 1, color: "#c4554d" }} title="Denied">×</span>
+              ) : approvalApproved ? (
+                <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
+              ) : isShareLink ? (
+                <span
+                  onClick={handleOpenShare}
+                  style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
+                  data-tooltip="Open published page"
+                >
+                  <ExternalLink size={12} />
+                </span>
+              ) : isFileOp && onOpenFile ? (
+                <span
+                  onClick={handleOpenFile}
+                  style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
+                  data-tooltip="Open in panel"
+                >
+                  <ExternalLink size={12} />
+                </span>
+              ) : showStatusSlot ? null : null}
+            </span>
+            <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: hasDetail ? 0.5 : 0 }}>
+              {hasDetail && (open ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
+            </span>
+          </>
         )}
-        <span style={{ width: 12, height: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          {live ? (
-            <span style={{
-              width: 6, height: 6, borderRadius: "50%",
-              background: "#d9a754",
-              display: "inline-block",
-              animation: "pulse 1.5s infinite",
-            }} />
-          ) : tool.output ? (
-            <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
-          ) : approvalPending ? (
-            <span style={{ opacity: 0.7, lineHeight: 1, color: "var(--accent)" }} title="Waiting for approval">!</span>
-          ) : approvalDenied ? (
-            <span style={{ opacity: 0.7, lineHeight: 1, color: "#c4554d" }} title="Denied">×</span>
-          ) : approvalApproved ? (
-            <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span>
-          ) : isShareLink ? (
-            <span
-              onClick={handleOpenShare}
-              style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
-              data-tooltip="Open published page"
-            >
-              <ExternalLink size={12} />
-            </span>
-          ) : isFileOp && onOpenFile ? (
-            <span
-              onClick={handleOpenFile}
-              style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }}
-              data-tooltip="Open in panel"
-            >
-              <ExternalLink size={12} />
-            </span>
-          ) : showStatusSlot ? null : null}
-        </span>
-        <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: hasDetail ? 0.5 : 0 }}>
-          {hasDetail && (open ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
-        </span>
       </button>
       {approvalPending && tool.tool_call_id && onRespond && (
         <div style={{
@@ -307,23 +527,31 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
           <button onClick={() => onRespond(tool.tool_call_id!, false, "once")} style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}>Deny</button>
         </div>
       )}
-      {open && (hasDetail || isStreaming) && (
-        <pre ref={preRef} style={{
+      {tool.name !== "edit_file" && open && (hasDetail || isStreaming) && (
+        <div style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
           borderRadius: "6px",
-          padding: "6px 10px",
           marginTop: "4px",
-          fontSize: "0.75rem",
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere",
-          wordBreak: "break-word",
           maxWidth: "100%",
-          maxHeight: isStreaming ? "5lh" : "200px",
-          overflowX: "hidden",
-          overflowY: "auto",
-          color: "var(--text)",
-        }}>{isStreaming ? displayContent : (tool.input ? tool.input + (tool.output ? "\n---\n" : "") : "") + (tool.output || "")}</pre>
+          overflow: "hidden",
+        }}>
+          {(isStreaming || (tool.input || tool.output)) && (
+            <pre ref={preRef} style={{
+              margin: 0,
+              padding: "6px 10px",
+              fontSize: "0.75rem",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+              maxWidth: "100%",
+              maxHeight: isStreaming ? "5lh" : "200px",
+              overflowX: "hidden",
+              overflowY: "auto",
+              color: "var(--text)",
+            }}>{isStreaming ? displayContent : (tool.input ? tool.input + (tool.output ? "\n---\n" : "") : "") + (tool.output || "")}</pre>
+          )}
+        </div>
       )}
     </div>
   );

@@ -64,3 +64,7 @@
 - Project conversation list now supports `Cmd+Shift+M` as a keyboard shortcut for creating a new conversation, while avoiding interception inside editable fields.
 - Conversation list cards now use icon-only archive/restore controls and always show a trash icon there as well, matching the compact action style requested for ConvoList.
 - Chat view header now includes a direct archive button to the left of the auto-mode button; archiving from chat immediately returns to the conversation list.
+- Tool chips in chat now start surfacing `edit_file` changes more transparently: the chip summary includes a compact `(+/-)` change count and the expanded body shows a capped inline before/after diff preview above the raw tool payload.
+- The next refinement for `edit_file` chips is richer diff rendering: default-expanded chips, per-line rows with line numbers, transparent add/remove row colors, and stronger word-level add/remove highlights inside changed lines.
+- `edit_file` chips now suppress the raw JSON payload in normal view, tighten the diff gutter/layout, and use a more robust line-alignment pass so diffs appear for more edit shapes instead of only simple contiguous replacements.
+- Follow-up refinement: for `edit_file`, the diff is now the chip body itself rather than a separate expanded panel below the header, matching the user's intent that the visible chip/gutter should be the diff instead of any raw JSON or detached detail area.
