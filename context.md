@@ -63,3 +63,4 @@
 - File finder hidden-file UX is now simplified and robust: frontend always fetches the full file list (including dotfiles), while the finder only reveals hidden paths when the search query contains `.`; no special key interception or separate hold/toggle state remains.
 - Project conversation list now supports `Cmd+Shift+M` as a keyboard shortcut for creating a new conversation, while avoiding interception inside editable fields.
 - Conversation list cards now use icon-only archive/restore controls and always show a trash icon there as well, matching the compact action style requested for ConvoList.
+- Chat view header now includes a direct archive button to the left of the auto-mode button; archiving from chat immediately returns to the conversation list.

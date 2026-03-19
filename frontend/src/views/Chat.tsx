@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMe
 import { useParams, Link, useNavigate } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic, ArrowUp } from "lucide-react";
+import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic, ArrowUp, Archive } from "lucide-react";
 import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment, type ConvoDetail } from "../api";
 import { input as inputStyle, btnPrimary, btnIcon } from "../styles";
 
@@ -1211,6 +1211,16 @@ export function Chat() {
     }
   }, [convId, autonomousToolsEnabled, savingAutonomy]);
 
+  const archiveConversation = useCallback(async () => {
+    if (!convId) return;
+    try {
+      await updateConvo(convId, { archived_at: new Date().toISOString() });
+      navigate(`/${projectId}`);
+    } catch (e: any) {
+      setError(e.message || "Failed to archive conversation");
+    }
+  }, [convId, navigate, projectId]);
+
   // @mention autocomplete filtering (agents + files)
   type MentionMatch =
     | { type: "agent"; agent: AgentConfig }
@@ -1744,6 +1754,19 @@ export function Chat() {
                 <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
               )}
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  onClick={archiveConversation}
+                  data-tooltip="Archive conversation"
+                  aria-label="Archive conversation"
+                  style={{
+                    ...headerIconBtnStyle,
+                    color: "var(--text-muted)",
+                  }}
+                  onMouseEnter={headerHoverIn}
+                  onMouseLeave={headerHoverOut}
+                >
+                  <Archive size={15} />
+                </button>
                 <button
                   onClick={toggleAutonomy}
                   disabled={savingAutonomy}
