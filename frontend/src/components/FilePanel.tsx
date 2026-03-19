@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download } from "lucide-react";
+import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download, FileText } from "lucide-react";
 import type { PanelFile } from "../hooks/usePanel";
 import { getToken } from "../api";
 import { btnIcon } from "../styles";
@@ -72,6 +72,47 @@ const iconBtnDangerStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
+const docxPreviewStyle = `
+  .docx-preview {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 40px 48px;
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 0.95rem;
+  }
+  .docx-preview p { margin: 0 0 0.9em; }
+  .docx-preview h1, .docx-preview h2, .docx-preview h3, .docx-preview h4, .docx-preview h5, .docx-preview h6 {
+    margin: 1.2em 0 0.45em;
+    line-height: 1.25;
+  }
+  .docx-preview h1 { font-size: 1.7em; }
+  .docx-preview h2 { font-size: 1.4em; }
+  .docx-preview h3 { font-size: 1.15em; }
+  .docx-preview ul, .docx-preview ol { margin: 0.5em 0 1em; padding-left: 1.5em; }
+  .docx-preview li { margin: 0.2em 0; }
+  .docx-preview table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 0.9rem;
+  }
+  .docx-preview th, .docx-preview td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    vertical-align: top;
+  }
+  .docx-preview th { background: var(--bg-surface); text-align: left; }
+  .docx-preview img { max-width: 100%; height: auto; }
+  .docx-preview a { color: var(--accent); }
+  .docx-preview blockquote {
+    margin: 1em 0;
+    padding-left: 1em;
+    border-left: 3px solid var(--border);
+    color: var(--text-muted);
+  }
+`;
+
 function hoverIn(e: React.MouseEvent<HTMLButtonElement>) {
   e.currentTarget.style.background = "color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 12%)";
 }
@@ -92,6 +133,10 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function isDocx(path: string): boolean {
+  return path.toLowerCase().endsWith(".docx");
+}
+
 export function FilePanel({
   file, editMode, dirty, saving, externalChange,
   onToggleEdit, onContentChange, onSave, onCancel, onClose,
@@ -100,10 +145,15 @@ export function FilePanel({
 }: FilePanelProps) {
   const [copied, setCopied] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
+  const [docxHtml, setDocxHtml] = useState<string>("");
+  const [docxMessages, setDocxMessages] = useState<string[]>([]);
+  const [docxLoading, setDocxLoading] = useState(false);
+  const [docxError, setDocxError] = useState<string | null>(null);
   const conversationMenuRef = useRef<HTMLDivElement | null>(null);
 
   const hasConversationChoices = !!onStartConversation || (conversationOptions.length > 0 && !!onOpenConversationOption);
   const visibleConversationOptions = useMemo(() => conversationOptions.slice(0, 4), [conversationOptions]);
+  const docxFile = isDocx(file.path);
 
   useEffect(() => {
     if (!showConversationMenu) return;
@@ -115,6 +165,54 @@ export function FilePanel({
     window.addEventListener("mousedown", onPointerDown);
     return () => window.removeEventListener("mousedown", onPointerDown);
   }, [showConversationMenu]);
+
+  useEffect(() => {
+    if (!docxFile) {
+      setDocxHtml("");
+      setDocxMessages([]);
+      setDocxError(null);
+      setDocxLoading(false);
+      return;
+    }
+    const token = getToken();
+    if (!token) {
+      setDocxError("Missing auth token");
+      setDocxLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setDocxLoading(true);
+    setDocxError(null);
+    setDocxHtml("");
+    setDocxMessages([]);
+
+    (async () => {
+      try {
+        const response = await fetch(`/api/projects/${file.projectId}/file/raw?path=${encodeURIComponent(file.path)}`, {
+          headers: {
+            Accept: "application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/octet-stream",
+            Authorization: `Bearer ${token}`,
+          },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Preview failed: ${response.status}`);
+        const arrayBuffer = await response.arrayBuffer();
+        const mammoth = await import("mammoth/mammoth.browser");
+        const result = await mammoth.convertToHtml({ arrayBuffer });
+        if (controller.signal.aborted) return;
+        setDocxHtml(result.value || "<p><em>This document appears to be empty.</em></p>");
+        setDocxMessages(result.messages.map((message: { message: string }) => message.message).filter(Boolean));
+      } catch (err: any) {
+        if (controller.signal.aborted) return;
+        console.error("DOCX preview failed", err);
+        setDocxError(err?.message || "Could not preview this Word document.");
+      } finally {
+        if (!controller.signal.aborted) setDocxLoading(false);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [docxFile, file.path, file.projectId]);
 
   const copy = () => {
     navigator.clipboard.writeText(file.content);
@@ -158,6 +256,7 @@ export function FilePanel({
       background: "var(--bg)",
       borderLeft: "1px solid var(--border)",
     }}>
+      <style>{docxPreviewStyle}</style>
       <div style={{
         display: "flex",
         alignItems: "center",
@@ -193,7 +292,20 @@ export function FilePanel({
           }} data-tooltip="Unsaved changes" />
         )}
 
-        {editMode ? (
+        {docxFile ? (
+          <span style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            fontSize: "0.72rem",
+            color: "var(--text-muted)",
+            padding: "0 2px",
+            flexShrink: 0,
+          }} data-tooltip="Read-only Word preview">
+            <FileText size={14} />
+            <span>Preview</span>
+          </span>
+        ) : editMode ? (
           <>
             <button
               onClick={onSave}
@@ -404,9 +516,11 @@ export function FilePanel({
           <Download size={15} />
         </button>
 
-        <button onClick={copy} style={iconBtnStyle} data-tooltip={copied ? "Copied!" : "Copy"} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-          {copied ? <Check size={15} /> : <Copy size={15} />}
-        </button>
+        {!docxFile && (
+          <button onClick={copy} style={iconBtnStyle} data-tooltip={copied ? "Copied!" : "Copy"} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+            {copied ? <Check size={15} /> : <Copy size={15} />}
+          </button>
+        )}
 
         <button onClick={onClose} style={iconBtnStyle} data-tooltip="Close panel" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
           <X size={16} />
@@ -436,24 +550,78 @@ export function FilePanel({
       )}
 
       <div style={{ flex: 1, overflow: "hidden" }}>
-        <Suspense fallback={
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            height: "100%",
-            color: "var(--text-muted)",
-            fontSize: "0.8rem",
-          }}>Loading editor...</div>
-        }>
-          <CodeMirrorEditor
-            code={file.content}
-            language={file.language}
-            readOnly={!editMode}
-            onChange={onContentChange}
-            onSave={onSave}
-          />
-        </Suspense>
+        {docxFile ? (
+          <div style={{ height: "100%", overflowY: "auto", background: "var(--bg)" }}>
+            {docxLoading ? (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100%",
+                color: "var(--text-muted)",
+                fontSize: "0.8rem",
+              }}>
+                Loading Word preview...
+              </div>
+            ) : docxError ? (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100%",
+                padding: "24px",
+                color: "var(--text-muted)",
+                fontSize: "0.85rem",
+                textAlign: "center",
+              }}>
+                <div style={{ maxWidth: 420 }}>
+                  <div>Could not preview this Word document. Try downloading it instead.</div>
+                  {docxError && (
+                    <div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>
+                      {docxError}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div>
+                {docxMessages.length > 0 && (
+                  <div style={{
+                    margin: "16px 16px 0",
+                    padding: "10px 12px",
+                    border: "1px solid var(--border)",
+                    borderRadius: "10px",
+                    background: "var(--bg-surface)",
+                    color: "var(--text-muted)",
+                    fontSize: "0.78rem",
+                  }}>
+                    Preview note: some Word formatting may not render exactly.
+                  </div>
+                )}
+                <div className="docx-preview" dangerouslySetInnerHTML={{ __html: docxHtml }} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <Suspense fallback={
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              color: "var(--text-muted)",
+              fontSize: "0.8rem",
+            }}>Loading editor...</div>
+          }>
+            <CodeMirrorEditor
+              code={file.content}
+              language={file.language}
+              readOnly={!editMode}
+              onChange={onContentChange}
+              onSave={onSave}
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   );

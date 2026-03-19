@@ -58,3 +58,4 @@
 - Prompt skills like `/docx` no longer inject full skill bodies as fake user chat. The backend now exposes a real `activate_skill` tool that returns structured skill content (`<skill_content ...>`) plus resource listings and skill-directory context; `/docx`-style slash activation now just nudges the model to call that tool.
 - Base agent system prompt now explicitly defaults to very brief responses, preferring a single sentence or short bullet list unless the user asks for detail.
 - The agent prompt now explicitly treats on-disk file contents as the source of truth: it must re-read a file immediately before any edit/write and preserve direct user edits unless the user explicitly asked to remove them. That same instruction is also injected when prompt skills are activated.
+- File panel now supports read-only `.docx` preview by fetching raw file bytes and rendering them client-side with Mammoth; download remains the fallback for unsupported Word features/layout.
