@@ -26,15 +26,15 @@ Recommended baseline:
 SSH into the server, then install the required tools.
 
 ```bash
+# packages
+apt update
+apt install -y unzip caddy ripgrep
+
 # uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Bun
 curl -fsSL https://bun.sh/install | bash
-
-# packages
-apt update
-apt install -y caddy ripgrep
 
 source ~/.bashrc
 ```
