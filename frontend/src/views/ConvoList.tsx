@@ -348,16 +348,27 @@ export function ConvoList() {
       </div>
       <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0 }}>
         <button
-          style={btnDanger}
+          style={iconBtnStyle}
           onClick={() => handleArchiveToggle(c, !archivedView)}
           title={archivedView ? "Restore conversation" : "Archive conversation"}
+          aria-label={archivedView ? "Restore conversation" : "Archive conversation"}
+          data-tooltip={archivedView ? "Restore conversation" : "Archive conversation"}
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
         >
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-            {archivedView ? <RotateCcw size={13} /> : <Archive size={13} />}
-            {archivedView ? "Restore" : "Archive"}
-          </span>
+          {archivedView ? <RotateCcw size={16} /> : <Archive size={16} />}
         </button>
-        {archivedView && <button style={btnDanger} onClick={() => handleDelete(c.id)}>Delete</button>}
+        <button
+          style={iconBtnStyle}
+          onClick={() => handleDelete(c.id)}
+          title="Delete conversation"
+          aria-label="Delete conversation"
+          data-tooltip="Delete conversation"
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
+        >
+          <Trash2 size={16} />
+        </button>
       </div>
     </div>
   );

@@ -62,3 +62,4 @@
 - Conversation auto-titling now starts immediately after the first user message is appended (instead of waiting for the first assistant response), still preferring `gpt-5-nano` with existing fallback models.
 - File finder hidden-file UX is now simplified and robust: frontend always fetches the full file list (including dotfiles), while the finder only reveals hidden paths when the search query contains `.`; no special key interception or separate hold/toggle state remains.
 - Project conversation list now supports `Cmd+Shift+M` as a keyboard shortcut for creating a new conversation, while avoiding interception inside editable fields.
+- Conversation list cards now use icon-only archive/restore controls and always show a trash icon there as well, matching the compact action style requested for ConvoList.
