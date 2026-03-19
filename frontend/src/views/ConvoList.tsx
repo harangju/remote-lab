@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { FileFinder } from "../components/FileFinder";
-import { listFiles } from "../api";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Archive, Pencil, Plus, Trash2, ChevronDown, ChevronUp, RotateCcw, FolderOpen, MessageSquare, ArrowLeft } from "lucide-react";
-import { getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, listModels, type Project, type ConvoMeta, type AgentConfig } from "../api";
+import { FileFinder } from "../components/FileFinder";
+import { listFiles, getProject, listConvos, createConvo, updateConvo, updateProject, deleteConvo, listProjectAgents, saveProjectAgents, deleteProjectAgents, listModels, type Project, type ConvoMeta, type AgentConfig } from "../api";
 import { container, card, btnPrimary, btnDanger, btnIcon, badge, input as inputStyle } from "../styles";
+
 
 const iconBtnStyle: React.CSSProperties = {
   ...btnIcon,
@@ -60,7 +60,7 @@ export function ConvoList() {
       setLoading(true);
       setFileListLoading(true);
       try {
-        const [p, c, agentRes, m, fileRes] = await Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId), listModels(), listFiles(projectId)]);
+        const [p, c, agentRes, m, fileRes] = await Promise.all([getProject(projectId), listConvos(projectId), listProjectAgents(projectId), listModels(), listFiles(projectId, { hidden: true })]);
         if (cancelled) return;
         setProject(p);
         setConvos(c);
@@ -135,16 +135,25 @@ export function ConvoList() {
 
   const activeConvos = useMemo(() => convos.filter((c) => !c.archived_at), [convos]);
 
+  const refreshFileList = () => {
+    if (!projectId) return;
+    setFileListLoading(true);
+    listFiles(projectId, { hidden: true })
+      .then((res) => setFileList(res.files))
+      .catch(() => setFileList([]))
+      .finally(() => setFileListLoading(false));
+  };
+
   const toggleFileFinder = () => {
     if (!fileList && !fileListLoading && projectId) {
-      setFileListLoading(true);
-      listFiles(projectId)
-        .then((res) => setFileList(res.files))
-        .catch(() => setFileList([]))
-        .finally(() => setFileListLoading(false));
+      refreshFileList();
     }
     setShowFileFinder((v) => !v);
   };
+
+  useEffect(() => {
+    if (showFileFinder) refreshFileList();
+  }, [projectId, showFileFinder]);
 
   const archivedConvos = useMemo(() => convos.filter((c) => c.archived_at), [convos]);
 

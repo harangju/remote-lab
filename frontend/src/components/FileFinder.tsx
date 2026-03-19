@@ -112,12 +112,17 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
     setExpandedDirs(defaultExpandedDirs(files));
   }, [files]);
 
+  const effectiveShowHidden = query.includes(".");
+  const effectiveFiles = useMemo(() => {
+    if (effectiveShowHidden) return files;
+    return files.filter((path) => !path.split("/").some((part) => part.startsWith(".")));
+  }, [effectiveShowHidden, files]);
   const touchedSet = useMemo(() => new Set(touchedFiles), [touchedFiles]);
-  const tree = useMemo(() => buildTree(files), [files]);
+  const tree = useMemo(() => buildTree(effectiveFiles), [effectiveFiles]);
 
   const filtered = useMemo(() => {
     if (!query) return [] as string[];
-    return files
+    return effectiveFiles
       .filter((f) => fuzzyMatch(query, f))
       .sort((a, b) => {
         const touchedDelta = Number(touchedSet.has(b)) - Number(touchedSet.has(a));
@@ -125,15 +130,26 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
         return fuzzyScore(query, a) - fuzzyScore(query, b);
       })
       .slice(0, 200);
-  }, [files, query, touchedSet]);
+  }, [effectiveFiles, query, touchedSet]);
 
   const explorerRows = useMemo(() => flattenTree(tree, expandedDirs), [tree, expandedDirs]);
   const visibleRows = query
     ? filtered.map((path) => ({ type: "file" as const, path, depth: path.split("/").length - 1 }))
     : explorerRows;
 
+  const prevQueryRef = useRef(query);
+  const prevVisibleLenRef = useRef(visibleRows.length);
+
   useEffect(() => {
-    setSelectedIndex(0);
+    const queryChanged = prevQueryRef.current !== query;
+    const listWasEmpty = prevVisibleLenRef.current === 0;
+    if (queryChanged || listWasEmpty) {
+      setSelectedIndex(0);
+    } else {
+      setSelectedIndex((i) => Math.min(i, Math.max(visibleRows.length - 1, 0)));
+    }
+    prevQueryRef.current = query;
+    prevVisibleLenRef.current = visibleRows.length;
   }, [query, visibleRows.length]);
 
   useEffect(() => {
@@ -160,7 +176,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
     onClose();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     const row = visibleRows[selectedIndex];
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -230,7 +246,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Browse files or search..."
+            placeholder={effectiveShowHidden ? "Browse files or search... (hidden shown)" : "Browse files or search..."}
             style={{
               flex: 1,
               background: "none",
@@ -329,21 +345,24 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
           })}
         </div>
 
-        <div style={{
-          padding: "6px 14px",
-          borderTop: "1px solid var(--border)",
-          fontSize: "0.7rem",
-          color: "var(--text-muted)",
-          display: "flex",
-          gap: "12px",
-          flexWrap: "wrap",
-        }}>
+        <div
+          style={{
+            padding: "6px 14px",
+            borderTop: "1px solid var(--border)",
+            fontSize: "0.7rem",
+            color: "var(--text-muted)",
+            display: "flex",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
           <span>↑↓ navigate</span>
           <span>↵ open</span>
           {!query && <span>←→ fold</span>}
+          <span>. hidden</span>
           <span>esc close</span>
           <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-            <CornerDownLeft size={12} /> {query ? `${filtered.length} matches` : `${files.length} files`}
+            <CornerDownLeft size={12} /> {query ? `${filtered.length} matches` : `${effectiveFiles.length} files`}
           </span>
         </div>
       </div>

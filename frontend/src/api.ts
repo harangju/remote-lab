@@ -172,8 +172,11 @@ export function writeFile(projectId: string, path: string, content: string): Pro
   });
 }
 
-export function listFiles(projectId: string): Promise<{ root: string; files: string[] }> {
-  return request(`/projects/${projectId}/files`);
+export function listFiles(projectId: string, opts?: { hidden?: boolean }): Promise<{ root: string; files: string[] }> {
+  const params = new URLSearchParams();
+  if (opts?.hidden) params.set("hidden", "true");
+  const query = params.toString();
+  return request(`/projects/${projectId}/files${query ? `?${query}` : ""}`);
 }
 
 export async function uploadFiles(projectId: string, files: File[]): Promise<Attachment[]> {

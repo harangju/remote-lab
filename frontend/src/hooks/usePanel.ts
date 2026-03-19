@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { readFile, writeFile, listFiles } from "../api";
 
+
 export interface PanelFile {
   projectId: string;
   path: string;
@@ -17,6 +18,7 @@ export interface PanelState {
   showFileFinder: boolean;
   fileList: string[] | null;
   fileListLoading: boolean;
+  showHiddenFiles: boolean;
 }
 
 export interface PanelActions {
@@ -27,6 +29,7 @@ export interface PanelActions {
   saveFile: () => Promise<void>;
   cancelEdit: () => void;
   toggleFileFinder: () => void;
+  setShowHiddenFiles: (on: boolean) => void;
   applyExternalChange: (path: string) => void;
   reloadFile: () => void;
   dismissExternalChange: () => void;
@@ -157,16 +160,25 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     setEditModeRaw(false);
   }, []);
 
+  const refreshFileList = useCallback(() => {
+    if (!projectId) return;
+    setFileListLoading(true);
+    listFiles(projectId, { hidden: true })
+      .then((res) => setFileList(res.files))
+      .catch(() => setFileList([]))
+      .finally(() => setFileListLoading(false));
+  }, [projectId]);
+
   const toggleFileFinder = useCallback(() => {
     if (!fileList && !fileListLoading && projectId) {
-      setFileListLoading(true);
-      listFiles(projectId)
-        .then((res) => setFileList(res.files))
-        .catch(() => setFileList([]))
-        .finally(() => setFileListLoading(false));
+      refreshFileList();
     }
     setShowFileFinder((v) => !v);
-  }, [fileList, fileListLoading, projectId]);
+  }, [fileList, fileListLoading, projectId, refreshFileList]);
+
+  useEffect(() => {
+    if (showFileFinder) refreshFileList();
+  }, [refreshFileList, showFileFinder]);
 
   const upsertFileInList = useCallback((path: string) => {
     setFileList((prev) => {
@@ -211,9 +223,10 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
 
   return {
     file, editMode, dirty, saving, externalChange,
-    showFileFinder, fileList, fileListLoading,
+    showFileFinder, fileList, fileListLoading, showHiddenFiles: false,
     openFile, closePanel, setEditMode, updateContent,
     saveFile, cancelEdit, toggleFileFinder,
+    setShowHiddenFiles: () => {},
     applyExternalChange, reloadFile, dismissExternalChange, upsertFileInList, forceClose,
   };
 }

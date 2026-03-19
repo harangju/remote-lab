@@ -60,3 +60,4 @@
 - The agent prompt now explicitly treats on-disk file contents as the source of truth: it must re-read a file immediately before any edit/write and preserve direct user edits unless the user explicitly asked to remove them. That same instruction is also injected when prompt skills are activated.
 - File panel now supports read-only `.docx` preview by fetching raw file bytes and rendering them client-side with Mammoth; download remains the fallback for unsupported Word features/layout.
 - Conversation auto-titling now starts immediately after the first user message is appended (instead of waiting for the first assistant response), still preferring `gpt-5-nano` with existing fallback models.
+- File finder hidden-file UX is now simplified and robust: frontend always fetches the full file list (including dotfiles), while the finder only reveals hidden paths when the search query contains `.`; no special key interception or separate hold/toggle state remains.
