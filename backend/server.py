@@ -674,9 +674,6 @@ async def _run_agent_task(
         await _emit(done.model_dump_json())
         await _update_conversation_status(convo_id, ConvoStatus.done)
 
-        meta = storage._read_meta(convo_id)
-        if meta and meta.title == "Untitled":
-            asyncio.create_task(_auto_title(convo_id, prompt, run))
 
     except asyncio.CancelledError:
         run.status = "error"
@@ -1004,7 +1001,7 @@ async def api_upload_files(project_id: str, files: list[UploadFile] = File(...))
 
 
 @api.get("/projects/{project_id}/files")
-async def api_list_files(project_id: str):
+async def api_list_files(project_id: str, hidden: bool = False):
     proj = storage.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1013,9 +1010,12 @@ async def api_list_files(project_id: str):
         raise HTTPException(status_code=400, detail="Project path does not exist")
     files: list[str] = []
     for root, dirs, filenames in os.walk(project_path):
-        dirs[:] = [d for d in dirs if d not in _EXCLUDED_DIRS and not d.startswith(".")]
+        dirs[:] = [
+            d for d in dirs
+            if d not in _EXCLUDED_DIRS and (hidden or not d.startswith("."))
+        ]
         for f in sorted(filenames):
-            if f.startswith("."):
+            if not hidden and f.startswith("."):
                 continue
             rel = os.path.relpath(os.path.join(root, f), project_path)
             files.append(rel)
@@ -1686,6 +1686,11 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             if message_id:
                 processed_message_ids.setdefault(convo_id, set()).add(message_id)
                 await ws.send_text(MessageAck(message_id=message_id).model_dump_json())
+
+            current_meta = storage._read_meta(convo_id)
+            if current_meta and current_meta.title == "Untitled":
+                title_run = session.run or RunState(convo_id=convo_id, run_id=_new_run_id())
+                asyncio.create_task(_auto_title(convo_id, prompt, title_run))
 
             await _update_conversation_status(convo_id, ConvoStatus.running)
 
