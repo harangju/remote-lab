@@ -32,6 +32,7 @@ apt install -y unzip caddy ripgrep
 
 # uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
+install -m 755 ~/.local/bin/uv /usr/local/bin/uv
 
 # Bun
 curl -fsSL https://bun.sh/install | bash

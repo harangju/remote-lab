@@ -51,6 +51,7 @@ apt update && apt install -y fail2ban
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+install -m 755 ~/.local/bin/uv /usr/local/bin/uv
 curl -fsSL https://bun.sh/install | bash
 apt install -y caddy ripgrep
 source ~/.bashrc
