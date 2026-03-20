@@ -838,6 +838,7 @@ export function Chat() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [slashIdx, setSlashIdx] = useState(0);
+  const mentionRefreshInFlightRef = useRef(false);
   // Track active agent info during streaming (for multi-agent labeling)
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
@@ -1006,6 +1007,18 @@ export function Chat() {
     }
     return Array.from(paths);
   }, [messages, streamBlocks]);
+
+  const refreshMentionFiles = useCallback(async () => {
+    if (!projectId || mentionRefreshInFlightRef.current) return;
+    mentionRefreshInFlightRef.current = true;
+    try {
+      const res = await listFiles(projectId);
+      setProjectFiles(res.files);
+    } catch {}
+    finally {
+      mentionRefreshInFlightRef.current = false;
+    }
+  }, [projectId]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1286,6 +1299,7 @@ export function Chat() {
         }
         case "file-changed": {
           panel.applyExternalChange(data.path);
+          setProjectFiles((prev) => prev.includes(data.path) ? prev : [...prev, data.path].sort());
           break;
         }
         case "tool-confirm": {
@@ -1519,6 +1533,7 @@ export function Chat() {
     const before = val.slice(0, pos);
     const atMatch = before.match(/@([\w./\-]*)$/);
     if (atMatch) {
+      if (mentionQuery === null) void refreshMentionFiles();
       setMentionQuery(atMatch[1]);
       setMentionIdx(0);
     } else {
