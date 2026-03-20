@@ -641,9 +641,11 @@ const INITIAL_HISTORY_PAGE_SIZE = 100;
 const OLDER_HISTORY_PAGE_SIZE = 100;
 const PANEL_MIN_WIDTH = 320;
 const PANEL_MAX_WIDTH_RATIO = 0.75;
+const PANEL_DEFAULT_WIDTH_RATIO = 0.36;
 const PANEL_RESIZE_HIT_WIDTH = 14;
 const PANEL_RESIZE_VISIBLE_WIDTH = 4;
 const PANEL_RESIZE_ACTIVATION_DELTA = 3;
+const CHAT_PANEL_RATIO_STORAGE_KEY = "remote-lab:chat-panel-width-ratio";
 
 function blockIdentity(block: StreamBlock): string {
   if (block.type === "tool") return `tool:${block.run_id || ""}:${block.tool_call_id || block.name}:${block.input || ""}:${block.output || ""}`;
@@ -1919,7 +1921,15 @@ export function Chat() {
   };
 
   // Resizable panel width
-  const [panelWidth, setPanelWidth] = useState(500);
+  const [panelWidth, setPanelWidth] = useState(() => {
+    if (typeof window === "undefined") return 500;
+    const maxWidth = Math.floor(window.innerWidth * PANEL_MAX_WIDTH_RATIO);
+    const storedRatio = Number(window.localStorage.getItem(CHAT_PANEL_RATIO_STORAGE_KEY));
+    const ratio = Number.isFinite(storedRatio) && storedRatio > 0
+      ? Math.min(PANEL_MAX_WIDTH_RATIO, Math.max(PANEL_MIN_WIDTH / window.innerWidth, storedRatio))
+      : PANEL_DEFAULT_WIDTH_RATIO;
+    return Math.max(PANEL_MIN_WIDTH, Math.min(maxWidth, Math.round(window.innerWidth * ratio)));
+  });
   const [panelResizeActive, setPanelResizeActive] = useState(false);
   const dragging = useRef(false);
   const dragActivatedRef = useRef(false);
@@ -1944,7 +1954,9 @@ export function Chat() {
       if (!dragActivatedRef.current && Math.abs(delta) < PANEL_RESIZE_ACTIVATION_DELTA) return;
       dragActivatedRef.current = true;
       setPanelResizeActive(true);
-      setPanelWidth(Math.max(PANEL_MIN_WIDTH, Math.min(maxWidth, startWidth + delta)));
+      const nextWidth = Math.max(PANEL_MIN_WIDTH, Math.min(maxWidth, startWidth + delta));
+      setPanelWidth(nextWidth);
+      window.localStorage.setItem(CHAT_PANEL_RATIO_STORAGE_KEY, String(nextWidth / window.innerWidth));
     };
     const onMouseUp = () => {
       dragging.current = false;
@@ -1960,6 +1972,20 @@ export function Chat() {
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
   }, [panelWidth]);
+
+  useEffect(() => {
+    if (!panel.file || typeof window === "undefined") return;
+    const onResize = () => {
+      const maxWidth = Math.floor(window.innerWidth * PANEL_MAX_WIDTH_RATIO);
+      const storedRatio = Number(window.localStorage.getItem(CHAT_PANEL_RATIO_STORAGE_KEY));
+      const ratio = Number.isFinite(storedRatio) && storedRatio > 0
+        ? Math.min(PANEL_MAX_WIDTH_RATIO, Math.max(PANEL_MIN_WIDTH / window.innerWidth, storedRatio))
+        : Math.min(PANEL_MAX_WIDTH_RATIO, Math.max(PANEL_MIN_WIDTH / window.innerWidth, PANEL_DEFAULT_WIDTH_RATIO));
+      setPanelWidth(Math.max(PANEL_MIN_WIDTH, Math.min(maxWidth, Math.round(window.innerWidth * ratio))));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [panel.file]);
 
   useEffect(() => {
     if (!voiceUiActive) {
