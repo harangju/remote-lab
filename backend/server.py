@@ -415,6 +415,7 @@ async def _run_bash_command_task(run: RunState, command: str, convo_id: str) -> 
             run_id=run.run_id,
             args=json.dumps(command_input),
             can_allow_project=not always_confirm,
+            can_turn_on_auto=not always_confirm,
         ).model_dump_json())
         await run.approval_event.wait()
         approved = bool(run.approval_decisions.get(tool_call_id, False))
@@ -676,6 +677,7 @@ async def _run_agent_task(
                             args=str(tool_call.args)[:500] if tool_call.args else None,
                             agent_id=agent_id,
                             can_allow_project=not always_confirm,
+                            can_turn_on_auto=not always_confirm,
                         ).model_dump_json())
 
                     if run.pending_approvals:
