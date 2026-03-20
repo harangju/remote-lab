@@ -64,7 +64,5 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(<App />);
 
-// Register service worker for PWA
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
-}
+// Service worker registration temporarily disabled.
+// The app should behave as a normal web app until SW behavior is proven safe.
