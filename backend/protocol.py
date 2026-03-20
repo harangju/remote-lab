@@ -69,6 +69,7 @@ class ToolResult(BaseModel):
     type: Literal["tool-result"] = "tool-result"
     name: str
     output: str
+    diff: str | None = None
     run_id: str
     agent_id: str | None = None
 

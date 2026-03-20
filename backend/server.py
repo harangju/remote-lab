@@ -194,7 +194,29 @@ def _user_event(content: str, message_id: str | None = None, attachments: list[d
     return event
 
 
-def _tool_event(name: str, *, event_type: str = "tool-result", input: str | None = None, output: str | None = None, run_id: str | None = None, agent_id: str | None = None, tool_call_id: str | None = None) -> dict[str, Any]:
+def _parse_tool_content(name: str, raw: Any) -> tuple[str, str | None]:
+    """Extract (output, diff) from a tool result.
+
+    For edit_file the tool returns a JSON string with {output, diff}.
+    For everything else just stringify the content.
+    """
+    if raw is None:
+        return "OK", None
+    text = str(raw)[:500]
+    if name != "edit_file":
+        return text, None
+    # edit_file returns json.dumps({"output": ..., "diff": ...})
+    src = raw if isinstance(raw, str) else str(raw)
+    try:
+        parsed = json.loads(src)
+        if isinstance(parsed, dict):
+            return str(parsed.get("output") or parsed.get("status") or "OK")[:500], parsed.get("diff")
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return text, None
+
+
+def _tool_event(name: str, *, event_type: str = "tool-result", input: str | None = None, output: str | None = None, diff: str | None = None, run_id: str | None = None, agent_id: str | None = None, tool_call_id: str | None = None) -> dict[str, Any]:
     event: dict[str, Any] = {
         "type": event_type,
         "role": "tool",
@@ -205,6 +227,8 @@ def _tool_event(name: str, *, event_type: str = "tool-result", input: str | None
         event["input"] = input
     if output is not None:
         event["output"] = output
+    if diff is not None:
+        event["diff"] = diff
     if run_id:
         event["run_id"] = run_id
     if agent_id:
@@ -633,15 +657,21 @@ async def _run_agent_task(
                                     await _append_event(convo_id, ev)
                                     await _emit(json.dumps({**ev, "type": "tool-use"}))
                                 elif isinstance(event, FunctionToolResultEvent):
-                                    output = str(event.content)[:500] if event.content else "OK"
+                                    tool_name = event.result.tool_name if hasattr(event.result, "tool_name") else ""
+                                    raw_content = getattr(event.result, "content", None)
+                                    if raw_content is None:
+                                        raw_content = event.content
+                                    output, diff = _parse_tool_content(tool_name, raw_content)
                                     ev = {
                                         "type": "tool-result",
-                                        "name": event.result.tool_name if hasattr(event.result, "tool_name") else "",
+                                        "name": tool_name,
                                         "output": output,
                                         "tool_call_id": getattr(event.result, "tool_call_id", "") or "",
                                         "timestamp": _iso_now(),
                                         "run_id": run.run_id,
                                     }
+                                    if diff is not None:
+                                        ev["diff"] = diff
                                     if agent_id:
                                         ev["agent_id"] = agent_id
                                     await _append_event(convo_id, ev)

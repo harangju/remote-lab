@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import os
 import signal
@@ -167,14 +168,28 @@ async def _edit_file(ctx: RunContext, path: str, old_string: str, new_string: st
         result = "Error: path outside working directory"
         return result
     try:
-        text = p.read_text()
-        if old_string not in text:
+        before_text = p.read_text()
+        if old_string not in before_text:
             result = "Error: old_string not found in file"
             return result
-        text = text.replace(old_string, new_string, 1)
-        p.write_text(text)
+        after_text = before_text.replace(old_string, new_string, 1)
+        p.write_text(after_text)
+        diff_lines = list(
+            difflib.unified_diff(
+                before_text.splitlines(),
+                after_text.splitlines(),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+                lineterm="",
+                n=3,
+            )
+        )
         await _notify_file_changed(path, "updated")
-        return "OK"
+        return json.dumps({
+            "status": "OK",
+            "output": "OK",
+            "diff": "\n".join(diff_lines),
+        })
     except Exception as e:
         result = f"Error: {e}"
         return result

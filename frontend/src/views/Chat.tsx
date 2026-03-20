@@ -31,6 +31,7 @@ interface ToolCall {
   name: string;
   input?: string;
   output?: string;
+  diff?: string;
   liveOutput?: string;
 }
 
@@ -38,7 +39,7 @@ type ApprovalScope = "once" | "project" | "auto";
 
 type StreamBlock =
   | { type: "text"; content: string }
-  | { type: "tool"; name: string; input?: string; output?: string; liveOutput?: string; tool_call_id?: string; run_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; canTurnOnAuto?: boolean; approvedScope?: ApprovalScope }
+  | { type: "tool"; name: string; input?: string; output?: string; diff?: string; liveOutput?: string; tool_call_id?: string; run_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; canTurnOnAuto?: boolean; approvedScope?: ApprovalScope }
   | { type: "system"; content: string; tone?: "error" | "info" };
 
 interface DisplayMessage {
@@ -171,11 +172,6 @@ function extractShareUrl(name: string, input?: string): string | null {
   return plainMatch ? plainMatch[0] : null;
 }
 
-function countLines(text: string): number {
-  if (!text) return 0;
-  return text.split("\n").length;
-}
-
 type DiffToken = { text: string; kind: "equal" | "add" | "remove" };
 type DiffLine = {
   type: "add" | "remove";
@@ -186,126 +182,67 @@ type DiffLine = {
 type EditDiffPreview = {
   summary: string | null;
   lines: DiffLine[];
-  additions: number;
-  deletions: number;
   truncated: boolean;
 };
 
-function diffWords(oldLine: string, newLine: string): { removed: DiffToken[]; added: DiffToken[] } {
-  const tokenize = (value: string) => value.match(/\s+|[^\s]+/g) || [];
-  const oldTokens = tokenize(oldLine);
-  const newTokens = tokenize(newLine);
-  let start = 0;
-  while (start < oldTokens.length && start < newTokens.length && oldTokens[start] === newTokens[start]) start += 1;
-
-  let oldEnd = oldTokens.length - 1;
-  let newEnd = newTokens.length - 1;
-  while (oldEnd >= start && newEnd >= start && oldTokens[oldEnd] === newTokens[newEnd]) {
-    oldEnd -= 1;
-    newEnd -= 1;
-  }
-
-  const removed: DiffToken[] = [];
-  const added: DiffToken[] = [];
-
-  for (let i = 0; i < start; i += 1) {
-    removed.push({ text: oldTokens[i], kind: "equal" });
-    added.push({ text: newTokens[i], kind: "equal" });
-  }
-  for (let i = start; i <= oldEnd; i += 1) removed.push({ text: oldTokens[i], kind: "remove" });
-  for (let i = start; i <= newEnd; i += 1) added.push({ text: newTokens[i], kind: "add" });
-  for (let i = oldEnd + 1, j = newEnd + 1; i < oldTokens.length && j < newTokens.length; i += 1, j += 1) {
-    removed.push({ text: oldTokens[i], kind: "equal" });
-    added.push({ text: newTokens[j], kind: "equal" });
-  }
-
-  return { removed, added };
-}
-
-function buildEditDiffPreview(input?: string): EditDiffPreview | null {
-  const parsed = parseToolInput(input);
-  if (!parsed) return null;
-  const oldString = typeof parsed.old_string === "string" ? parsed.old_string : null;
-  const newString = typeof parsed.new_string === "string" ? parsed.new_string : null;
-  if (oldString == null || newString == null) return null;
-
-  const oldLines = oldString.split("\n");
-  const newLines = newString.split("\n");
-  const additions = Math.max(0, countLines(newString) - countLines(oldString));
-  const deletions = Math.max(0, countLines(oldString) - countLines(newString));
-  const maxRenderedRows = 40;
-  const lines: DiffLine[] = [];
+function buildEditDiffPreview(diff?: string): EditDiffPreview | null {
+  if (!diff) return null;
+  const lines = diff.split("\n");
+  const previewLines: DiffLine[] = [];
+  let oldLineNumber = 0;
+  let newLineNumber = 0;
+  let additions = 0;
+  let deletions = 0;
   let truncated = false;
-  let oldIdx = 0;
-  let newIdx = 0;
+  const maxRenderedRows = 40;
 
-  while (oldIdx < oldLines.length || newIdx < newLines.length) {
-    if (lines.length >= maxRenderedRows) {
-      truncated = true;
-      break;
-    }
-
-    const oldLine = oldLines[oldIdx];
-    const newLine = newLines[newIdx];
-
-    if (oldLine === newLine) {
-      oldIdx += 1;
-      newIdx += 1;
-      continue;
-    }
-
-    const nextOld = oldIdx + 1 < oldLines.length ? oldLines[oldIdx + 1] : null;
-    const nextNew = newIdx + 1 < newLines.length ? newLines[newIdx + 1] : null;
-
-    if (nextOld !== null && nextOld === newLine) {
-      lines.push({ type: "remove", lineNumber: oldIdx + 1, tokens: [{ text: oldLine, kind: "remove" }] });
-      oldIdx += 1;
-      continue;
-    }
-
-    if (nextNew !== null && oldLine === nextNew) {
-      lines.push({ type: "add", lineNumber: newIdx + 1, tokens: [{ text: newLine, kind: "add" }] });
-      newIdx += 1;
-      continue;
-    }
-
-    if (oldLine != null && newLine != null) {
-      const tokenDiff = diffWords(oldLine, newLine);
-      lines.push({ type: "remove", lineNumber: oldIdx + 1, tokens: tokenDiff.removed });
-      if (lines.length >= maxRenderedRows) {
-        truncated = true;
-        break;
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (match) {
+        oldLineNumber = Number(match[1]);
+        newLineNumber = Number(match[2]);
       }
-      lines.push({ type: "add", lineNumber: newIdx + 1, tokens: tokenDiff.added });
-      oldIdx += 1;
-      newIdx += 1;
       continue;
     }
-
-    if (oldLine != null) {
-      lines.push({ type: "remove", lineNumber: oldIdx + 1, tokens: [{ text: oldLine, kind: "remove" }] });
-      oldIdx += 1;
+    if (line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("\\ No newline")) {
       continue;
     }
-
-    if (newLine != null) {
-      lines.push({ type: "add", lineNumber: newIdx + 1, tokens: [{ text: newLine, kind: "add" }] });
-      newIdx += 1;
+    if (line.startsWith("+")) {
+      additions += 1;
+      if (previewLines.length < maxRenderedRows) {
+        previewLines.push({ type: "add", lineNumber: newLineNumber || null, tokens: [{ text: line.slice(1), kind: "add" }] });
+      } else {
+        truncated = true;
+      }
+      newLineNumber += 1;
+      continue;
+    }
+    if (line.startsWith("-")) {
+      deletions += 1;
+      if (previewLines.length < maxRenderedRows) {
+        previewLines.push({ type: "remove", lineNumber: oldLineNumber || null, tokens: [{ text: line.slice(1), kind: "remove" }] });
+      } else {
+        truncated = true;
+      }
+      oldLineNumber += 1;
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      oldLineNumber += 1;
+      newLineNumber += 1;
     }
   }
 
-  if (lines.length === 0) {
-    return { summary: "no visible line change", lines: [], additions, deletions, truncated: false };
-  }
-
-  const addedRows = lines.filter((line) => line.type === "add").length;
-  const removedRows = lines.filter((line) => line.type === "remove").length;
+  if (previewLines.length === 0) return null;
   const summaryBits: string[] = [];
-  if (addedRows > 0) summaryBits.push(`+${addedRows}`);
-  if (removedRows > 0) summaryBits.push(`-${removedRows}`);
-  const summary = summaryBits.length > 0 ? summaryBits.join(" ") : "edited";
-
-  return { summary, lines, additions, deletions, truncated };
+  if (additions > 0) summaryBits.push(`+${additions}`);
+  if (deletions > 0) summaryBits.push(`-${deletions}`);
+  return {
+    summary: summaryBits.length > 0 ? summaryBits.join(" ") : "edited",
+    lines: previewLines,
+    truncated,
+  };
 }
 
 function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond, autonomousToolsEnabled }: {
@@ -319,7 +256,7 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond, auto
   const [manualOpen, setManualOpen] = useState(defaultOpen);
   const preRef = useRef<HTMLPreElement>(null);
   const Icon = toolIcons[tool.name] || Settings;
-  const editDiff = tool.name === "edit_file" ? buildEditDiffPreview(tool.input) : null;
+  const editDiff = tool.name === "edit_file" ? buildEditDiffPreview(tool.diff) : null;
   const hasDiffPreview = !!editDiff && editDiff.lines.length > 0;
   const hasDetail = !!(tool.input || tool.output || hasDiffPreview);
   const summary = editDiff?.summary ? `${toolSummary(tool.name, tool.input) || tool.name} (${editDiff.summary})` : toolSummary(tool.name, tool.input);
@@ -866,15 +803,15 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
     if (type === "tool-result") {
       if (!mAny.tool_call_id) {
         flushPending();
-        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, run_id: mAny.run_id || undefined });
+        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, diff: typeof mAny.diff === "string" ? mAny.diff : undefined, run_id: mAny.run_id || undefined });
         continue;
       }
       const idx = toolIndexById.get(mAny.tool_call_id);
       if (idx != null && pendingBlocks[idx]?.type === "tool") {
         const existing = pendingBlocks[idx];
-        pendingBlocks[idx] = { ...existing, output: mAny.output ?? existing.liveOutput ?? existing.output, input: mAny.input ?? existing.input, liveOutput: undefined };
+        pendingBlocks[idx] = { ...existing, output: mAny.output ?? existing.liveOutput ?? existing.output, input: mAny.input ?? existing.input, diff: typeof mAny.diff === "string" ? mAny.diff : existing.diff, liveOutput: undefined };
       } else {
-        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
+        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, diff: typeof mAny.diff === "string" ? mAny.diff : undefined, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
       }
       continue;
     }
@@ -930,7 +867,7 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
     }
 
     if (mAny.role === "tool") {
-      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
+      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, diff: typeof mAny.diff === "string" ? mAny.diff : undefined, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
       if (mAny.tool_call_id) toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
     }
   }
@@ -1423,13 +1360,13 @@ export function Chat() {
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (b.type === "tool" && (data.tool_call_id ? b.tool_call_id === data.tool_call_id : b.name === data.name) && !b.output) {
-              blocks[i] = { ...b, output: b.liveOutput || data.output, liveOutput: undefined };
+              blocks[i] = { ...b, output: b.liveOutput || data.output, diff: data.diff ?? b.diff, liveOutput: undefined };
               matched = true;
               break;
             }
           }
           if (!matched) {
-            blocks.push({ type: "tool", name: data.name, output: data.output, tool_call_id: data.tool_call_id, run_id: data.run_id });
+            blocks.push({ type: "tool", name: data.name, output: data.output, diff: data.diff, tool_call_id: data.tool_call_id, run_id: data.run_id });
           }
           blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
