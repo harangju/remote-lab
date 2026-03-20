@@ -81,10 +81,16 @@ If you add or copy project files later as another user, fix ownership again or u
 
 ## 5. Configure Caddy
 
-In this step, you are editing Caddy's config on the server so your domain forwards traffic to Remote Lab.
+In this step, you are doing two things:
 
-1. Make sure your domain or subdomain (for example `lab.example.com`) points to your VPS IP.
-2. Open Caddy's config file:
+1. setting DNS so your domain points to your VPS
+2. editing Caddy's config on the server so that domain forwards traffic to Remote Lab
+
+First, go to wherever your domain is managed and create an `A` record for your subdomain. For example, if your server IP is `203.0.113.10`, create:
+
+- `lab.example.com -> 203.0.113.10`
+
+2. On the server, open Caddy's config file:
 
 ```bash
 sudo nano /etc/caddy/Caddyfile
