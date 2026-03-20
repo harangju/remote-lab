@@ -639,6 +639,11 @@ const CHAT_INPUT_MAX_WIDTH = "64rem";
 const MESSAGE_MAX_WIDTH = "92%";
 const INITIAL_HISTORY_PAGE_SIZE = 100;
 const OLDER_HISTORY_PAGE_SIZE = 100;
+const PANEL_MIN_WIDTH = 320;
+const PANEL_MAX_WIDTH_RATIO = 0.75;
+const PANEL_RESIZE_HIT_WIDTH = 14;
+const PANEL_RESIZE_VISIBLE_WIDTH = 4;
+const PANEL_RESIZE_ACTIVATION_DELTA = 3;
 
 function blockIdentity(block: StreamBlock): string {
   if (block.type === "tool") return `tool:${block.run_id || ""}:${block.tool_call_id || block.name}:${block.input || ""}:${block.output || ""}`;
@@ -1915,7 +1920,9 @@ export function Chat() {
 
   // Resizable panel width
   const [panelWidth, setPanelWidth] = useState(500);
+  const [panelResizeActive, setPanelResizeActive] = useState(false);
   const dragging = useRef(false);
+  const dragActivatedRef = useRef(false);
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   const isBashMode = input.startsWith("!");
   const inputPlaceholder = busy || uploadingAttachments
@@ -1927,15 +1934,22 @@ export function Chat() {
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     dragging.current = true;
+    dragActivatedRef.current = false;
     const startX = e.clientX;
     const startWidth = panelWidth;
+    const maxWidth = Math.floor(window.innerWidth * PANEL_MAX_WIDTH_RATIO);
     const onMouseMove = (e: MouseEvent) => {
       if (!dragging.current) return;
       const delta = startX - e.clientX;
-      setPanelWidth(Math.max(280, Math.min(window.innerWidth * 0.7, startWidth + delta)));
+      if (!dragActivatedRef.current && Math.abs(delta) < PANEL_RESIZE_ACTIVATION_DELTA) return;
+      dragActivatedRef.current = true;
+      setPanelResizeActive(true);
+      setPanelWidth(Math.max(PANEL_MIN_WIDTH, Math.min(maxWidth, startWidth + delta)));
     };
     const onMouseUp = () => {
       dragging.current = false;
+      dragActivatedRef.current = false;
+      setPanelResizeActive(false);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
       document.body.style.cursor = "";
@@ -2782,16 +2796,37 @@ export function Chat() {
         <div
           onMouseDown={onDragStart}
           style={{
-            width: "5px",
+            width: `${PANEL_RESIZE_HIT_WIDTH}px`,
+            marginLeft: `${-Math.floor(PANEL_RESIZE_HIT_WIDTH / 2)}px`,
+            marginRight: `${-Math.floor(PANEL_RESIZE_HIT_WIDTH / 2)}px`,
             cursor: "col-resize",
             background: "transparent",
             flexShrink: 0,
             position: "relative",
             zIndex: 10,
+            touchAction: "none",
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-          onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = "transparent"; }}
-        />
+          onMouseEnter={(e) => {
+            if (!panelResizeActive) e.currentTarget.style.background = "transparent";
+          }}
+          onMouseLeave={(e) => {
+            if (!dragging.current && !panelResizeActive) e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <div style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `calc(50% - ${PANEL_RESIZE_VISIBLE_WIDTH / 2}px)`,
+            width: `${PANEL_RESIZE_VISIBLE_WIDTH}px`,
+            borderRadius: 999,
+            background: panelResizeActive
+              ? "color-mix(in srgb, var(--accent) 55%, var(--border))"
+              : "var(--border)",
+            opacity: panelResizeActive ? 1 : 0.45,
+            boxShadow: panelResizeActive ? "0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
+          }} />
+        </div>
         <div
           className="artifact-panel-wrap"
           style={{
@@ -2799,6 +2834,7 @@ export function Chat() {
             flexShrink: 0,
             height: "calc(var(--vh, 1vh) * 100)",
             overflow: "hidden",
+            pointerEvents: panelResizeActive ? "none" : undefined,
           }}
         >
           <FilePanel
