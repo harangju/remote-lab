@@ -80,9 +80,10 @@ The service runs as `www-data`.
 ```bash
 sudo chown -R www-data:www-data /srv/remote-lab
 sudo chown -R www-data:www-data /srv/projects
+sudo chown -R www-data:www-data /var/www
 ```
 
-Projects typically live under `/srv/projects/`. If files are later created by `root` or another user, the agent may lose write access.
+Projects typically live under `/srv/projects/`. If files are later created by `root` or another user, the agent may lose write access. `/var/www` must also be writable by `www-data` so `uv` can create its cache under `/var/www/.cache/uv`.
 
 ## 7. Configure git for the agent
 

@@ -72,4 +72,5 @@
 - Project list cards now match ConvoList’s compact actions: archive/restore is icon-only and a trash icon is always shown alongside it.
 - `docs/getting-started.md` step 5 (Configure Caddy) now explains the concrete actions: set the DNS `A` record for the subdomain, edit `/etc/caddy/Caddyfile`, add a reverse-proxy block for the domain, and reload Caddy.
 - `docs/getting-started.md` and `docs/reference/deployment.md` now make the `uv` install path explicit by copying `~/.local/bin/uv` to `/usr/local/bin/uv`, so the documented systemd `ExecStart=/usr/local/bin/uv ...` matches fresh installs.
+- Those docs now also require `sudo chown -R www-data:www-data /var/www` so `uv` can create its cache under `/var/www/.cache/uv` when the service runs as `www-data`.
 - Agent image attachments now flow into PydanticAI as real multimodal `BinaryImage` content instead of only textual `[Attached image: ...]` markers, while non-image attachments still remain path references. Conversation compaction was updated to summarize binary attachments safely.

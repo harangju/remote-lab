@@ -76,9 +76,10 @@ The app runs as `www-data`.
 ```bash
 sudo chown -R www-data:www-data /srv/remote-lab
 sudo chown -R www-data:www-data /srv/projects
+sudo chown -R www-data:www-data /var/www
 ```
 
-If you add or copy project files later as another user, fix ownership again or use the ACL approach described in [Operations](reference/operations.md).
+If you add or copy project files later as another user, fix ownership again or use the ACL approach described in [Operations](reference/operations.md). `/var/www` also needs to be writable by `www-data` so `uv` can create its cache under `/var/www/.cache/uv`.
 
 ## 5. Configure Caddy
 
