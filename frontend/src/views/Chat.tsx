@@ -174,7 +174,7 @@ function extractShareUrl(name: string, input?: string): string | null {
 
 type DiffToken = { text: string; kind: "equal" | "add" | "remove" };
 type DiffLine = {
-  type: "add" | "remove";
+  type: "add" | "remove" | "context";
   lineNumber: number | null;
   tokens: DiffToken[];
 };
@@ -229,6 +229,11 @@ function buildEditDiffPreview(diff?: string): EditDiffPreview | null {
       continue;
     }
     if (line.startsWith(" ")) {
+      if (previewLines.length < maxRenderedRows) {
+        previewLines.push({ type: "context", lineNumber: oldLineNumber || null, tokens: [{ text: line.slice(1), kind: "equal" }] });
+      } else {
+        truncated = true;
+      }
       oldLineNumber += 1;
       newLineNumber += 1;
     }
@@ -360,8 +365,10 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond, auto
               fontSize: "0.75rem",
             }}>
               {editDiff.lines.map((line, idx) => {
-                const rowBg = line.type === "add" ? "rgba(77, 147, 117, 0.12)" : "rgba(196, 85, 77, 0.12)";
-                const tokenBg = line.type === "add" ? "rgba(77, 147, 117, 0.28)" : "rgba(196, 85, 77, 0.28)";
+                const rowBg = line.type === "add" ? "rgba(77, 147, 117, 0.12)" : line.type === "remove" ? "rgba(196, 85, 77, 0.12)" : "transparent";
+                const tokenBg = line.type === "add" ? "rgba(77, 147, 117, 0.28)" : line.type === "remove" ? "rgba(196, 85, 77, 0.28)" : "transparent";
+                const sigil = line.type === "add" ? "+" : line.type === "remove" ? "-" : " ";
+                const sigilColor = line.type === "add" ? "#4d9375" : line.type === "remove" ? "#c4554d" : "transparent";
                 return (
                   <div key={`${line.type}-${line.lineNumber}-${idx}`} style={{
                     display: "grid",
@@ -373,7 +380,7 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond, auto
                     color: "var(--text)",
                   }}>
                     <span style={{ color: "var(--text-muted)", textAlign: "right", userSelect: "none" }}>{line.lineNumber ?? ""}</span>
-                    <span style={{ color: line.type === "add" ? "#4d9375" : "#c4554d", userSelect: "none" }}>{line.type === "add" ? "+" : "-"}</span>
+                    <span style={{ color: sigilColor, userSelect: "none" }}>{sigil}</span>
                     <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", textIndent: 0, paddingLeft: 0, marginLeft: 0 }}>
                       {line.tokens.map((token, tokenIdx) => (
                         <span key={tokenIdx} style={token.kind === "equal" ? undefined : {
