@@ -81,7 +81,16 @@ If you add or copy project files later as another user, fix ownership again or u
 
 ## 5. Configure Caddy
 
-Point your domain to the server, then add a Caddy site:
+In this step, you are editing Caddy's config on the server so your domain forwards traffic to Remote Lab.
+
+1. Make sure your domain or subdomain (for example `lab.example.com`) points to your VPS IP.
+2. Open Caddy's config file:
+
+```bash
+sudo nano /etc/caddy/Caddyfile
+```
+
+3. Add a site block like this:
 
 ```caddy
 lab.yourdomain.com {
@@ -89,11 +98,17 @@ lab.yourdomain.com {
 }
 ```
 
-Reload Caddy:
+Replace `lab.yourdomain.com` with your real domain.
+
+This means: when someone visits that domain, Caddy should send the request to Remote Lab running locally on port `3000`.
+
+4. Save the file, then reload Caddy:
 
 ```bash
-systemctl reload caddy
+sudo systemctl reload caddy
 ```
+
+After this, requests to `https://lab.yourdomain.com` will go through Caddy to the app.
 
 ## 6. Create the systemd service
 

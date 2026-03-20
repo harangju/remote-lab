@@ -70,3 +70,4 @@
 - Follow-up refinement: for `edit_file`, the diff is now the chip body itself rather than a separate expanded panel below the header, matching the user's intent that the visible chip/gutter should be the diff instead of any raw JSON or detached detail area.
 - Fixed live conversation auto-title updates: auto-title no longer tries to broadcast via a speculative `RunState` created before the real run exists. It now broadcasts directly to the conversation session subscribers (and appends into the active run buffer when present), so first-message title updates reach the live chat header without requiring reload.
 - Project list cards now match ConvoList’s compact actions: archive/restore is icon-only and a trash icon is always shown alongside it.
+- `docs/getting-started.md` step 5 (Configure Caddy) now explains the concrete action: edit `/etc/caddy/Caddyfile`, add a reverse-proxy block for the domain, and reload Caddy.
