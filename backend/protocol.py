@@ -107,6 +107,7 @@ class ToolConfirm(BaseModel):
     args: dict | str | None = None
     agent_id: str | None = None
     can_allow_project: bool = True
+    can_turn_on_auto: bool = True
 
 
 class TitleUpdated(BaseModel):

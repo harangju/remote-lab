@@ -34,11 +34,11 @@ interface ToolCall {
   liveOutput?: string;
 }
 
-type ApprovalScope = "once" | "project";
+type ApprovalScope = "once" | "project" | "auto";
 
 type StreamBlock =
   | { type: "text"; content: string }
-  | { type: "tool"; name: string; input?: string; output?: string; liveOutput?: string; tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope }
+  | { type: "tool"; name: string; input?: string; output?: string; liveOutput?: string; tool_call_id?: string; run_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; canTurnOnAuto?: boolean; approvedScope?: ApprovalScope }
   | { type: "system"; content: string; tone?: "error" | "info" };
 
 interface DisplayMessage {
@@ -308,12 +308,13 @@ function buildEditDiffPreview(input?: string): EditDiffPreview | null {
   return { summary, lines, additions, deletions, truncated };
 }
 
-function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
-  tool: ToolCall & { tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; approvedScope?: ApprovalScope };
+function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond, autonomousToolsEnabled }: {
+  tool: ToolCall & { tool_call_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; canTurnOnAuto?: boolean; approvedScope?: ApprovalScope };
   live?: boolean;
   defaultOpen?: boolean;
   onOpenFile?: (path: string) => void;
   onRespond?: (toolCallId: string, approved: boolean, scope?: ApprovalScope) => void;
+  autonomousToolsEnabled?: boolean;
 }) {
   const [manualOpen, setManualOpen] = useState(defaultOpen);
   const preRef = useRef<HTMLPreElement>(null);
@@ -329,6 +330,7 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
   const approvalPending = !!tool.awaitingApproval && tool.approvalStatus !== "approved" && tool.approvalStatus !== "denied";
   const approvalDenied = tool.approvalStatus === "denied";
   const approvalApproved = tool.approvalStatus === "approved";
+  const autoTurnedOn = autonomousToolsEnabled || tool.approvedScope === "auto";
   const showStatusSlot = live || !!tool.output || approvalPending || approvalDenied || approvalApproved || (isFileOp && !!onOpenFile) || isShareLink;
   const isStreaming = !!(live && tool.liveOutput);
   const open = isStreaming || (tool.name === "edit_file" ? true : manualOpen);
@@ -521,6 +523,16 @@ function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond }: {
           alignItems: "center",
         }}>
           <button onClick={() => onRespond(tool.tool_call_id!, true, "once")} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "4px 8px", borderRadius: "6px" }}>Allow once</button>
+          {tool.canTurnOnAuto && (!autoTurnedOn ? (
+            <button
+              onClick={() => onRespond(tool.tool_call_id!, true, "auto")}
+              style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}
+            >
+              Turn on auto
+            </button>
+          ) : (
+            <span style={{ fontSize: "0.75rem", color: "var(--accent)", padding: "4px 2px" }}>Auto mode on</span>
+          ))}
           {tool.canAllowProject && (
             <button onClick={() => onRespond(tool.tool_call_id!, true, "project")} style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}>Allow in project</button>
           )}
@@ -685,13 +697,106 @@ const INITIAL_HISTORY_PAGE_SIZE = 100;
 const OLDER_HISTORY_PAGE_SIZE = 100;
 
 function blockIdentity(block: StreamBlock): string {
-  if (block.type === "tool") return `tool:${block.tool_call_id || block.name}:${block.input || ""}:${block.output || ""}`;
+  if (block.type === "tool") return `tool:${block.run_id || ""}:${block.tool_call_id || block.name}:${block.input || ""}:${block.output || ""}`;
   if (block.type === "text") return `text:${block.content}`;
   return `system:${block.tone || "info"}:${block.content}`;
 }
 
 function messageIdentity(message: DisplayMessage): string {
-  return `${message.role}:${message.agent_id || ""}:${message.blocks.map(blockIdentity).join("|")}`;
+  return `${message.role}:${message.agent_id || ""}:${message.message_id || ""}:${message.blocks.map(blockIdentity).join("|")}`;
+}
+
+function mergeAssistantMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayMessage[] {
+  const result = [...prev];
+  const firstToolMessageIndexByName = new Map<string, number>();
+  const lastToolMessageIndexByName = new Map<string, number>();
+  const indexByToolCallId = new Map<string, number>();
+
+  for (let i = 0; i < result.length; i += 1) {
+    const message = result[i];
+    if (message.role !== "assistant") continue;
+    for (const block of message.blocks) {
+      if (block.type !== "tool") continue;
+      if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, i);
+      if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, i);
+      lastToolMessageIndexByName.set(block.name, i);
+    }
+  }
+
+  for (const message of next) {
+    if (message.role !== "assistant") {
+      result.push(message);
+      continue;
+    }
+    const toolBlocks = message.blocks.filter((block): block is Extract<StreamBlock, { type: "tool" }> => block.type === "tool");
+    const toolCallIds = toolBlocks.filter((block) => !!block.tool_call_id).map((block) => block.tool_call_id!);
+    const existingIdxById = toolCallIds.map((id) => indexByToolCallId.get(id)).find((idx): idx is number => idx != null);
+    const shouldPreferFirstByName = toolBlocks.some((block) => !!block.output || !!block.liveOutput || block.awaitingApproval || block.approvalStatus === "approved" || block.approvalStatus === "denied");
+    const existingIdxByName = toolBlocks
+      .map((block) => shouldPreferFirstByName ? firstToolMessageIndexByName.get(block.name) : lastToolMessageIndexByName.get(block.name))
+      .find((idx): idx is number => idx != null);
+    const existingIdx = existingIdxById ?? existingIdxByName;
+    if (existingIdx == null) {
+      result.push(message);
+      const newIndex = result.length - 1;
+      for (const block of toolBlocks) {
+        if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, newIndex);
+        if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, newIndex);
+        lastToolMessageIndexByName.set(block.name, newIndex);
+      }
+      continue;
+    }
+
+    const existing = result[existingIdx];
+    const mergedBlocks = [...existing.blocks];
+    const blockIndexByToolCallId = new Map<string, number>();
+    const firstBlockIndexByName = new Map<string, number>();
+    const lastBlockIndexByName = new Map<string, number>();
+    for (let i = 0; i < mergedBlocks.length; i += 1) {
+      const block = mergedBlocks[i];
+      if (block.type !== "tool") continue;
+      if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, i);
+      if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, i);
+      lastBlockIndexByName.set(block.name, i);
+    }
+
+    for (const block of message.blocks) {
+      if (block.type === "tool") {
+        const targetIndex = block.tool_call_id && blockIndexByToolCallId.has(block.tool_call_id)
+          ? blockIndexByToolCallId.get(block.tool_call_id)!
+          : (shouldPreferFirstByName ? firstBlockIndexByName.get(block.name) : lastBlockIndexByName.get(block.name));
+        if (targetIndex != null) {
+          mergedBlocks[targetIndex] = { ...mergedBlocks[targetIndex], ...block };
+          if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, targetIndex);
+          if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, targetIndex);
+          lastBlockIndexByName.set(block.name, targetIndex);
+          continue;
+        }
+      }
+      if (!mergedBlocks.some((existingBlock) => blockIdentity(existingBlock) === blockIdentity(block))) {
+        mergedBlocks.push(block);
+        if (block.type === "tool") {
+          const idx = mergedBlocks.length - 1;
+          if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, idx);
+          if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, idx);
+          lastBlockIndexByName.set(block.name, idx);
+        }
+      }
+    }
+
+    result[existingIdx] = {
+      ...existing,
+      ...message,
+      blocks: mergedBlocks,
+    };
+    for (const block of toolBlocks) {
+      if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, existingIdx);
+      if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, existingIdx);
+      lastToolMessageIndexByName.set(block.name, existingIdx);
+    }
+  }
+
+  return result;
 }
 
 function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { messages: DisplayMessage[]; meta: MetaInfo | null; title: string; autonomousToolsEnabled: boolean } {
@@ -712,8 +817,39 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
     const type = mAny.type;
 
     if (type === "tool-call") {
-      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, tool_call_id: mAny.tool_call_id || undefined });
+      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
       if (mAny.tool_call_id) toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
+      continue;
+    }
+
+    if (type === "tool-confirm") {
+      const pendingTool: StreamBlock = {
+        type: "tool",
+        name: mAny.name,
+        input: mAny.args,
+        tool_call_id: mAny.tool_call_id || undefined,
+        run_id: mAny.run_id || undefined,
+        awaitingApproval: true,
+        approvalStatus: "pending",
+        canAllowProject: mAny.can_allow_project !== false,
+        canTurnOnAuto: mAny.can_turn_on_auto !== false,
+      };
+      if (!mAny.tool_call_id) {
+        pendingBlocks.push(pendingTool);
+        continue;
+      }
+      const idx = toolIndexById.get(mAny.tool_call_id);
+      if (idx != null && pendingBlocks[idx]?.type === "tool") {
+        const existing = pendingBlocks[idx];
+        pendingBlocks[idx] = {
+          ...existing,
+          ...pendingTool,
+          input: pendingTool.input ?? existing.input,
+        };
+      } else {
+        pendingBlocks.push(pendingTool);
+        toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
+      }
       continue;
     }
 
@@ -730,7 +866,7 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
     if (type === "tool-result") {
       if (!mAny.tool_call_id) {
         flushPending();
-        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output });
+        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, run_id: mAny.run_id || undefined });
         continue;
       }
       const idx = toolIndexById.get(mAny.tool_call_id);
@@ -738,7 +874,7 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
         const existing = pendingBlocks[idx];
         pendingBlocks[idx] = { ...existing, output: mAny.output ?? existing.liveOutput ?? existing.output, input: mAny.input ?? existing.input, liveOutput: undefined };
       } else {
-        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined });
+        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
       }
       continue;
     }
@@ -794,7 +930,7 @@ function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { 
     }
 
     if (mAny.role === "tool") {
-      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined });
+      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
       if (mAny.tool_call_id) toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
     }
   }
@@ -1112,9 +1248,8 @@ export function Chat() {
     setHasMoreHistory(detail.has_more);
     setHistoryCursor(detail.next_before);
     setMessages((prev) => {
-      const rebuiltIds = new Set(rebuilt.messages.map(messageIdentity));
-      const pendingOnly = prev.filter((msg) => msg.pending || !rebuiltIds.has(messageIdentity(msg)));
-      return [...rebuilt.messages, ...pendingOnly.filter((msg) => msg.pending)];
+      const pendingOnly = prev.filter((msg) => msg.pending);
+      return mergeAssistantMessages(rebuilt.messages, pendingOnly);
     });
     setMeta(rebuilt.meta);
     blocksRef.current = [];
@@ -1185,9 +1320,6 @@ export function Chat() {
       switch (data.type) {
         case "auth-ok":
           setConnected(true);
-          reloadConversation().catch((e) => {
-            if (!cancelled) setError(e.message);
-          });
           flushPendingQueue();
           break;
         case "message-ack":
@@ -1256,13 +1388,14 @@ export function Chat() {
                 input: data.input ?? b.input,
                 awaitingApproval: false,
                 approvalStatus: b.approvalStatus === "denied" ? b.approvalStatus : undefined,
+                canAllowProject: b.canAllowProject,
               };
               matched = true;
               break;
             }
           }
           if (!matched) {
-            blocks.push({ type: "tool", name: data.name, input: data.input, tool_call_id: data.tool_call_id });
+            blocks.push({ type: "tool", name: data.name, input: data.input, tool_call_id: data.tool_call_id, run_id: data.run_id });
           }
           blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
@@ -1286,12 +1419,17 @@ export function Chat() {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(true);
           const blocks = [...blocksRef.current];
+          let matched = false;
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (b.type === "tool" && (data.tool_call_id ? b.tool_call_id === data.tool_call_id : b.name === data.name) && !b.output) {
               blocks[i] = { ...b, output: b.liveOutput || data.output, liveOutput: undefined };
+              matched = true;
               break;
             }
+          }
+          if (!matched) {
+            blocks.push({ type: "tool", name: data.name, output: data.output, tool_call_id: data.tool_call_id, run_id: data.run_id });
           }
           blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
@@ -1317,6 +1455,7 @@ export function Chat() {
                 awaitingApproval: true,
                 approvalStatus: "pending",
                 canAllowProject: data.can_allow_project !== false,
+                canTurnOnAuto: data.can_turn_on_auto !== false,
               };
               matched = true;
               break;
@@ -1326,11 +1465,13 @@ export function Chat() {
             blocks.push({
               type: "tool",
               tool_call_id: data.tool_call_id,
+              run_id: data.run_id,
               name: data.name,
               input: data.args,
               awaitingApproval: true,
               approvalStatus: "pending",
               canAllowProject: data.can_allow_project !== false,
+              canTurnOnAuto: data.can_turn_on_auto !== false,
             });
           }
           blocksRef.current = blocks;
@@ -1655,7 +1796,19 @@ export function Chat() {
     setWaitingForModel(false);
   };
 
-  const handleToolApproval = useCallback((toolCallId: string, approved: boolean, scope: ApprovalScope = "once") => {
+  const handleToolApproval = useCallback(async (toolCallId: string, approved: boolean, scope: ApprovalScope = "once") => {
+    if (approved && scope === "auto" && convId) {
+      setSavingAutonomy(true);
+      try {
+        const updated = await updateConvo(convId, { autonomous_tools_enabled: true });
+        setAutonomousToolsEnabled(!!updated.autonomous_tools_enabled);
+      } catch (e: any) {
+        setError(e.message || "Failed to enable auto mode");
+        setSavingAutonomy(false);
+        return;
+      }
+      setSavingAutonomy(false);
+    }
     const ws = wsRef.current;
     const runId = activeRunIdRef.current;
     if (ws && ws.readyState === WebSocket.OPEN && runId) {
@@ -1673,7 +1826,7 @@ export function Chat() {
     );
     blocksRef.current = blocks;
     setStreamBlocks([...blocks]);
-  }, []);
+  }, [convId]);
 
   // Shared logic for sending a text message to the agent
   const sendText = async (text: string) => {
@@ -2126,7 +2279,7 @@ export function Chat() {
               {m.blocks.map((b, j) => (
                 b.type === "tool" ? (
                   <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                    <ToolChip tool={b} defaultOpen={!!m.defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
+                    <ToolChip tool={b} defaultOpen={!!m.defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} autonomousToolsEnabled={autonomousToolsEnabled} />
                   </div>
                 ) : b.type === "system" ? (
                   <div key={j} style={{ alignSelf: "center", fontSize: "0.8rem", color: b.tone === "error" ? "#c4554d" : "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", padding: "6px 10px", margin: "6px 0", maxWidth: "100%" }}>
@@ -2307,7 +2460,7 @@ export function Chat() {
                 {m.blocks.map((b, j) => (
                   b.type === "tool" ? (
                     <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                      <ToolChip tool={b} live={!!(m as any).live && !b.output} defaultOpen={!!(m as any).defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} />
+                      <ToolChip tool={b} live={!!(m as any).live && !b.output} defaultOpen={!!(m as any).defaultExpandedTools} onOpenFile={handleOpenFile} onRespond={handleToolApproval} autonomousToolsEnabled={autonomousToolsEnabled} />
                     </div>
                   ) : b.type === "system" ? (
                     <div key={j} style={{ alignSelf: "center", fontSize: "0.8rem", color: b.tone === "error" ? "#c4554d" : "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", padding: "6px 10px", margin: "6px 0", maxWidth: "100%" }}>
