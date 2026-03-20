@@ -21,9 +21,13 @@ from fastapi.responses import HTMLResponse, Response
 import mimetypes
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic_ai.messages import (
+    BinaryImage,
+    ModelRequest,
     ModelResponse,
     ModelMessagesTypeAdapter,
     TextPart,
+    UserContent,
+    UserPromptPart,
     PartStartEvent,
     PartDeltaEvent,
     TextPartDelta,
@@ -505,8 +509,36 @@ async def _run_bash_command_task(run: RunState, command: str, convo_id: str) -> 
                 sessions.pop(convo_id, None)
 
 
+def _build_multimodal_prompt(
+    prompt: str,
+    attachments: list[dict[str, Any]],
+    project_path: Path,
+) -> str | list[UserContent]:
+    if not attachments:
+        return prompt
+
+    content: list[UserContent] = [prompt]
+    for attachment in attachments:
+        rel_path = str(attachment.get("path", "")).strip()
+        kind = str(attachment.get("kind", "file")).strip() or "file"
+        mime_type = str(attachment.get("mime_type", "application/octet-stream")).strip() or "application/octet-stream"
+        if not rel_path:
+            continue
+        target = (project_path / rel_path).resolve()
+        if not str(target).startswith(str(project_path.resolve())) or not target.is_file():
+            continue
+        if kind == "image":
+            try:
+                content.append(BinaryImage(data=target.read_bytes(), media_type=mime_type, identifier=rel_path))
+            except Exception:
+                content.append(f"[Attached image could not be loaded: {rel_path}]")
+        else:
+            content.append(f"[Attached file: {rel_path}]")
+    return content
+
+
 async def _run_agent_task(
-    run: RunState, prompt: str, message_history: list, convo_id: str,
+    run: RunState, prompt: str | list[UserContent], message_history: list, convo_id: str,
     instructions: str | None = None,
     agent_instance: "Agent | None" = None,
     agent_id: str | None = None,
@@ -538,7 +570,7 @@ async def _run_agent_task(
     agent_tools.set_broadcast(_emit)
 
     try:
-        current_prompt: str | None = prompt
+        current_prompt: str | list[UserContent] | None = prompt
         current_history = message_history if message_history else None
         deferred_results: DeferredToolResults | None = None
         total_turns = 0
@@ -1720,7 +1752,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 cleaned_prompt = prompt
 
             file_refs, cleaned_prompt = extract_file_mentions(cleaned_prompt, project_path)
-            attachment_lines: list[str] = []
+            non_image_attachment_lines: list[str] = []
             for attachment in attachments:
                 rel_path = str(attachment.get("path", "")).strip()
                 if not rel_path:
@@ -1729,14 +1761,17 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                 if not str(target).startswith(str(project_path.resolve())) or not target.is_file():
                     continue
                 kind = attachment.get("kind", "file")
-                attachment_lines.append(f"[Attached {kind}: {rel_path}]")
-            if file_refs or attachment_lines:
+                if kind != "image":
+                    non_image_attachment_lines.append(f"[Attached {kind}: {rel_path}]")
+            if file_refs or non_image_attachment_lines:
                 file_context_parts: list[str] = []
-                if attachment_lines:
-                    file_context_parts.append("\n".join(attachment_lines))
+                if non_image_attachment_lines:
+                    file_context_parts.append("\n".join(non_image_attachment_lines))
                 if file_refs:
                     file_context_parts.append("\n\n".join(f"[File: {path}]\n```\n{content}\n```" for path, content in file_refs))
                 cleaned_prompt = f"{'\n\n'.join(file_context_parts)}\n\n{cleaned_prompt}"
+
+            agent_prompt = _build_multimodal_prompt(cleaned_prompt, attachments, project_path)
 
             run = RunState(convo_id=convo_id, run_id=_new_run_id())
             run.subscribers.update(session.subscribers)
@@ -1754,7 +1789,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             MAX_HANDOFFS = 10
             handoff_count = 0
             current_targets = target_agents
-            current_prompt = cleaned_prompt
+            current_prompt: str | list[UserContent] = agent_prompt
             is_handoff = False
             run_context = run
 
@@ -1789,10 +1824,18 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                             _invalidate_message_cache()
                             shared_ctx = _build_shared_context(convo_id, aid, cached_messages=_get_cached_messages())
                             if shared_ctx:
-                                if _is_handoff:
-                                    agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[Handoff from another agent]\n{_current_prompt}"
+                                if isinstance(agent_prompt, list):
+                                    user_text = next((item for item in agent_prompt if isinstance(item, str)), "")
+                                    prefix = "[Handoff from another agent]" if _is_handoff else "[New message from user]"
+                                    agent_prompt = [
+                                        f"[Conversation context]\n{shared_ctx}\n\n{prefix}\n{user_text}",
+                                        *[item for item in agent_prompt if not isinstance(item, str)],
+                                    ]
                                 else:
-                                    agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[New message from user]\n{_current_prompt}"
+                                    if _is_handoff:
+                                        agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[Handoff from another agent]\n{agent_prompt}"
+                                    else:
+                                        agent_prompt = f"[Conversation context]\n{shared_ctx}\n\n[New message from user]\n{agent_prompt}"
                             await run_context.broadcast(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color).model_dump_json())
 
                         agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)

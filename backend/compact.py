@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
+    BinaryContent,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -42,7 +43,18 @@ def _extract_text(messages: list[ModelMessage]) -> str:
         if isinstance(msg, ModelRequest):
             for part in msg.parts:
                 if isinstance(part, UserPromptPart):
-                    lines.append(f"User: {part.content}")
+                    if isinstance(part.content, str):
+                        lines.append(f"User: {part.content}")
+                    else:
+                        rendered: list[str] = []
+                        for item in part.content:
+                            if isinstance(item, str):
+                                rendered.append(item)
+                            elif isinstance(item, BinaryContent):
+                                rendered.append(f"[binary attachment: {item.media_type} {item.identifier or ''}]".strip())
+                            else:
+                                rendered.append(str(item))
+                        lines.append(f"User: {' '.join(rendered)}")
                 elif isinstance(part, ToolReturnPart):
                     content = str(part.content)[:200]
                     lines.append(f"Tool result ({part.tool_name}): {content}")
