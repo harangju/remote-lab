@@ -21,6 +21,7 @@ interface FilePanelProps {
   editMode: boolean;
   dirty: boolean;
   saving: boolean;
+  saveError?: string | null;
   externalChange: boolean;
   onToggleEdit: () => void;
   onContentChange: (content: string) => void;
@@ -138,7 +139,7 @@ function isDocx(path: string): boolean {
 }
 
 export function FilePanel({
-  file, editMode, dirty, saving, externalChange,
+  file, editMode, dirty, saving, saveError, externalChange,
   onToggleEdit, onContentChange, onSave, onCancel, onClose,
   onReload, onDismissExternal, onOpenFileFinder, onStartConversation, conversationDisabled,
   conversationOptions = [], conversationOptionsLabel = "Recent conversations using this file", conversationModal = false, onOpenConversationOption,
@@ -527,25 +528,39 @@ export function FilePanel({
         </button>
       </div>
 
-      {externalChange && (
+      {(externalChange || saveError) && (
         <div style={{
           display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "6px 12px",
-          background: "#d9a75422",
+          flexDirection: "column",
+          gap: "6px",
+          padding: "8px 12px",
+          background: saveError ? "rgba(196, 85, 77, 0.10)" : "#d9a75422",
           borderBottom: "1px solid var(--border)",
           fontSize: "0.75rem",
           color: "var(--text)",
           flexShrink: 0,
         }}>
-          <span style={{ flex: 1 }}>This file was modified by the agent.</span>
-          <button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}>
-            <RotateCcw size={12} /> Reload
-          </button>
-          <button onClick={onDismissExternal} style={{ ...btnStyle, fontSize: "0.72rem" }}>
-            Dismiss
-          </button>
+          {saveError && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ flex: 1 }}>{saveError}</span>
+              <button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}>
+                <RotateCcw size={12} /> Reload
+              </button>
+            </div>
+          )}
+          {externalChange && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ flex: 1 }}>This file was modified by the agent.</span>
+              {!saveError && (
+                <button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}>
+                  <RotateCcw size={12} /> Reload
+                </button>
+              )}
+              <button onClick={onDismissExternal} style={{ ...btnStyle, fontSize: "0.72rem" }}>
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
       )}
 

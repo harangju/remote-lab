@@ -1,6 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { readFile, writeFile, listFiles } from "../api";
 
+class FileSaveConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FileSaveConflictError";
+  }
+}
+
 
 export interface PanelFile {
   projectId: string;
@@ -14,6 +21,7 @@ export interface PanelState {
   editMode: boolean;
   dirty: boolean;
   saving: boolean;
+  saveError: string | null;
   externalChange: boolean;
   showFileFinder: boolean;
   fileList: string[] | null;
@@ -57,16 +65,20 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const [editMode, setEditModeRaw] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [externalChange, setExternalChange] = useState(false);
   const [showFileFinder, setShowFileFinder] = useState(false);
   const [fileList, setFileList] = useState<string[] | null>(null);
   const [fileListLoading, setFileListLoading] = useState(false);
   const originalContentRef = useRef<string>("");
+  const latestContentRef = useRef<string>("");
   const fileRef = useRef<PanelFile | null>(null);
   const dirtyRef = useRef(false);
+  const openRequestIdRef = useRef(0);
 
   useEffect(() => {
     fileRef.current = file;
+    latestContentRef.current = file?.content ?? "";
   }, [file]);
 
   useEffect(() => {
@@ -93,6 +105,7 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
         setFile(null);
         setEditModeRaw(false);
         setDirty(false);
+        setSaveError(null);
         setExternalChange(false);
       }
     };
@@ -102,17 +115,23 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
 
   const openFile = useCallback((path: string) => {
     if (!projectId) return;
+    const requestId = ++openRequestIdRef.current;
     readFile(projectId, path)
       .then((res) => {
+        if (openRequestIdRef.current !== requestId) return;
         setFile({ projectId, path: res.path, content: res.content, language: langFromPath(path) });
         originalContentRef.current = res.content;
+        latestContentRef.current = res.content;
         setEditModeRaw(false);
         setDirty(false);
         setExternalChange(false);
       })
       .catch((err) => {
+        if (openRequestIdRef.current !== requestId) return;
         setFile({ projectId, path, content: `Error: ${err.message}`, language: "text" });
         originalContentRef.current = "";
+        latestContentRef.current = "";
+        setSaveError(null);
       });
   }, [projectId]);
 
@@ -121,14 +140,17 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     setFile(null);
     setEditModeRaw(false);
     setDirty(false);
+    setSaveError(null);
     setExternalChange(false);
     return true;
   }, [dirty]);
 
   const forceClose = useCallback(() => {
+    openRequestIdRef.current += 1;
     setFile(null);
     setEditModeRaw(false);
     setDirty(false);
+    setSaveError(null);
     setExternalChange(false);
   }, []);
 
@@ -137,26 +159,44 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   }, []);
 
   const updateContent = useCallback((content: string) => {
+    latestContentRef.current = content;
     setFile((prev) => prev ? { ...prev, content } : null);
     setDirty(content !== originalContentRef.current);
+    setSaveError(null);
   }, []);
 
   const saveFile = useCallback(async () => {
-    if (!projectId || !file) return;
+    const currentFile = fileRef.current;
+    if (!projectId || !currentFile) return;
+    const latestContent = latestContentRef.current;
     setSaving(true);
     try {
-      await writeFile(projectId, file.path, file.content);
-      originalContentRef.current = file.content;
+      const diskFile = await readFile(projectId, currentFile.path);
+      if (diskFile.content !== originalContentRef.current) {
+        setExternalChange(true);
+        throw new FileSaveConflictError("Could not save because the file changed on disk and your editor is no longer aligned. Reload and try again.");
+      }
+      await writeFile(projectId, currentFile.path, latestContent);
+      originalContentRef.current = latestContent;
+      latestContentRef.current = latestContent;
+      setFile((prev) => prev && prev.path === currentFile.path ? { ...prev, content: latestContent } : prev);
       setDirty(false);
       setEditModeRaw(false);
+      setSaveError(null);
+      setExternalChange(false);
+    } catch (err: any) {
+      setSaveError(err?.message || "Could not save this file.");
+      throw err;
     } finally {
       setSaving(false);
     }
-  }, [projectId, file]);
+  }, [projectId]);
 
   const cancelEdit = useCallback(() => {
+    latestContentRef.current = originalContentRef.current;
     setFile((prev) => prev ? { ...prev, content: originalContentRef.current } : null);
     setDirty(false);
+    setSaveError(null);
     setEditModeRaw(false);
   }, []);
 
@@ -201,6 +241,8 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
               ? { ...prev, content: res.content, language: langFromPath(path) }
               : prev);
             originalContentRef.current = res.content;
+            latestContentRef.current = res.content;
+            setSaveError(null);
             setExternalChange(false);
             setDirty(false);
           })
@@ -222,7 +264,7 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   }, []);
 
   return {
-    file, editMode, dirty, saving, externalChange,
+    file, editMode, dirty, saving, saveError, externalChange,
     showFileFinder, fileList, fileListLoading, showHiddenFiles: false,
     openFile, closePanel, setEditMode, updateContent,
     saveFile, cancelEdit, toggleFileFinder,

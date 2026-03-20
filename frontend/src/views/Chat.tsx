@@ -2709,6 +2709,7 @@ export function Chat() {
             editMode={panel.editMode}
             dirty={panel.dirty}
             saving={panel.saving}
+            saveError={panel.saveError}
             externalChange={panel.externalChange}
             onToggleEdit={handleToggleEdit}
             onContentChange={panel.updateContent}
