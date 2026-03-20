@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run --hot src/dev.ts",
-    "build": "bun run src/build.ts"
+    "build": "bun run src/build.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.2",

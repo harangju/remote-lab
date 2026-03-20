@@ -3,8 +3,9 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink, FolderOpen, Square, RotateCw, ShieldCheck, ShieldX, Copy, Check, Sparkles, Paperclip, X, Mic, ArrowUp, Archive } from "lucide-react";
-import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment, type ConvoDetail } from "../api";
+import { getConvo, updateConvo, connectWs, listProjectAgents, listFiles, listSkills, uploadFiles, type WsEvent, type AgentConfig, type Skill, type Attachment } from "../api";
 import { input as inputStyle, btnPrimary, btnIcon } from "../styles";
+import { buildDisplayMessages, mergeAssistantMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "../chatState";
 
 const headerIconBtnStyle: React.CSSProperties = {
   ...btnIcon,
@@ -35,26 +36,6 @@ interface ToolCall {
   liveOutput?: string;
 }
 
-type ApprovalScope = "once" | "project" | "auto";
-
-type StreamBlock =
-  | { type: "text"; content: string }
-  | { type: "tool"; name: string; input?: string; output?: string; diff?: string; liveOutput?: string; tool_call_id?: string; run_id?: string; awaitingApproval?: boolean; approvalStatus?: "pending" | "approved" | "denied"; canAllowProject?: boolean; canTurnOnAuto?: boolean; approvedScope?: ApprovalScope }
-  | { type: "system"; content: string; tone?: "error" | "info" };
-
-interface DisplayMessage {
-  role: "user" | "assistant" | "system";
-  blocks: StreamBlock[];
-  agent_id?: string;
-  agent_name?: string;
-  agent_color?: string;
-  message_id?: string;
-  pending?: boolean;
-  attachments?: Attachment[];
-  bashMode?: boolean;
-  defaultExpandedTools?: boolean;
-}
-
 interface PendingMessage {
   message_id: string;
   text: string;
@@ -66,11 +47,6 @@ interface ComposerAttachment {
   previewUrl?: string;
 }
 
-interface MetaInfo {
-  turns: number;
-  context_tokens: number;
-  context_limit: number;
-}
 
 // ---------------------------------------------------------------------------
 // ContextDonut — small SVG ring showing context window usage
@@ -646,259 +622,6 @@ const PANEL_RESIZE_HIT_WIDTH = 14;
 const PANEL_RESIZE_VISIBLE_WIDTH = 4;
 const PANEL_RESIZE_ACTIVATION_DELTA = 3;
 const CHAT_PANEL_RATIO_STORAGE_KEY = "remote-lab:chat-panel-width-ratio";
-
-function blockIdentity(block: StreamBlock): string {
-  if (block.type === "tool") return `tool:${block.run_id || ""}:${block.tool_call_id || block.name}:${block.input || ""}:${block.output || ""}`;
-  if (block.type === "text") return `text:${block.content}`;
-  return `system:${block.tone || "info"}:${block.content}`;
-}
-
-function messageIdentity(message: DisplayMessage): string {
-  return `${message.role}:${message.agent_id || ""}:${message.message_id || ""}:${message.blocks.map(blockIdentity).join("|")}`;
-}
-
-function mergeAssistantMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayMessage[] {
-  const result = [...prev];
-  const firstToolMessageIndexByName = new Map<string, number>();
-  const lastToolMessageIndexByName = new Map<string, number>();
-  const indexByToolCallId = new Map<string, number>();
-
-  for (let i = 0; i < result.length; i += 1) {
-    const message = result[i];
-    if (message.role !== "assistant") continue;
-    for (const block of message.blocks) {
-      if (block.type !== "tool") continue;
-      if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, i);
-      if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, i);
-      lastToolMessageIndexByName.set(block.name, i);
-    }
-  }
-
-  for (const message of next) {
-    if (message.role !== "assistant") {
-      result.push(message);
-      continue;
-    }
-    const toolBlocks = message.blocks.filter((block): block is Extract<StreamBlock, { type: "tool" }> => block.type === "tool");
-    const toolCallIds = toolBlocks.filter((block) => !!block.tool_call_id).map((block) => block.tool_call_id!);
-    const existingIdxById = toolCallIds.map((id) => indexByToolCallId.get(id)).find((idx): idx is number => idx != null);
-    const shouldPreferFirstByName = toolBlocks.some((block) => !!block.output || !!block.liveOutput || block.awaitingApproval || block.approvalStatus === "approved" || block.approvalStatus === "denied");
-    const existingIdxByName = toolBlocks
-      .map((block) => shouldPreferFirstByName ? firstToolMessageIndexByName.get(block.name) : lastToolMessageIndexByName.get(block.name))
-      .find((idx): idx is number => idx != null);
-    const existingIdx = existingIdxById ?? existingIdxByName;
-    if (existingIdx == null) {
-      result.push(message);
-      const newIndex = result.length - 1;
-      for (const block of toolBlocks) {
-        if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, newIndex);
-        if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, newIndex);
-        lastToolMessageIndexByName.set(block.name, newIndex);
-      }
-      continue;
-    }
-
-    const existing = result[existingIdx];
-    const mergedBlocks = [...existing.blocks];
-    const blockIndexByToolCallId = new Map<string, number>();
-    const firstBlockIndexByName = new Map<string, number>();
-    const lastBlockIndexByName = new Map<string, number>();
-    for (let i = 0; i < mergedBlocks.length; i += 1) {
-      const block = mergedBlocks[i];
-      if (block.type !== "tool") continue;
-      if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, i);
-      if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, i);
-      lastBlockIndexByName.set(block.name, i);
-    }
-
-    for (const block of message.blocks) {
-      if (block.type === "tool") {
-        const targetIndex = block.tool_call_id && blockIndexByToolCallId.has(block.tool_call_id)
-          ? blockIndexByToolCallId.get(block.tool_call_id)!
-          : (shouldPreferFirstByName ? firstBlockIndexByName.get(block.name) : lastBlockIndexByName.get(block.name));
-        if (targetIndex != null) {
-          mergedBlocks[targetIndex] = { ...mergedBlocks[targetIndex], ...block };
-          if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, targetIndex);
-          if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, targetIndex);
-          lastBlockIndexByName.set(block.name, targetIndex);
-          continue;
-        }
-      }
-      if (!mergedBlocks.some((existingBlock) => blockIdentity(existingBlock) === blockIdentity(block))) {
-        mergedBlocks.push(block);
-        if (block.type === "tool") {
-          const idx = mergedBlocks.length - 1;
-          if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, idx);
-          if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, idx);
-          lastBlockIndexByName.set(block.name, idx);
-        }
-      }
-    }
-
-    result[existingIdx] = {
-      ...existing,
-      ...message,
-      blocks: mergedBlocks,
-    };
-    for (const block of toolBlocks) {
-      if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, existingIdx);
-      if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, existingIdx);
-      lastToolMessageIndexByName.set(block.name, existingIdx);
-    }
-  }
-
-  return result;
-}
-
-function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { messages: DisplayMessage[]; meta: MetaInfo | null; title: string; autonomousToolsEnabled: boolean } {
-  const msgs: DisplayMessage[] = [];
-  let pendingBlocks: StreamBlock[] = [];
-  const toolIndexById = new Map<string, number>();
-
-  const flushPending = () => {
-    if (pendingBlocks.length > 0) {
-      msgs.push({ role: "assistant", blocks: [...pendingBlocks] });
-      pendingBlocks = [];
-      toolIndexById.clear();
-    }
-  };
-
-  for (const m of detail.messages) {
-    const mAny = m as any;
-    const type = mAny.type;
-
-    if (type === "tool-call") {
-      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
-      if (mAny.tool_call_id) toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
-      continue;
-    }
-
-    if (type === "tool-confirm") {
-      const pendingTool: StreamBlock = {
-        type: "tool",
-        name: mAny.name,
-        input: mAny.args,
-        tool_call_id: mAny.tool_call_id || undefined,
-        run_id: mAny.run_id || undefined,
-        awaitingApproval: true,
-        approvalStatus: "pending",
-        canAllowProject: mAny.can_allow_project !== false,
-        canTurnOnAuto: mAny.can_turn_on_auto !== false,
-      };
-      if (!mAny.tool_call_id) {
-        pendingBlocks.push(pendingTool);
-        continue;
-      }
-      const idx = toolIndexById.get(mAny.tool_call_id);
-      if (idx != null && pendingBlocks[idx]?.type === "tool") {
-        const existing = pendingBlocks[idx];
-        pendingBlocks[idx] = {
-          ...existing,
-          ...pendingTool,
-          input: pendingTool.input ?? existing.input,
-        };
-      } else {
-        pendingBlocks.push(pendingTool);
-        toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
-      }
-      continue;
-    }
-
-    if (type === "tool-output") {
-      if (!mAny.tool_call_id) continue;
-      const idx = toolIndexById.get(mAny.tool_call_id);
-      if (idx != null && pendingBlocks[idx]?.type === "tool") {
-        const existing = pendingBlocks[idx];
-        pendingBlocks[idx] = { ...existing, liveOutput: `${existing.liveOutput || ""}${mAny.output || ""}` };
-      }
-      continue;
-    }
-
-    if (type === "tool-result") {
-      if (!mAny.tool_call_id) {
-        flushPending();
-        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, diff: typeof mAny.diff === "string" ? mAny.diff : undefined, run_id: mAny.run_id || undefined });
-        continue;
-      }
-      const idx = toolIndexById.get(mAny.tool_call_id);
-      if (idx != null && pendingBlocks[idx]?.type === "tool") {
-        const existing = pendingBlocks[idx];
-        pendingBlocks[idx] = { ...existing, output: mAny.output ?? existing.liveOutput ?? existing.output, input: mAny.input ?? existing.input, diff: typeof mAny.diff === "string" ? mAny.diff : existing.diff, liveOutput: undefined };
-      } else {
-        pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, diff: typeof mAny.diff === "string" ? mAny.diff : undefined, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
-      }
-      continue;
-    }
-
-    if (type === "run-error" || type === "system") {
-      flushPending();
-      msgs.push({ role: "system", blocks: [{ type: "system", content: mAny.message || mAny.content || "", tone: type === "run-error" ? "error" : "info" }] });
-      continue;
-    }
-
-    if (type === "compacted") {
-      flushPending();
-      msgs.push({ role: "system", blocks: [{ type: "system", content: mAny.output || mAny.message || mAny.content || "Conversation compacted", tone: "info" }] });
-      continue;
-    }
-
-    if (type === "skill-result") {
-      flushPending();
-      msgs.push({ role: "system", blocks: [{ type: "system", content: mAny.output || "", tone: "info" }] });
-      continue;
-    }
-
-    if (type === "user-message" || mAny.role === "user") {
-      flushPending();
-      msgs.push({
-        role: "user",
-        blocks: [{ type: "text", content: typeof mAny.content === "string" ? mAny.content : JSON.stringify(mAny.content) }],
-        message_id: typeof mAny.message_id === "string" ? mAny.message_id : undefined,
-        pending: false,
-        attachments: Array.isArray(mAny.attachments) ? mAny.attachments : undefined,
-        bashMode: !!mAny.bash_mode,
-      });
-      continue;
-    }
-
-    if (type === "assistant-message" || mAny.role === "assistant") {
-      const content = typeof mAny.content === "string" ? mAny.content : JSON.stringify(mAny.content);
-      const blocks: StreamBlock[] = [...pendingBlocks];
-      if (content) blocks.push({ type: "text", content });
-      if (blocks.length > 0) {
-        const agentId = mAny.agent_id;
-        const agentCfg = agentId ? agentList.find((a: AgentConfig) => a.id === agentId) : undefined;
-        msgs.push({
-          role: "assistant", blocks,
-          agent_id: agentId,
-          agent_name: agentCfg?.name,
-          agent_color: agentCfg?.color,
-        });
-      }
-      pendingBlocks = [];
-      toolIndexById.clear();
-      continue;
-    }
-
-    if (mAny.role === "tool") {
-      pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, diff: typeof mAny.diff === "string" ? mAny.diff : undefined, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
-      if (mAny.tool_call_id) toolIndexById.set(mAny.tool_call_id, pendingBlocks.length - 1);
-    }
-  }
-
-  flushPending();
-
-  return {
-    messages: msgs,
-    meta: detail.context_limit > 0 ? {
-      turns: 0,
-      context_tokens: detail.context_tokens,
-      context_limit: detail.context_limit,
-    } : null,
-    title: detail.title || "Untitled",
-    autonomousToolsEnabled: !!detail.autonomous_tools_enabled,
-  };
-}
 
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
