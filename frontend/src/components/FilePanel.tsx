@@ -138,6 +138,10 @@ function isDocx(path: string): boolean {
   return path.toLowerCase().endsWith(".docx");
 }
 
+function isPdf(path: string): boolean {
+  return path.toLowerCase().endsWith(".pdf");
+}
+
 export function FilePanel({
   file, editMode, dirty, saving, saveError, externalChange,
   onToggleEdit, onContentChange, onSave, onCancel, onClose,
@@ -155,6 +159,12 @@ export function FilePanel({
   const hasConversationChoices = !!onStartConversation || (conversationOptions.length > 0 && !!onOpenConversationOption);
   const visibleConversationOptions = useMemo(() => conversationOptions.slice(0, 4), [conversationOptions]);
   const docxFile = isDocx(file.path);
+  const pdfFile = isPdf(file.path);
+  const previewFile = docxFile || pdfFile;
+  const embedToken = getToken();
+  const pdfPreviewUrl = pdfFile && embedToken
+    ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}`
+    : null;
 
   useEffect(() => {
     if (!showConversationMenu) return;
@@ -293,7 +303,7 @@ export function FilePanel({
           }} data-tooltip="Unsaved changes" />
         )}
 
-        {docxFile ? (
+        {previewFile ? (
           <span style={{
             display: "inline-flex",
             alignItems: "center",
@@ -302,7 +312,7 @@ export function FilePanel({
             color: "var(--text-muted)",
             padding: "0 2px",
             flexShrink: 0,
-          }} data-tooltip="Read-only Word preview">
+          }} data-tooltip={docxFile ? "Read-only Word preview" : "Read-only PDF preview"}>
             <FileText size={14} />
             <span>Preview</span>
           </span>
@@ -517,7 +527,7 @@ export function FilePanel({
           <Download size={15} />
         </button>
 
-        {!docxFile && (
+        {!previewFile && (
           <button onClick={copy} style={iconBtnStyle} data-tooltip={copied ? "Copied!" : "Copy"} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
             {copied ? <Check size={15} /> : <Copy size={15} />}
           </button>
@@ -617,6 +627,37 @@ export function FilePanel({
               </div>
             )}
           </div>
+        ) : pdfFile ? (
+          pdfPreviewUrl ? (
+            <iframe
+              title={file.path}
+              src={pdfPreviewUrl}
+              style={{
+                width: "100%",
+                height: "100%",
+                border: "none",
+                background: "var(--bg)",
+              }}
+            />
+          ) : (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              padding: "24px",
+              color: "var(--text-muted)",
+              fontSize: "0.85rem",
+              textAlign: "center",
+            }}>
+              <div style={{ maxWidth: 420 }}>
+                <div>Could not preview this PDF. Try downloading it instead.</div>
+                <div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>
+                  Missing auth token.
+                </div>
+              </div>
+            </div>
+          )
         ) : (
           <Suspense fallback={
             <div style={{

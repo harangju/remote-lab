@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, FileResponse
 import mimetypes
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic_ai.messages import (
@@ -1116,6 +1116,33 @@ def check_token(input_token: str) -> bool:
     if not WS_TOKEN:
         return False
     return hmac.compare_digest(input_token.encode(), WS_TOKEN.encode())
+
+
+def _resolve_project_file(project_id: str, path: str) -> tuple[Path, Path]:
+    proj = storage.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_path = Path(proj.path).resolve()
+    if not project_path.exists() or not project_path.is_dir():
+        raise HTTPException(status_code=400, detail="Project path does not exist")
+    target = (project_path / path).resolve()
+    if not str(target).startswith(str(project_path)):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return project_path, target
+
+
+@app.get("/api/projects/{project_id}/file/embed")
+async def api_read_file_embed(project_id: str, path: str, token: str):
+    if not check_token(token):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    _, target = _resolve_project_file(project_id, path)
+    media_type, _ = mimetypes.guess_type(str(target))
+    response = FileResponse(target, media_type=media_type or "application/octet-stream")
+    response.headers["Content-Disposition"] = f'inline; filename="{target.name}"'
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    return response
 
 
 @app.get("/{rest:path}", response_class=HTMLResponse)

@@ -60,6 +60,11 @@ export function langFromPath(path: string): string {
   return map[ext] || "text";
 }
 
+function isPreviewOnlyPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".pdf") || lower.endsWith(".docx");
+}
+
 export function usePanel(projectId: string | undefined): PanelState & PanelActions {
   const [file, setFile] = useState<PanelFile | null>(null);
   const [editMode, setEditModeRaw] = useState(false);
@@ -116,6 +121,18 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const openFile = useCallback((path: string) => {
     if (!projectId) return;
     const requestId = ++openRequestIdRef.current;
+
+    if (isPreviewOnlyPath(path)) {
+      setFile({ projectId, path, content: "", language: langFromPath(path) });
+      originalContentRef.current = "";
+      latestContentRef.current = "";
+      setEditModeRaw(false);
+      setDirty(false);
+      setSaveError(null);
+      setExternalChange(false);
+      return;
+    }
+
     readFile(projectId, path)
       .then((res) => {
         if (openRequestIdRef.current !== requestId) return;
