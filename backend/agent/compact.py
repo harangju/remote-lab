@@ -14,7 +14,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from backend.agents import agent, CONTEXT_BUDGET_FRACTION, get_context_limit
+from backend.agent.agents import agent, CONTEXT_BUDGET_FRACTION, get_context_limit
 
 # Number of recent request/response pairs to keep intact
 KEEP_RECENT_TURNS = 3

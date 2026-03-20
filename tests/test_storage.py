@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.models import ProjectCreate
+from backend.data.models import ProjectCreate
 
 
 def test_project_and_conversation_crud_and_pagination(storage_module, tmp_path):

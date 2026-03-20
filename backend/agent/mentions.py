@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from backend.agent_config import AgentConfig
+from backend.agent.agent_config import AgentConfig
 
 # Matches @word (agent IDs) — does NOT match paths with / or .
 _AGENT_MENTION_RE = re.compile(r"@(\w+)")

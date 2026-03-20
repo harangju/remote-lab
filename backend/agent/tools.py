@@ -11,8 +11,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from backend.protocol import FileChanged
-from backend.skills import get_skill
+from backend.data.protocol import FileChanged
+from backend.agent.skills import get_skill
 
 import httpx
 from pydantic_ai import RunContext

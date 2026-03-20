@@ -17,23 +17,23 @@ def temp_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("WS_TOKEN", "test-token")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram-key")
-    monkeypatch.setattr("backend.storage.DATA_DIR", data_dir, raising=False)
-    monkeypatch.setattr("backend.storage.PROJECTS_FILE", data_dir / "projects.json", raising=False)
-    monkeypatch.setattr("backend.storage.CONVOS_DIR", data_dir / "conversations", raising=False)
-    monkeypatch.setattr("backend.storage.AGENTS_DIR", data_dir / "agents", raising=False)
+    monkeypatch.setattr("backend.data.storage.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("backend.data.storage.PROJECTS_FILE", data_dir / "projects.json", raising=False)
+    monkeypatch.setattr("backend.data.storage.CONVOS_DIR", data_dir / "conversations", raising=False)
+    monkeypatch.setattr("backend.data.storage.AGENTS_DIR", data_dir / "agents", raising=False)
     return data_dir
 
 
 @pytest.fixture()
 def storage_module(temp_data_dir: Path):
-    import backend.storage as storage
+    import backend.data.storage as storage
 
     return storage
 
 
 @pytest.fixture()
 def server_module(temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch):
-    import backend.agents as agents
+    import backend.agent.agents as agents
 
     monkeypatch.setattr(agents, "_available", ["openai:gpt-5-nano"], raising=False)
     monkeypatch.setattr(agents, "model", "openai:gpt-5-nano", raising=False)

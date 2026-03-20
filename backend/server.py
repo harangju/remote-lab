@@ -6,7 +6,6 @@ import asyncio
 import hmac
 import json
 import os
-from dataclasses import dataclass, field
 from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,10 +15,9 @@ from types import SimpleNamespace
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, Response, FileResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import HTMLResponse, Response
 import mimetypes
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic_ai.messages import (
     BinaryImage,
     ModelRequest,
@@ -38,22 +36,25 @@ from pydantic_ai.messages import (
 
 from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
 
-from backend.agent_config import AgentConfig
-from backend.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
-from backend.compact import compact, needs_compaction
-from backend.context import build_project_instructions
-from backend.mentions import parse_mentions, extract_file_mentions
-from backend.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, VoiceState, VoiceTranscript, Error, FileChanged, ToolResult, ToolOutput
-from backend.skills import get_skills, get_skill, SkillType
-from backend.permissions import is_tool_auto_allowed, add_project_rule, tool_is_always_confirmed, build_project_rule
-from backend.models import (
+from backend.agent.agent_config import AgentConfig
+from backend.agent.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
+from backend.agent.compact import compact, needs_compaction
+from backend.agent.context import build_project_instructions
+from backend.agent.mentions import parse_mentions, extract_file_mentions
+from backend.data.protocol import AuthOk, MessageAck, TextDelta, ThinkingDelta, Done, Running, AgentStart, Compacted, SkillResult, ToolConfirm, TitleUpdated, VoiceState, VoiceTranscript, Error, FileChanged, ToolResult, ToolOutput
+from backend.agent.skills import get_skills, get_skill, SkillType
+from backend.agent.permissions import is_tool_auto_allowed, add_project_rule, tool_is_always_confirmed, build_project_rule
+from backend.data.models import (
     Project, ProjectCreate, ProjectUpdate,
     ConvoMeta, ConvoCreate, ConvoUpdate, ConvoDetail,
     ConvoStatus, UploadResult,
 )
-from backend import storage
-from backend import tools as agent_tools
-from backend.stt import DeepgramSTTSession
+from backend.data import storage
+from backend.agent import tools as agent_tools
+from backend.voice.stt import DeepgramSTTSession
+from backend.api.routes import create_api_router
+from backend.runtime.state import ConversationSession, RunState, get_convo_lock, get_session, processed_message_ids, seen_tool_call_ids, sessions
+from backend.runtime.commands import handle_share, handle_shares, handle_unshare
 
 
 def get_workdir() -> Path:
@@ -94,81 +95,16 @@ PUBLIC_DIR = Path(__file__).parent.parent / "public"
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class RunState:
-    """Tracks an in-flight agent run independently of WebSocket connections."""
-    convo_id: str
-    run_id: str
-    task: asyncio.Task | None = None
-    events: list[str] = field(default_factory=list)
-    full_text: str = ""
-    done_event: dict | None = None
-    error_msg: str | None = None
-    status: str = "running"  # running | done | error
-    subscribers: set[WebSocket] = field(default_factory=set)
-    message_history: list = field(default_factory=list)
-    last_context_tokens: int = 0
-    pending_approvals: set[str] = field(default_factory=set)
-    pending_approval_details: dict[str, dict[str, Any]] = field(default_factory=dict)
-    approval_decisions: dict[str, bool] = field(default_factory=dict)
-    approval_event: asyncio.Event = field(default_factory=asyncio.Event)
-
-    async def broadcast(self, msg_str: str):
-        dead: set[WebSocket] = set()
-        for ws in self.subscribers:
-            try:
-                await ws.send_text(msg_str)
-            except Exception:
-                dead.add(ws)
-        self.subscribers -= dead
-
-
-@dataclass
-class ConversationSession:
-    convo_id: str
-    controller: WebSocket | None = None
-    subscribers: set[WebSocket] = field(default_factory=set)
-    run: RunState | None = None
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    stt_session: DeepgramSTTSession | None = None
-    stt_partial: str = ""
-    stt_final: str = ""
-
-
-sessions: dict[str, ConversationSession] = {}
-processed_message_ids: dict[str, set[str]] = {}
-convo_locks: dict[str, asyncio.Lock] = {}
-
-
-def _get_session(convo_id: str) -> ConversationSession:
-    session = sessions.get(convo_id)
-    if session is None:
-        session = ConversationSession(convo_id=convo_id)
-        sessions[convo_id] = session
-    return session
-
-
-def _get_convo_lock(convo_id: str) -> asyncio.Lock:
-    lock = convo_locks.get(convo_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        convo_locks[convo_id] = lock
-    return lock
-
-
-_seen_tool_call_ids: dict[str, set[str]] = {}
-
-
 async def _append_event(convo_id: str, event: dict) -> None:
     event_type = str(event.get("type", ""))
     if event_type == "tool-call":
         tool_call_id = str(event.get("tool_call_id", ""))
         if tool_call_id:
-            seen = _seen_tool_call_ids.setdefault(convo_id, set())
+            seen = seen_tool_call_ids(convo_id)
             if tool_call_id in seen:
                 return
             seen.add(tool_call_id)
-    async with _get_convo_lock(convo_id):
+    async with get_convo_lock(convo_id):
         storage.append_event(convo_id, event)
 
 
@@ -253,22 +189,22 @@ def _system_event(content: str, *, event_type: str = "system", run_id: str | Non
 
 
 async def _update_conversation_status(convo_id: str, status: ConvoStatus) -> None:
-    async with _get_convo_lock(convo_id):
+    async with get_convo_lock(convo_id):
         storage.update_conversation_status(convo_id, status)
 
 
 async def _save_agent_history(convo_id: str, data: bytes, agent_id: str | None = None) -> None:
-    async with _get_convo_lock(convo_id):
+    async with get_convo_lock(convo_id):
         storage.save_agent_history(convo_id, data, agent_id=agent_id)
 
 
 async def _update_conversation_autonomy(convo_id: str, enabled: bool) -> None:
-    async with _get_convo_lock(convo_id):
+    async with get_convo_lock(convo_id):
         storage.update_conversation_autonomy(convo_id, enabled)
 
 
 async def _update_conversation_title(convo_id: str, title: str) -> None:
-    async with _get_convo_lock(convo_id):
+    async with get_convo_lock(convo_id):
         storage.update_conversation_title(convo_id, title)
 
 
@@ -293,7 +229,7 @@ async def _broadcast_conversation_event(convo_id: str, msg_str: str) -> None:
 
 async def _auto_title(convo_id: str, user_message: str):
     from pydantic_ai import Agent as _Agent
-    from backend.agents import _available
+    from backend.agent.agents import _available
 
     title_model = None
     for preferred in ("openai:gpt-5-nano", "google-gla:gemini-2.5-flash"):
@@ -784,331 +720,6 @@ async def _run_agent_task(
 # REST API — /api routes
 # ---------------------------------------------------------------------------
 
-_bearer = HTTPBearer()
-
-
-async def _require_token(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-) -> str:
-    if not check_token(credentials.credentials):
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return credentials.credentials
-
-
-api = APIRouter(prefix="/api", dependencies=[Depends(_require_token)])
-
-
-@api.get("/projects", response_model=list[Project])
-async def api_list_projects():
-    return storage.list_projects()
-
-
-@api.post("/projects", response_model=Project, status_code=201)
-async def api_create_project(body: ProjectCreate):
-    if body.github_url:
-        target = Path(body.path)
-        if target.exists() and any(target.iterdir()):
-            raise HTTPException(status_code=400, detail="Target directory already exists and is not empty")
-        clone_url = body.github_url
-        import re as _re
-        m = _re.match(r"https?://github\.com/(.+)", clone_url)
-        if m:
-            clone_url = f"git@github.com:{m.group(1)}"
-            if not clone_url.endswith(".git"):
-                clone_url += ".git"
-        proc = await asyncio.create_subprocess_exec(
-            "git", "clone", "--depth", "1", clone_url, str(target),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=dict(os.environ),
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise HTTPException(status_code=400, detail=f"git clone failed: {stderr.decode().strip()}")
-    return storage.create_project(body)
-
-
-@api.get("/projects/{project_id}", response_model=Project)
-async def api_get_project(project_id: str):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return proj
-
-
-@api.put("/projects/{project_id}", response_model=Project)
-async def api_update_project(project_id: str, body: ProjectUpdate, request: Request):
-    payload = await request.json()
-    if not payload:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    proj = storage.update_project(project_id, body)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return proj
-
-
-@api.delete("/projects/{project_id}", status_code=204)
-async def api_delete_project(project_id: str):
-    if not storage.delete_project(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-
-
-@api.get("/projects/{project_id}/convos", response_model=list[ConvoMeta])
-async def api_list_convos(project_id: str):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return storage.list_conversations(project_id)
-
-
-@api.post("/projects/{project_id}/convos", response_model=ConvoMeta, status_code=201)
-async def api_create_convo(project_id: str, body: ConvoCreate):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return storage.create_conversation(project_id, body.title)
-
-
-@api.get("/convos/{convo_id}", response_model=ConvoDetail)
-async def api_get_convo(convo_id: str, before: int | None = None, limit: int | None = None):
-    convo = storage.get_conversation(convo_id, before=before, limit=limit)
-    if not convo:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return convo
-
-
-@api.patch("/convos/{convo_id}", response_model=ConvoMeta)
-async def api_update_convo(convo_id: str, body: ConvoUpdate, request: Request):
-    meta = storage._read_meta(convo_id)
-    if not meta:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    payload = await request.json()
-    if not payload:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    if "title" in payload:
-        meta = storage.update_conversation_title(convo_id, body.title or "Untitled")
-    if "archived_at" in payload:
-        meta = storage.update_conversation_archive(convo_id, body.archived_at)
-    if "autonomous_tools_enabled" in payload:
-        meta = storage.update_conversation_autonomy(convo_id, bool(body.autonomous_tools_enabled))
-    if not meta:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return meta
-
-
-@api.delete("/convos/{convo_id}", status_code=204)
-async def api_delete_convo(convo_id: str):
-    if not storage.delete_conversation(convo_id):
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-
-@api.get("/models")
-async def api_list_models():
-    from backend.agents import _available, active_model
-    return {"models": _available, "active": active_model}
-
-
-@api.get("/agents")
-async def api_list_global_agents():
-    return [a.model_dump() for a in storage.load_global_agents()]
-
-
-@api.put("/agents")
-async def api_save_global_agents(body: list[AgentConfig]):
-    storage.save_global_agents(body)
-    return [a.model_dump() for a in body]
-
-
-@api.get("/projects/{project_id}/agents")
-async def api_list_agents(project_id: str):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    agents = storage.load_project_agents(project_id)
-    return {
-        "agents": [a.model_dump() for a in agents],
-        "custom": storage.has_project_agents(project_id),
-    }
-
-
-@api.put("/projects/{project_id}/agents")
-async def api_save_agents(project_id: str, body: list[AgentConfig]):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    storage.save_project_agents(project_id, body)
-    return [a.model_dump() for a in body]
-
-
-@api.delete("/projects/{project_id}/agents")
-async def api_delete_project_agents(project_id: str):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    storage.delete_project_agents(project_id)
-    return {"ok": True}
-
-
-@api.get("/projects/{project_id}/skills")
-async def api_list_skills(project_id: str):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_path = Path(proj.path)
-    skills = get_skills(project_path if project_path.is_dir() else None)
-    return [s.model_dump() for s in skills]
-
-
-@api.get("/projects/{project_id}/file/raw")
-async def api_read_file_raw(project_id: str, path: str):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_path = Path(proj.path)
-    if not project_path.exists() or not project_path.is_dir():
-        raise HTTPException(status_code=400, detail="Project path does not exist")
-    target = (project_path / path).resolve()
-    if not str(target).startswith(str(project_path.resolve())):
-        raise HTTPException(status_code=403, detail="Path traversal not allowed")
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    media_type, _ = mimetypes.guess_type(str(target))
-    return Response(target.read_bytes(), media_type=media_type or "application/octet-stream")
-
-
-@api.get("/projects/{project_id}/file")
-async def api_read_file(project_id: str, path: str):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_path = Path(proj.path)
-    if not project_path.exists() or not project_path.is_dir():
-        raise HTTPException(status_code=400, detail="Project path does not exist")
-    target = (project_path / path).resolve()
-    if not str(target).startswith(str(project_path.resolve())):
-        raise HTTPException(status_code=403, detail="Path traversal not allowed")
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    try:
-        content = target.read_text(errors="replace")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    if len(content) > 200_000:
-        content = content[:200_000] + "\n\n--- truncated at 200KB ---"
-    return {"path": path, "content": content}
-
-
-from pydantic import BaseModel as _BaseModel
-
-
-class FileWrite(_BaseModel):
-    path: str
-    content: str
-
-
-def _sanitize_upload_name(name: str) -> str:
-    cleaned = Path(name).name.strip().replace("\x00", "")
-    if not cleaned:
-        return "upload"
-    return "".join(ch if ch.isalnum() or ch in {".", "-", "_"} else "-" for ch in cleaned)
-
-
-def _upload_kind(mime_type: str, filename: str) -> str:
-    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-    if mime_type.startswith("image/") or Path(filename).suffix.lower() in image_exts:
-        return "image"
-    return "file"
-
-
-@api.post("/projects/{project_id}/file")
-async def api_write_file(project_id: str, body: FileWrite):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_path = Path(proj.path)
-    if not project_path.exists() or not project_path.is_dir():
-        raise HTTPException(status_code=400, detail="Project path does not exist")
-    target = (project_path / body.path).resolve()
-    if not str(target).startswith(str(project_path.resolve())):
-        raise HTTPException(status_code=403, detail="Path traversal not allowed")
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body.content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    return {"path": body.path, "size": len(body.content.encode())}
-
-
-_EXCLUDED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".next", "dist", "build", ".cache", ".mypy_cache", ".ruff_cache"}
-
-
-@api.post("/projects/{project_id}/uploads", response_model=list[UploadResult])
-async def api_upload_files(project_id: str, files: list[UploadFile] = File(...)):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_path = Path(proj.path).resolve()
-    if not project_path.exists() or not project_path.is_dir():
-        raise HTTPException(status_code=400, detail="Project path does not exist")
-    now = datetime.now(timezone.utc)
-    upload_dir = project_path / ".remote-lab" / "uploads" / now.strftime("%Y") / now.strftime("%m")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    results: list[UploadResult] = []
-    total_size = 0
-    for upload in files:
-        content = await upload.read()
-        size = len(content)
-        total_size += size
-        if size > 50 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail=f"File too large: {upload.filename}")
-        if total_size > 100 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Total upload size exceeds 100 MB")
-        safe_name = _sanitize_upload_name(upload.filename or "upload")
-        stored_name = f"{uuid4().hex[:12]}-{safe_name}"
-        target = (upload_dir / stored_name).resolve()
-        if not str(target).startswith(str(project_path)):
-            raise HTTPException(status_code=403, detail="Invalid upload path")
-        target.write_bytes(content)
-        rel_path = str(target.relative_to(project_path))
-        mime_type = upload.content_type or "application/octet-stream"
-        results.append(UploadResult(
-            path=rel_path,
-            name=upload.filename or safe_name,
-            mime_type=mime_type,
-            size=size,
-            kind=_upload_kind(mime_type, safe_name),
-        ))
-    return results
-
-
-@api.get("/projects/{project_id}/files")
-async def api_list_files(project_id: str, hidden: bool = False):
-    proj = storage.get_project(project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_path = Path(proj.path).resolve()
-    if not project_path.exists() or not project_path.is_dir():
-        raise HTTPException(status_code=400, detail="Project path does not exist")
-    files: list[str] = []
-    for root, dirs, filenames in os.walk(project_path):
-        dirs[:] = [
-            d for d in dirs
-            if d not in _EXCLUDED_DIRS and (hidden or not d.startswith("."))
-        ]
-        for f in sorted(filenames):
-            if not hidden and f.startswith("."):
-                continue
-            rel = os.path.relpath(os.path.join(root, f), project_path)
-            files.append(rel)
-            if len(files) >= 5000:
-                break
-        if len(files) >= 5000:
-            break
-    return {"root": proj.path, "files": sorted(files)}
-
-
-app.include_router(api)
-
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend" / "dist"
 
 
@@ -1133,16 +744,8 @@ def _resolve_project_file(project_id: str, path: str) -> tuple[Path, Path]:
     return project_path, target
 
 
-@app.get("/api/projects/{project_id}/file/embed")
-async def api_read_file_embed(project_id: str, path: str, token: str):
-    if not check_token(token):
-        raise HTTPException(status_code=401, detail="Invalid token")
-    _, target = _resolve_project_file(project_id, path)
-    media_type, _ = mimetypes.guess_type(str(target))
-    response = FileResponse(target, media_type=media_type or "application/octet-stream")
-    response.headers["Content-Disposition"] = f'inline; filename="{target.name}"'
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    return response
+api = create_api_router(check_token=check_token, resolve_project_file=_resolve_project_file)
+app.include_router(api)
 
 
 @app.get("/{rest:path}", response_class=HTMLResponse)
@@ -1175,250 +778,6 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _sanitize_public_name(name: str) -> str:
-    cleaned = Path(name).name.strip().replace("\x00", "")
-    safe = "".join(ch if ch.isalnum() or ch in {".", "-", "_"} else "-" for ch in cleaned)
-    return safe or "shared-file"
-
-
-def _public_url_base(ws: WebSocket) -> str:
-    if PUBLIC_BASE_URL:
-        return PUBLIC_BASE_URL
-    origin = ws.headers.get("origin", "").strip().rstrip("/")
-    if origin:
-        return origin
-    host = ws.headers.get("host", "").strip()
-    if not host:
-        return ""
-    proto = "https" if ws.url.scheme == "wss" else "http"
-    return f"{proto}://{host}"
-
-
-def _share_output_name(output_name: str) -> str:
-    path = Path(output_name)
-    if path.suffix.lower() in {".html", ".md"}:
-        return path.stem
-    return output_name
-
-
-def _shared_access_key(name: str) -> str:
-    path = Path(name)
-    if path.suffix.lower() in {".html", ".md"}:
-        return path.stem
-    return path.name
-
-
-def _load_public_access() -> dict[str, list[str]]:
-    access_file = PUBLIC_DIR / ".access.json"
-    try:
-        data = json.loads(access_file.read_text())
-        if isinstance(data, dict):
-            return {str(k): [str(v) for v in values if isinstance(v, str)] for k, values in data.items() if isinstance(values, list)}
-    except Exception:
-        pass
-    return {}
-
-
-def _save_public_access(rules: dict[str, list[str]]) -> None:
-    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
-    access_file = PUBLIC_DIR / ".access.json"
-    access_file.write_text(json.dumps(rules, indent=2, sort_keys=True) + "\n")
-
-
-def _share_output(output_name: str, ws: WebSocket, token: str | None = None) -> str:
-    public_name = _share_output_name(output_name)
-    path = f"/{public_name}"
-    if token:
-        path = f"{path}?t={token}"
-    base = _public_url_base(ws)
-    if base:
-        full_url = f"{base}{path}"
-        return f"Shared to {full_url}"
-    return f"Shared to {path}"
-
-
-def _share_url_for_slug(slug: str, ws: WebSocket, token: str | None = None) -> str:
-    path = f"/{slug}"
-    if token:
-        path = f"{path}?t={token}"
-    base = _public_url_base(ws)
-    if base:
-        return f"{base}{path}"
-    return path
-
-
-def _resolve_share_source(project_root: Path, raw_path: str) -> tuple[Path | None, str | None]:
-    allowed_exts = {".md", ".html", ".pdf"}
-    rel_path = raw_path.strip()
-    if rel_path.startswith("@"):
-        rel_path = rel_path[1:]
-    rel_path = rel_path.strip()
-    if not rel_path:
-        return None, "Usage: /share <project-relative .md, .html, or .pdf file>"
-
-    direct = (project_root / rel_path).resolve()
-    if not str(direct).startswith(str(project_root)):
-        return None, "Source file must be inside the current project"
-    if direct.is_file() and direct.suffix.lower() in allowed_exts:
-        return direct, None
-
-    search_terms: list[str] = []
-    if rel_path:
-        search_terms.append(rel_path)
-        rel_obj = Path(rel_path)
-        if rel_obj.suffix.lower() not in allowed_exts:
-            search_terms.extend([f"{rel_path}.md", f"{rel_path}.html", f"{rel_path}.pdf"])
-        name = rel_obj.name
-        if name and name not in search_terms:
-            search_terms.append(name)
-        if name and Path(name).suffix.lower() not in allowed_exts:
-            search_terms.extend([f"{name}.md", f"{name}.html", f"{name}.pdf"])
-
-    candidates: list[Path] = []
-    seen: set[str] = set()
-    for file_path in project_root.rglob("*"):
-        if not file_path.is_file():
-            continue
-        if file_path.suffix.lower() not in allowed_exts:
-            continue
-        try:
-            rel = str(file_path.relative_to(project_root))
-        except ValueError:
-            continue
-        rel_lower = rel.lower()
-        name_lower = file_path.name.lower()
-        if any(rel_lower == term.lower() or name_lower == term.lower() for term in search_terms):
-            if rel not in seen:
-                seen.add(rel)
-                candidates.append(file_path)
-
-    if len(candidates) == 1:
-        return candidates[0], None
-    if len(candidates) > 1:
-        options = ", ".join(str(p.relative_to(project_root)) for p in sorted(candidates)[:5])
-        more = "" if len(candidates) <= 5 else f", ... ({len(candidates)} matches)"
-        return None, f"Multiple matching files found: {options}{more}"
-    return None, "No matching .md, .html, or .pdf file found"
-
-
-def _parse_share_args(cmd_args: str) -> tuple[str, str | None]:
-    raw = cmd_args.strip()
-    if not raw:
-        return "", None
-    parts = raw.rsplit(None, 1)
-    if len(parts) == 2 and parts[1].strip():
-        candidate_path, candidate_token = parts[0].strip(), parts[1].strip()
-        if candidate_path:
-            return candidate_path, candidate_token
-    return raw, None
-
-
-async def _handle_share(cmd_args: str, project_path: Path, ws: WebSocket) -> str:
-    project_root = project_path.resolve()
-    source_arg, token_arg = _parse_share_args(cmd_args)
-    source, error = _resolve_share_source(project_root, source_arg)
-    if error:
-        return error
-    assert source is not None
-
-    ext = source.suffix.lower()
-    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
-
-    if ext in {".html", ".pdf"}:
-        output_name = _sanitize_public_name(source.name)
-        destination = (PUBLIC_DIR / output_name).resolve()
-        if destination.parent != PUBLIC_DIR.resolve():
-            return "Invalid destination"
-        destination.write_bytes(source.read_bytes())
-    else:
-        content = source.read_text(errors="replace")
-        is_marp = content.lstrip().startswith("---") and "marp:" in content[:500]
-        if is_marp:
-            output_name = _sanitize_public_name(f"{source.stem}.html")
-            destination = (PUBLIC_DIR / output_name).resolve()
-            if destination.parent != PUBLIC_DIR.resolve():
-                return "Invalid destination"
-            proc = await asyncio.create_subprocess_exec(
-                "marp", "--html", str(source), "-o", str(destination),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                err = stderr.decode(errors="replace").strip()
-                return f"Marp build failed: {err or 'unknown error'}"
-        else:
-            output_name = _sanitize_public_name(source.name)
-            destination = (PUBLIC_DIR / output_name).resolve()
-            if destination.parent != PUBLIC_DIR.resolve():
-                return "Invalid destination"
-            destination.write_text(content)
-
-    access_key = _shared_access_key(output_name)
-    rules = _load_public_access()
-    existing_tokens = [t for t in rules.get(access_key, []) if t]
-    token = token_arg or (existing_tokens[0] if existing_tokens else uuid4().hex[:12])
-    rules[access_key] = [token]
-    _save_public_access(rules)
-    return _share_output(output_name, ws, token=token)
-
-
-def _resolve_unshare_target(public_root: Path, raw_path: str) -> str | None:
-    rel_path = raw_path.strip()
-    if rel_path.startswith("@"):
-        rel_path = rel_path[1:]
-    rel_path = rel_path.strip()
-    if not rel_path:
-        return None
-    direct = (public_root / rel_path).resolve()
-    if str(direct).startswith(str(public_root)) and direct.is_file() and direct.suffix.lower() in {".md", ".html", ".pdf"}:
-        return _shared_access_key(direct.name)
-    return _shared_access_key(rel_path)
-
-
-async def _handle_shares(ws: WebSocket) -> str:
-    rules = _load_public_access()
-    public_root = PUBLIC_DIR.resolve()
-    shared_files: dict[str, str] = {}
-    if public_root.exists():
-        for file_path in sorted(public_root.iterdir()):
-            if not file_path.is_file() or file_path.name.startswith("."):
-                continue
-            if file_path.suffix.lower() not in {".md", ".html", ".pdf"}:
-                continue
-            shared_files[_shared_access_key(file_path.name)] = file_path.name
-
-    if not shared_files:
-        return "No shared files"
-
-    lines: list[str] = []
-    for slug, filename in shared_files.items():
-        tokens = [t for t in rules.get(slug, []) if t]
-        url = _share_url_for_slug(slug, ws, tokens[0] if tokens else None)
-        lines.append(f"{filename}: {url}")
-    return "\n".join(lines)
-
-
-async def _handle_unshare(cmd_args: str) -> str:
-    slug = _resolve_unshare_target(PUBLIC_DIR.resolve(), cmd_args)
-    if not slug:
-        return "Usage: /unshare <path-or-slug>"
-    removed_files: list[str] = []
-    pdf_target = (PUBLIC_DIR / slug).resolve()
-    if pdf_target.parent == PUBLIC_DIR.resolve() and pdf_target.is_file() and pdf_target.suffix.lower() == ".pdf":
-        pdf_target.unlink()
-        removed_files.append(pdf_target.name)
-    for ext in (".html", ".md"):
-        target = (PUBLIC_DIR / f"{slug}{ext}").resolve()
-        if target.parent == PUBLIC_DIR.resolve() and target.is_file():
-            target.unlink()
-            removed_files.append(target.name)
-    rules = _load_public_access()
-    rules.pop(slug, None)
-    _save_public_access(rules)
-    if not removed_files:
-        return f"Nothing shared for {slug}"
-    return f"Unshared {', '.join(removed_files)}"
 
 
 @app.websocket("/api/ws/{convo_id}")
@@ -1708,7 +1067,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     elif skill.name == "model":
                         await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
-                        from backend.agents import active_model, _available, set_model
+                        from backend.agent.agents import active_model, _available, set_model
                         if cmd_args.strip():
                             try:
                                 new_model = set_model(cmd_args.strip())
@@ -1735,7 +1094,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     elif skill.name == "share":
                         await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
-                        output = await _handle_share(cmd_args, project_path, ws)
+                        output = await handle_share(cmd_args, project_path, ws, PUBLIC_DIR, PUBLIC_BASE_URL)
                         await _append_message(convo_id, _tool_event("share", event_type="skill-result", output=output))
                         if message_id:
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)
@@ -1744,7 +1103,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     elif skill.name == "shares":
                         await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
-                        output = await _handle_shares(ws)
+                        output = await handle_shares(ws, PUBLIC_DIR, PUBLIC_BASE_URL)
                         await _append_message(convo_id, _tool_event("shares", event_type="skill-result", output=output))
                         if message_id:
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)
@@ -1753,7 +1112,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     elif skill.name == "unshare":
                         await _append_message(convo_id, _user_event(prompt, message_id=message_id, server_command=True))
                         _invalidate_message_cache()
-                        output = await _handle_unshare(cmd_args)
+                        output = await handle_unshare(cmd_args, PUBLIC_DIR)
                         await _append_message(convo_id, _tool_event("unshare", event_type="skill-result", output=output))
                         if message_id:
                             processed_message_ids.setdefault(convo_id, set()).add(message_id)

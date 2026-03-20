@@ -15,36 +15,38 @@ def test_check_token_requires_exact_match(server_module):
 
 
 def test_parse_share_args_splits_optional_token(server_module):
-    server = server_module
+    from backend.runtime import commands
 
-    assert server._parse_share_args("docs/report.md abc123") == ("docs/report.md", "abc123")
-    assert server._parse_share_args("docs/report.md") == ("docs/report.md", None)
-    assert server._parse_share_args("  ") == ("", None)
+    assert commands.parse_share_args("docs/report.md abc123") == ("docs/report.md", "abc123")
+    assert commands.parse_share_args("docs/report.md") == ("docs/report.md", None)
+    assert commands.parse_share_args("  ") == ("", None)
 
 
 def test_resolve_share_source_handles_direct_match_and_errors(server_module, tmp_path: Path):
-    server = server_module
+    from backend.runtime import commands
+
     project_root = tmp_path / "project"
     project_root.mkdir()
     report = project_root / "docs" / "report.md"
     report.parent.mkdir(parents=True)
     report.write_text("# Report\n")
 
-    source, error = server._resolve_share_source(project_root, "docs/report.md")
+    source, error = commands.resolve_share_source(project_root, "docs/report.md")
     assert source == report
     assert error is None
 
-    source, error = server._resolve_share_source(project_root, "")
+    source, error = commands.resolve_share_source(project_root, "")
     assert source is None
     assert error is not None
 
-    source, error = server._resolve_share_source(project_root, "../outside.md")
+    source, error = commands.resolve_share_source(project_root, "../outside.md")
     assert source is None
     assert error == "Source file must be inside the current project"
 
 
 def test_resolve_share_source_reports_ambiguous_matches(server_module, tmp_path: Path):
-    server = server_module
+    from backend.runtime import commands
+
     project_root = tmp_path / "project"
     project_root.mkdir()
     for subdir in ("a", "b"):
@@ -52,7 +54,7 @@ def test_resolve_share_source_reports_ambiguous_matches(server_module, tmp_path:
         path.parent.mkdir(parents=True)
         path.write_text("# Report\n")
 
-    source, error = server._resolve_share_source(project_root, "report")
+    source, error = commands.resolve_share_source(project_root, "report")
     assert source is None
     assert error is not None
     assert error.startswith("Multiple matching files found:")

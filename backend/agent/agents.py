@@ -9,7 +9,7 @@ from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.tools import DeferredToolRequests
 from pydantic_ai.usage import UsageLimits
 
-from backend import tools
+from backend.agent import tools
 
 # Context window sizes per model (in tokens)
 MODEL_CONTEXT_LIMITS: dict[str, int] = {
@@ -161,7 +161,7 @@ def create_agent(config: "AgentConfig | None" = None) -> Agent:
     if config is None:
         return agent
 
-    from backend.agent_config import AgentConfig  # noqa: F811
+    from backend.agent.agent_config import AgentConfig  # noqa: F811
 
     agent_model = config.model if config.model else model
     prompt = SYSTEM_PROMPT

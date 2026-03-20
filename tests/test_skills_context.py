@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.context import build_project_instructions
-from backend.skills import SkillType, get_skill, get_skills
+from backend.agent.context import build_project_instructions
+from backend.agent.skills import SkillType, get_skill, get_skills
 
 
 def test_packaged_project_skill_is_loaded(tmp_path: Path):

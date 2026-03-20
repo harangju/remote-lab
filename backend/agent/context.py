@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from backend.skills import get_skills, SkillType, GLOBAL_SKILLS_DIR
+from backend.agent.skills import get_skills, SkillType, GLOBAL_SKILLS_DIR
 
 _EXCLUDED_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".env",

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.agent_config import AgentConfig
-from backend.mentions import extract_file_mentions, parse_mentions
+from backend.agent.agent_config import AgentConfig
+from backend.agent.mentions import extract_file_mentions, parse_mentions
 
 
 def test_parse_mentions_prefers_explicit_matches_and_cleans_text():
