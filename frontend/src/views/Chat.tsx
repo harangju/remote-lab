@@ -1292,15 +1292,33 @@ export function Chat() {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(false);
           const blocks = [...blocksRef.current];
-          blocks.push({
-            type: "tool",
-            tool_call_id: data.tool_call_id,
-            name: data.name,
-            input: data.args,
-            awaitingApproval: true,
-            approvalStatus: "pending",
-            canAllowProject: data.can_allow_project !== false,
-          });
+          let matched = false;
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const b = blocks[i];
+            if (b.type === "tool" && b.tool_call_id === data.tool_call_id) {
+              blocks[i] = {
+                ...b,
+                name: data.name,
+                input: data.args ?? b.input,
+                awaitingApproval: true,
+                approvalStatus: "pending",
+                canAllowProject: data.can_allow_project !== false,
+              };
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
+            blocks.push({
+              type: "tool",
+              tool_call_id: data.tool_call_id,
+              name: data.name,
+              input: data.args,
+              awaitingApproval: true,
+              approvalStatus: "pending",
+              canAllowProject: data.can_allow_project !== false,
+            });
+          }
           blocksRef.current = blocks;
           setStreamBlocks(blocksRef.current);
           break;
