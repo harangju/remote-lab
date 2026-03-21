@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { FileText, Pencil, FolderOpen, Sparkles, Archive, MessageSquarePlus, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { FileText, Pencil, FolderOpen, Sparkles, Archive, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Leaf, TreePine, Flower2, Apple, Cherry, Fish, Bird, Wheat, Sprout, Rabbit, Turtle, Squirrel, Grape, Citrus, Bug, Shell, Orbit, Mountain, Waves, CloudSun, Snowflake, Flame, Gem, Feather } from "lucide-react";
 import { listConvos, createConvo, updateConvo, type ConvoMeta } from "../api";
 import { btnIcon, colors, input as inputStyle } from "../styles";
 import { FilePanel } from "../components/FilePanel";
@@ -85,6 +85,39 @@ function railStatusColor(tone: RailStatusTone): string {
   if (tone === "error") return colors.badgeError;
   if (tone === "done") return colors.badgeDone;
   return colors.badgeIdle;
+}
+
+const railIdentityIcons = [
+  Leaf,
+  TreePine,
+  Flower2,
+  Apple,
+  Cherry,
+  Fish,
+  Bird,
+  Wheat,
+  Sprout,
+  Rabbit,
+  Turtle,
+  Squirrel,
+  Grape,
+  Citrus,
+  Bug,
+  Shell,
+  Orbit,
+  Mountain,
+  Waves,
+  CloudSun,
+  Snowflake,
+  Flame,
+  Gem,
+  Feather,
+];
+
+function railIdentityIcon(convoId: string) {
+  let hash = 0;
+  for (let i = 0; i < convoId.length; i += 1) hash = (hash * 31 + convoId.charCodeAt(i)) >>> 0;
+  return railIdentityIcons[hash % railIdentityIcons.length] || Leaf;
 }
 
 export function Chat() {
@@ -421,6 +454,7 @@ export function Chat() {
             const tone = railStatusTone(convo);
             const statusColor = railStatusColor(tone);
             const isActive = convo.id === convId;
+            const IdentityIcon = railIdentityIcon(convo.id);
             const sublabel = convo.status === "running"
               ? "running"
               : timeAgo(convo.last_event_at || convo.updated_at);
@@ -436,6 +470,7 @@ export function Chat() {
                   title={railCollapsed ? (convo.title || "Untitled") : undefined}
                   style={{
                     width: "100%",
+                    minHeight: "44px",
                     display: "flex",
                     alignItems: railCollapsed ? "center" : "flex-start",
                     justifyContent: railCollapsed ? "center" : undefined,
@@ -446,9 +481,13 @@ export function Chat() {
                     background: isActive ? colors.bgSurface : "transparent",
                     color: colors.text,
                     textAlign: railCollapsed ? "center" : "left",
+                    position: "relative",
                   }}
                 >
-                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, flexShrink: 0, marginTop: railCollapsed ? 0 : 5 }} />
+                  <span style={{ position: "relative", width: 18, height: 18, flexShrink: 0, marginTop: railCollapsed ? 0 : 2, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    <IdentityIcon size={16} style={{ color: isActive ? colors.text : colors.textMuted, flexShrink: 0 }} />
+                    <span style={{ position: "absolute", top: railCollapsed ? 0 : -1, right: railCollapsed ? -1 : -2, width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 0 2px ${isActive ? colors.bgSurface : colors.bg}` }} />
+                  </span>
                   {!railCollapsed && (
                     <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
                       <span style={{ fontSize: "0.84rem", fontWeight: isActive ? 600 : 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
