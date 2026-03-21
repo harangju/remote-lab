@@ -2,8 +2,8 @@ import { resolve } from "path";
 import { readdirSync, copyFileSync } from "fs";
 
 const result = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, "main.tsx")],
-  outdir: resolve(import.meta.dir, "../dist"),
+  entrypoints: [resolve(import.meta.dir, "src/main.tsx")],
+  outdir: resolve(import.meta.dir, "dist"),
   minify: true,
   splitting: true,
   target: "browser",
@@ -15,9 +15,9 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
-// Copy index.html to dist/, injecting the built script name
-const outDir = resolve(import.meta.dir, "../dist");
-const publicDir = resolve(import.meta.dir, "../public");
+
+const outDir = resolve(import.meta.dir, "dist");
+const publicDir = resolve(import.meta.dir, "public");
 const jsFile = result.outputs.find((o) => o.path.endsWith(".js"));
 const scriptName = jsFile ? jsFile.path.split("/").pop()! : "main.js";
 const buildHash = Date.now().toString(36);
@@ -27,7 +27,6 @@ await Bun.write(
   html.replace("/main.js", `/${scriptName}?v=${buildHash}`),
 );
 
-// Copy all other public files (manifest, icons, sw.js, etc.)
 for (const file of readdirSync(publicDir)) {
   if (file === "index.html") continue;
   copyFileSync(resolve(publicDir, file), resolve(outDir, file));

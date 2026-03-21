@@ -2,8 +2,8 @@
   "name": "remote-lab-frontend",
   "private": true,
   "scripts": {
-    "dev": "bun run --hot src/dev.ts",
-    "build": "bun run src/build.ts",
+    "dev": "bun run --hot dev.ts",
+    "build": "bun run build.ts",
     "test": "bun test"
   },
   "dependencies": {
