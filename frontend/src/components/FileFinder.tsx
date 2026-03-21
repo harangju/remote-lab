@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { Search, X, FileText, Folder, ChevronRight, ChevronDown, CornerDownLeft } from "lucide-react";
+import { colors, overlayBackdrop, overlayHeader, overlayPanel, interactiveRow } from "../styles";
 
 interface FileFinderProps {
   files: string[];
@@ -22,7 +23,6 @@ interface ExplorerRow {
   depth: number;
 }
 
-/** Simple fuzzy match: all characters of query appear in order in target. */
 function fuzzyMatch(query: string, target: string): boolean {
   const q = query.toLowerCase();
   const t = target.toLowerCase();
@@ -33,7 +33,6 @@ function fuzzyMatch(query: string, target: string): boolean {
   return qi === q.length;
 }
 
-/** Score a match — lower is better. Prefers filename matches over path matches. */
 function fuzzyScore(query: string, target: string): number {
   const q = query.toLowerCase();
   const filename = target.split("/").pop()?.toLowerCase() || "";
@@ -82,9 +81,7 @@ function flattenTree(node: TreeNode, expanded: Set<string>, depth = 0): Explorer
   const rows: ExplorerRow[] = [];
   for (const dir of node.dirs) {
     rows.push({ type: "dir", path: dir.path, depth });
-    if (expanded.has(dir.path)) {
-      rows.push(...flattenTree(dir, expanded, depth + 1));
-    }
+    if (expanded.has(dir.path)) rows.push(...flattenTree(dir, expanded, depth + 1));
   }
   for (const file of node.files) {
     const fullPath = node.path ? `${node.path}/${file}` : file;
@@ -100,7 +97,7 @@ function defaultExpandedDirs(): Set<string> {
 export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: FileFinderProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => defaultExpandedDirs(files));
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => defaultExpandedDirs());
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -109,7 +106,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
   }, []);
 
   useEffect(() => {
-    setExpandedDirs(defaultExpandedDirs(files));
+    setExpandedDirs(defaultExpandedDirs());
   }, [files]);
 
   const effectiveShowHidden = query.includes(".");
@@ -143,11 +140,8 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
   useEffect(() => {
     const queryChanged = prevQueryRef.current !== query;
     const listWasEmpty = prevVisibleLenRef.current === 0;
-    if (queryChanged || listWasEmpty) {
-      setSelectedIndex(0);
-    } else {
-      setSelectedIndex((i) => Math.min(i, Math.max(visibleRows.length - 1, 0)));
-    }
+    if (queryChanged || listWasEmpty) setSelectedIndex(0);
+    else setSelectedIndex((i) => Math.min(i, Math.max(visibleRows.length - 1, 0)));
     prevQueryRef.current = query;
     prevVisibleLenRef.current = visibleRows.length;
   }, [query, visibleRows.length]);
@@ -168,10 +162,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
 
   const handleActivate = (row: ExplorerRow | undefined) => {
     if (!row) return;
-    if (row.type === "dir") {
-      toggleDir(row.path);
-      return;
-    }
+    if (row.type === "dir") return toggleDir(row.path);
     onSelect(row.path);
     onClose();
   };
@@ -204,43 +195,21 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
 
   return (
     <>
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.3)",
-          zIndex: 1000,
-        }}
-      />
+      <div onClick={onClose} style={overlayBackdrop} />
 
       <div
         className="file-finder"
         style={{
-          position: "fixed",
+          ...overlayPanel,
           top: "10vh",
           left: "50%",
           transform: "translateX(-50%)",
           width: "min(640px, 92vw)",
           maxHeight: "72vh",
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: "10px",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-          display: "flex",
-          flexDirection: "column",
-          zIndex: 1001,
-          overflow: "hidden",
         }}
       >
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "10px 14px",
-          borderBottom: "1px solid var(--border)",
-        }}>
-          <Search size={16} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+        <div style={{ ...overlayHeader, color: colors.text }}>
+          <Search size={16} style={{ color: colors.textMuted, flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={query}
@@ -252,7 +221,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
               background: "none",
               border: "none",
               outline: "none",
-              color: "var(--text)",
+              color: colors.text,
               fontSize: "0.9rem",
               fontFamily: "inherit",
             }}
@@ -260,14 +229,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
           {query && (
             <button
               onClick={() => setQuery("")}
-              style={{
-                background: "none",
-                border: "none",
-                padding: "2px",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                display: "inline-flex",
-              }}
+              style={{ background: "none", border: "none", padding: "2px", color: colors.textMuted, display: "inline-flex" }}
             >
               <X size={14} />
             </button>
@@ -275,23 +237,13 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
         </div>
 
         <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
-          {loading && (
-            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-muted)", fontSize: "0.8rem" }}>
-              Loading files...
-            </div>
-          )}
-          {!loading && visibleRows.length === 0 && (
-            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-muted)", fontSize: "0.8rem" }}>
-              {query ? "No files match" : "No files found"}
-            </div>
-          )}
+          {loading && <div style={{ padding: "20px", textAlign: "center", color: colors.textMuted, fontSize: "0.8rem" }}>Loading files...</div>}
+          {!loading && visibleRows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: colors.textMuted, fontSize: "0.8rem" }}>{query ? "No files match" : "No files found"}</div>}
           {!loading && visibleRows.map((row, i) => {
             const isSelected = i === selectedIndex;
             const isTouched = row.type === "file" && touchedSet.has(row.path);
             const name = row.path.split("/").pop() || row.path;
-            const dir = row.type === "file"
-              ? row.path.split("/").slice(0, -1).join("/")
-              : row.path;
+            const dir = row.type === "file" ? row.path.split("/").slice(0, -1).join("/") : row.path;
             const isExpanded = row.type === "dir" && expandedDirs.has(row.path);
 
             return (
@@ -300,44 +252,26 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
                 onClick={() => handleActivate(row)}
                 onMouseEnter={() => setSelectedIndex(i)}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  width: "100%",
+                  ...interactiveRow(isSelected),
                   padding: "7px 14px",
                   paddingLeft: `${14 + row.depth * 18}px`,
-                  background: isSelected ? "var(--bg-surface)" : "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text)",
-                  fontSize: "0.82rem",
-                  textAlign: "left",
                   fontFamily: row.type === "file" ? "monospace" : "inherit",
                 }}
               >
                 {row.type === "dir" ? (
                   <>
-                    {isExpanded ? <ChevronDown size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} /> : <ChevronRight size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />}
-                    <Folder size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+                    {isExpanded ? <ChevronDown size={14} style={{ flexShrink: 0, color: colors.textMuted }} /> : <ChevronRight size={14} style={{ flexShrink: 0, color: colors.textMuted }} />}
+                    <Folder size={14} style={{ flexShrink: 0, color: colors.textMuted }} />
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>{name}</span>
                   </>
                 ) : (
                   <>
-                    <FileText size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+                    <FileText size={14} style={{ flexShrink: 0, color: colors.textMuted }} />
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <span style={{ fontWeight: 500 }}>{name}</span>
-                      {query && dir && <span style={{ color: "var(--text-muted)", marginLeft: "6px" }}>{dir}/</span>}
+                      {query && dir && <span style={{ color: colors.textMuted, marginLeft: "6px" }}>{dir}/</span>}
                     </span>
-                    {isTouched && (
-                      <span style={{
-                        width: 5,
-                        height: 5,
-                        borderRadius: "50%",
-                        background: "var(--accent)",
-                        flexShrink: 0,
-                        marginLeft: "auto",
-                      }} data-tooltip="Modified in this conversation" />
-                    )}
+                    {isTouched && <span style={{ width: 5, height: 5, borderRadius: "50%", background: colors.accent, flexShrink: 0, marginLeft: "auto" }} data-tooltip="Modified in this conversation" />}
                   </>
                 )}
               </button>
@@ -345,17 +279,7 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
           })}
         </div>
 
-        <div
-          style={{
-            padding: "6px 14px",
-            borderTop: "1px solid var(--border)",
-            fontSize: "0.7rem",
-            color: "var(--text-muted)",
-            display: "flex",
-            gap: "12px",
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ padding: "6px 14px", borderTop: `1px solid ${colors.border}`, fontSize: "0.7rem", color: colors.textMuted, display: "flex", gap: "12px", flexWrap: "wrap" }}>
           <span>↑↓ navigate</span>
           <span>↵ open</span>
           {!query && <span>←→ fold</span>}

@@ -1,17 +1,55 @@
-// Shared inline styles — keeps things simple until we add a CSS framework.
+// Shared inline styles — lightweight design tokens + reusable primitives.
 
 export const colors = {
   bg: "var(--bg)",
   bgSurface: "var(--bg-surface)",
+  bgSurfaceHover: "var(--bg-surface-hover)",
   border: "var(--border)",
+  borderStrong: "var(--border-strong)",
   text: "var(--text)",
   textMuted: "var(--text-muted)",
   accent: "var(--accent)",
-  danger: "#c4554d",
-  badgeIdle: "#9b9a97",
-  badgeRunning: "#d9a754",
-  badgeDone: "#4d9375",
-  badgeError: "#c4554d",
+  accentSoft: "var(--accent-soft)",
+  success: "var(--success)",
+  successSoft: "var(--success-soft)",
+  warning: "var(--warning)",
+  warningSoft: "var(--warning-soft)",
+  danger: "var(--danger)",
+  dangerSoft: "var(--danger-soft)",
+  overlay: "var(--overlay)",
+  codeBg: "var(--code-bg)",
+  badgeIdle: "var(--text-muted)",
+  badgeRunning: "var(--warning)",
+  badgeDone: "var(--success)",
+  badgeError: "var(--danger)",
+};
+
+export const radius = {
+  sm: "4px",
+  md: "6px",
+  lg: "8px",
+  xl: "10px",
+  pill: "999px",
+};
+
+export const shadow = {
+  overlay: "0 8px 32px rgba(0,0,0,0.2)",
+  focus: "0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent)",
+};
+
+export const zIndex = {
+  overlayBackdrop: 1000,
+  overlayPanel: 1001,
+  tooltip: 2147483647,
+};
+
+export const controlSize = {
+  icon: "34px",
+};
+
+export const transition = {
+  fast: "120ms ease",
+  button: "140ms ease",
 };
 
 /** Inject CSS variables for light/dark mode into document head. */
@@ -23,10 +61,20 @@ export function injectTheme() {
     :root {
       --bg: #fbfaf8;
       --bg-surface: #f3f2ee;
+      --bg-surface-hover: #ece9e2;
       --border: #e6e4df;
+      --border-strong: #d7d3cc;
       --text: #37352f;
       --text-muted: #9b9a97;
       --accent: #b4885d;
+      --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--bg));
+      --success: #4d9375;
+      --success-soft: rgba(77,147,117,0.12);
+      --warning: #d9a754;
+      --warning-soft: rgba(217,167,84,0.14);
+      --danger: #c4554d;
+      --danger-soft: rgba(196,85,77,0.12);
+      --overlay: rgba(0,0,0,0.3);
       --bg-user: #ede9e3;
       --border-user: #ddd9d3;
       --bg-bash-user: #e7ece7;
@@ -39,10 +87,20 @@ export function injectTheme() {
       :root {
         --bg: #191919;
         --bg-surface: #202020;
+        --bg-surface-hover: #272727;
         --border: #2e2e2e;
+        --border-strong: #3a3a3a;
         --text: #e8e7e4;
         --text-muted: #8b8a86;
         --accent: #c9a57c;
+        --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--bg));
+        --success: #6aa88c;
+        --success-soft: rgba(106,168,140,0.16);
+        --warning: #d9a754;
+        --warning-soft: rgba(217,167,84,0.16);
+        --danger: #d06a63;
+        --danger-soft: rgba(208,106,99,0.16);
+        --overlay: rgba(0,0,0,0.46);
         --bg-user: #2a2926;
         --border-user: #3a3835;
         --bg-bash-user: #202723;
@@ -53,7 +111,6 @@ export function injectTheme() {
       }
     }
     *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    /* Prevent iOS zoom on input focus */
     input, textarea, select { font-size: 16px !important; }
     html, body {
       margin: 0;
@@ -85,7 +142,7 @@ export function injectTheme() {
       white-space: nowrap;
       border-radius: 4px;
       pointer-events: none;
-      z-index: 2147483647;
+      z-index: ${zIndex.tooltip};
     }
     [data-tooltip][data-tooltip-pos="top"]:hover::after {
       top: auto;
@@ -97,7 +154,7 @@ export function injectTheme() {
       cursor: pointer;
       font-family: inherit;
       font-size: 0.875rem;
-      transition: filter 140ms ease, transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+      transition: filter ${transition.button}, transform ${transition.button}, box-shadow ${transition.button}, opacity ${transition.button};
     }
     button:hover:not(:disabled) {
       filter: brightness(0.97);
@@ -122,7 +179,6 @@ export function injectTheme() {
       font-family: inherit;
       font-size: 0.875rem;
     }
-    /* Hide scrollbars but keep scrolling */
     * {
       scrollbar-width: none;
     }
@@ -133,7 +189,6 @@ export function injectTheme() {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
     }
-    /* Artifact panel: full-screen overlay on mobile */
     @media (max-width: 768px) {
       .artifact-panel-wrap {
         position: fixed !important;
@@ -145,7 +200,6 @@ export function injectTheme() {
         z-index: 100;
       }
     }
-    /* Markdown content resets */
     .md-content p { margin: 0 0 0.4em; }
     .md-content p:last-child { margin-bottom: 0; }
     .md-content ul, .md-content ol { margin: 0.3em 0; padding-left: 1.4em; }
@@ -172,8 +226,6 @@ export function injectTheme() {
   document.head.appendChild(style);
 }
 
-// Reusable style objects
-
 export const container: React.CSSProperties = {
   padding: "1.5rem",
   maxWidth: "48rem",
@@ -181,58 +233,62 @@ export const container: React.CSSProperties = {
 };
 
 export const btnPrimary: React.CSSProperties = {
-  background: "var(--text)",
-  color: "var(--bg)",
+  background: colors.text,
+  color: colors.bg,
   border: "none",
-  borderRadius: "6px",
+  borderRadius: radius.md,
   padding: "6px 14px",
   fontWeight: 500,
 };
 
 export const btnIcon: React.CSSProperties = {
-  background: "var(--bg-surface)",
-  border: "1px solid var(--border)",
-  color: "var(--text)",
+  background: colors.bgSurface,
+  border: `1px solid ${colors.border}`,
+  color: colors.text,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  width: "34px",
-  height: "34px",
-  minWidth: "34px",
-  minHeight: "34px",
+  width: controlSize.icon,
+  height: controlSize.icon,
+  minWidth: controlSize.icon,
+  minHeight: controlSize.icon,
   padding: 0,
   borderRadius: "9px",
   flexShrink: 0,
-  transition: "background 120ms ease, border-color 120ms ease, opacity 120ms ease",
+  transition: `background ${transition.fast}, border-color ${transition.fast}, opacity ${transition.fast}`,
   transform: "none",
   boxShadow: "none",
   appearance: "none",
   WebkitAppearance: "none",
 };
 
-export const btnDanger: React.CSSProperties = {
+export const btnSubtle: React.CSSProperties = {
   background: "transparent",
-  color: "var(--text-muted)",
-  border: "1px solid var(--border)",
-  borderRadius: "6px",
+  color: colors.textMuted,
+  border: `1px solid ${colors.border}`,
+  borderRadius: radius.md,
   padding: "4px 10px",
   fontSize: "0.75rem",
 };
 
+export const btnDanger: React.CSSProperties = {
+  ...btnSubtle,
+};
+
 export const input: React.CSSProperties = {
-  background: "var(--bg-surface)",
-  color: "var(--text)",
-  border: "1px solid var(--border)",
-  borderRadius: "6px",
+  background: colors.bgSurface,
+  color: colors.text,
+  border: `1px solid ${colors.border}`,
+  borderRadius: radius.md,
   padding: "6px 10px",
   outline: "none",
   width: "100%",
 };
 
 export const card: React.CSSProperties = {
-  background: "var(--bg-surface)",
-  border: "1px solid var(--border)",
-  borderRadius: "8px",
+  background: colors.bgSurface,
+  border: `1px solid ${colors.border}`,
+  borderRadius: radius.lg,
   padding: "12px 16px",
   marginBottom: "8px",
   display: "flex",
@@ -240,11 +296,56 @@ export const card: React.CSSProperties = {
   justifyContent: "space-between",
 };
 
-export const backLink: React.CSSProperties = {
-  display: "inline-block",
-  marginBottom: "1rem",
-  fontSize: "0.875rem",
+export const overlayBackdrop: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: colors.overlay,
+  zIndex: zIndex.overlayBackdrop,
 };
+
+export const overlayPanel: React.CSSProperties = {
+  position: "fixed",
+  background: colors.bg,
+  border: `1px solid ${colors.border}`,
+  borderRadius: radius.xl,
+  boxShadow: shadow.overlay,
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+  zIndex: zIndex.overlayPanel,
+};
+
+export const overlayHeader: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  padding: "10px 14px",
+  borderBottom: `1px solid ${colors.border}`,
+  fontSize: "0.82rem",
+  color: colors.textMuted,
+};
+
+export function interactiveRow(selected = false): React.CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    width: "100%",
+    padding: "8px 14px",
+    background: selected ? colors.bgSurface : "transparent",
+    border: "none",
+    cursor: "pointer",
+    color: colors.text,
+    fontSize: "0.82rem",
+    textAlign: "left",
+  };
+}
+
+export function iconButtonHoverStyle(active = false): React.CSSProperties {
+  return {
+    background: active ? colors.bgSurfaceHover : colors.bgSurfaceHover,
+  };
+}
 
 export function badge(status: string): React.CSSProperties {
   const colorMap: Record<string, string> = {
@@ -261,7 +362,7 @@ export function badge(status: string): React.CSSProperties {
     textTransform: "uppercase",
     padding: "2px 8px",
     borderRadius: "10px",
-    background: c + "22",
+    background: `color-mix(in srgb, ${c} 14%, transparent)`,
     color: c,
     ...(status === "running" ? { animation: "pulse 1.5s infinite" } : {}),
   };

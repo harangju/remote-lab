@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { overlayBackdrop, overlayHeader, overlayPanel } from "../styles";
 
 interface ListModalProps {
   title: string;
@@ -21,43 +22,19 @@ export function ListModal({ title, children, width = "min(520px, 92vw)", maxHeig
 
   return (
     <>
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.3)",
-          zIndex: 1000,
-        }}
-      />
+      <div onClick={onClose} style={overlayBackdrop} />
       <div
         ref={panelRef}
         style={{
-          position: "fixed",
+          ...overlayPanel,
           top: "12vh",
           left: "50%",
           transform: "translateX(-50%)",
           width,
           maxHeight,
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: "10px",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          zIndex: 1001,
         }}
       >
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "10px 14px",
-          borderBottom: "1px solid var(--border)",
-          fontSize: "0.82rem",
-          color: "var(--text-muted)",
-        }}>
+        <div style={overlayHeader}>
           <span>{title}</span>
         </div>
         <div style={{ overflowY: "auto", flex: 1 }}>

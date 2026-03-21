@@ -2,10 +2,9 @@ import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "rea
 import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download, FileText } from "lucide-react";
 import type { PanelFile } from "../hooks/usePanel";
 import { getToken } from "../api";
-import { btnIcon } from "../styles";
+import { btnIcon, colors, interactiveRow, overlayHeader, overlayPanel, radius, shadow } from "../styles";
 import { ListModal } from "./ListModal";
 
-// Lazy-load CodeMirror — only fetched when the panel first renders
 const CodeMirrorEditor = lazy(() =>
   import("./CodeMirrorEditor").then((m) => ({ default: m.CodeMirrorEditor }))
 );
@@ -39,39 +38,11 @@ interface FilePanelProps {
   onOpenConversationOption?: (id: string) => void;
 }
 
-const iconBtnStyle: React.CSSProperties = {
-  ...btnIcon,
-  cursor: "pointer",
-};
-
-const btnStyle: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  padding: "4px 8px",
-  color: "var(--text-muted)",
-  cursor: "pointer",
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "4px",
-  fontSize: "0.75rem",
-  borderRadius: "4px",
-};
-
-const iconBtnActiveStyle: React.CSSProperties = {
-  ...btnIcon,
-  background: "var(--text)",
-  border: "1px solid var(--text)",
-  color: "var(--bg)",
-  cursor: "pointer",
-};
-
-const iconBtnDangerStyle: React.CSSProperties = {
-  ...btnIcon,
-  background: "transparent",
-  border: "1px solid color-mix(in srgb, var(--text-muted) 55%, var(--border))",
-  color: "var(--text-muted)",
-  cursor: "pointer",
-};
+const iconBtnStyle: React.CSSProperties = { ...btnIcon, cursor: "pointer" };
+const btnStyle: React.CSSProperties = { background: "none", border: "none", padding: "4px 8px", color: colors.textMuted, display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.75rem", borderRadius: radius.sm };
+const iconBtnActiveStyle: React.CSSProperties = { ...btnIcon, background: colors.text, border: `1px solid ${colors.text}`, color: colors.bg, cursor: "pointer" };
+const iconBtnDangerStyle: React.CSSProperties = { ...btnIcon, background: "transparent", border: `1px solid color-mix(in srgb, ${colors.textMuted} 55%, ${colors.border})`, color: colors.textMuted, cursor: "pointer" };
+const conversationPopoverStyle: React.CSSProperties = { ...overlayPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(360px, 82vw)", maxHeight: "min(420px, 60vh)", boxShadow: shadow.overlay, zIndex: 20 };
 
 const docxPreviewStyle = `
   .docx-preview {
@@ -92,34 +63,20 @@ const docxPreviewStyle = `
   .docx-preview h3 { font-size: 1.15em; }
   .docx-preview ul, .docx-preview ol { margin: 0.5em 0 1em; padding-left: 1.5em; }
   .docx-preview li { margin: 0.2em 0; }
-  .docx-preview table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 1em 0;
-    font-size: 0.9rem;
-  }
-  .docx-preview th, .docx-preview td {
-    border: 1px solid var(--border);
-    padding: 8px 10px;
-    vertical-align: top;
-  }
+  .docx-preview table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.9rem; }
+  .docx-preview th, .docx-preview td { border: 1px solid var(--border); padding: 8px 10px; vertical-align: top; }
   .docx-preview th { background: var(--bg-surface); text-align: left; }
   .docx-preview img { max-width: 100%; height: auto; }
   .docx-preview a { color: var(--accent); }
-  .docx-preview blockquote {
-    margin: 1em 0;
-    padding-left: 1em;
-    border-left: 3px solid var(--border);
-    color: var(--text-muted);
-  }
+  .docx-preview blockquote { margin: 1em 0; padding-left: 1em; border-left: 3px solid var(--border); color: var(--text-muted); }
 `;
 
 function hoverIn(e: React.MouseEvent<HTMLButtonElement>) {
-  e.currentTarget.style.background = "color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 12%)";
+  e.currentTarget.style.background = colors.bgSurfaceHover;
 }
 
 function hoverOut(e: React.MouseEvent<HTMLButtonElement>) {
-  e.currentTarget.style.background = "var(--bg-surface)";
+  e.currentTarget.style.background = colors.bgSurface;
 }
 
 function timeAgo(iso: string): string {
@@ -162,16 +119,12 @@ export function FilePanel({
   const pdfFile = isPdf(file.path);
   const previewFile = docxFile || pdfFile;
   const embedToken = getToken();
-  const pdfPreviewUrl = pdfFile && embedToken
-    ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}`
-    : null;
+  const pdfPreviewUrl = pdfFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}` : null;
 
   useEffect(() => {
     if (!showConversationMenu) return;
     const onPointerDown = (event: MouseEvent) => {
-      if (!conversationMenuRef.current?.contains(event.target as Node)) {
-        setShowConversationMenu(false);
-      }
+      if (!conversationMenuRef.current?.contains(event.target as Node)) setShowConversationMenu(false);
     };
     window.addEventListener("mousedown", onPointerDown);
     return () => window.removeEventListener("mousedown", onPointerDown);
@@ -259,261 +212,64 @@ export function FilePanel({
     }
   };
 
+  const conversationActionRow = (icon: React.ReactNode, label: React.ReactNode, onClick: () => void) => (
+    <button onClick={onClick} style={interactiveRow(false)} onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgSurface; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+      {icon}
+      {label}
+    </button>
+  );
+
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      height: "100%",
-      background: "var(--bg)",
-      borderLeft: "1px solid var(--border)",
-    }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: colors.bg, borderLeft: `1px solid ${colors.border}` }}>
       <style>{docxPreviewStyle}</style>
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        padding: "8px 10px",
-        borderBottom: "1px solid var(--border)",
-        flexShrink: 0,
-        minHeight: "40px",
-        position: "relative",
-        zIndex: 2,
-        overflow: "visible",
-      }}>
-        <span style={{
-          flex: 1,
-          fontSize: "0.78rem",
-          fontFamily: "monospace",
-          color: "var(--text)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          direction: "rtl",
-          textAlign: "left",
-        }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderBottom: `1px solid ${colors.border}`, flexShrink: 0, minHeight: "40px", position: "relative", zIndex: 2, overflow: "visible" }}>
+        <span style={{ flex: 1, fontSize: "0.78rem", fontFamily: "monospace", color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
           <bdi>{file.path}</bdi>
         </span>
 
-        {dirty && (
-          <span style={{
-            width: 6, height: 6, borderRadius: "50%",
-            background: "var(--accent)",
-            display: "inline-block",
-            flexShrink: 0,
-          }} data-tooltip="Unsaved changes" />
-        )}
+        {dirty && <span style={{ width: 6, height: 6, borderRadius: "50%", background: colors.accent, display: "inline-block", flexShrink: 0 }} data-tooltip="Unsaved changes" />}
 
         {previewFile ? (
-          <span style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "5px",
-            fontSize: "0.72rem",
-            color: "var(--text-muted)",
-            padding: "0 2px",
-            flexShrink: 0,
-          }} data-tooltip={docxFile ? "Read-only Word preview" : "Read-only PDF preview"}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "0.72rem", color: colors.textMuted, padding: "0 2px", flexShrink: 0 }} data-tooltip={docxFile ? "Read-only Word preview" : "Read-only PDF preview"}>
             <FileText size={14} />
             <span>Preview</span>
           </span>
         ) : editMode ? (
           <>
-            <button
-              onClick={onSave}
-              disabled={saving || !dirty}
-              style={{
-                ...iconBtnActiveStyle,
-                opacity: (saving || !dirty) ? 0.5 : 1,
-                cursor: (saving || !dirty) ? "default" : "pointer",
-              }}
-              data-tooltip={saving ? "Saving..." : "Save (⌘S)"}
-            >
-              <Save size={15} />
-            </button>
-            <button onClick={onCancel} style={iconBtnDangerStyle} data-tooltip="Cancel edit">
-              <X size={16} />
-            </button>
+            <button onClick={onSave} disabled={saving || !dirty} style={{ ...iconBtnActiveStyle, opacity: (saving || !dirty) ? 0.5 : 1, cursor: (saving || !dirty) ? "default" : "pointer" }} data-tooltip={saving ? "Saving..." : "Save (⌘S)"}><Save size={15} /></button>
+            <button onClick={onCancel} style={iconBtnDangerStyle} data-tooltip="Cancel edit"><X size={16} /></button>
           </>
         ) : (
-          <button onClick={onToggleEdit} style={iconBtnStyle} data-tooltip="Edit file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-            <Pencil size={15} />
-          </button>
+          <button onClick={onToggleEdit} style={iconBtnStyle} data-tooltip="Edit file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><Pencil size={15} /></button>
         )}
 
-        {onOpenFileFinder && (
-          <button onClick={onOpenFileFinder} style={iconBtnStyle} data-tooltip="Open file (⌘P)" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-            <FolderOpen size={15} />
-          </button>
-        )}
+        {onOpenFileFinder && <button onClick={onOpenFileFinder} style={iconBtnStyle} data-tooltip="Open file (⌘P)" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><FolderOpen size={15} /></button>}
 
         {hasConversationChoices && (
           <div ref={conversationMenuRef} style={{ position: "relative", display: "inline-flex" }}>
-            <button
-              onClick={() => !conversationDisabled && setShowConversationMenu((v) => !v)}
-              disabled={conversationDisabled}
-              style={{ ...iconBtnStyle, opacity: conversationDisabled ? 0.5 : 1, cursor: conversationDisabled ? "default" : "pointer" }}
-              data-tooltip="Open conversation menu"
-              onMouseEnter={(e) => { if (!conversationDisabled) hoverIn(e); }}
-              onMouseLeave={hoverOut}
-            >
-              <MessageSquare size={15} />
-            </button>
+            <button onClick={() => !conversationDisabled && setShowConversationMenu((v) => !v)} disabled={conversationDisabled} style={{ ...iconBtnStyle, opacity: conversationDisabled ? 0.5 : 1, cursor: conversationDisabled ? "default" : "pointer" }} data-tooltip="Open conversation menu" onMouseEnter={(e) => { if (!conversationDisabled) hoverIn(e); }} onMouseLeave={hoverOut}><MessageSquare size={15} /></button>
             {showConversationMenu && !conversationDisabled && (
               conversationModal ? (
                 <ListModal title="Conversations for this file" onClose={() => setShowConversationMenu(false)}>
-                  {onStartConversation && (
-                    <button
-                      onClick={() => {
-                        setShowConversationMenu(false);
-                        onStartConversation();
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        width: "100%",
-                        padding: "8px 14px",
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "var(--text)",
-                        fontSize: "0.82rem",
-                        textAlign: "left",
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-surface)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                    >
-                      <MessageSquare size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-                      <span style={{ fontWeight: 500 }}>New conversation about this file</span>
-                    </button>
-                  )}
-                  {visibleConversationOptions.length > 0 && (
-                    <div style={{ padding: "6px 14px 4px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", borderTop: onStartConversation ? "1px solid var(--border)" : "none" }}>
-                      {conversationOptionsLabel}
-                    </div>
-                  )}
+                  {onStartConversation && conversationActionRow(<MessageSquare size={15} style={{ flexShrink: 0, color: colors.textMuted }} />, <span style={{ fontWeight: 500 }}>New conversation about this file</span>, () => { setShowConversationMenu(false); onStartConversation(); })}
+                  {visibleConversationOptions.length > 0 && <div style={{ padding: "6px 14px 4px", fontSize: "0.7rem", color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", borderTop: onStartConversation ? `1px solid ${colors.border}` : "none" }}>{conversationOptionsLabel}</div>}
                   {visibleConversationOptions.map((option) => (
-                    <button
-                      key={option.id}
-                      onClick={() => {
-                        setShowConversationMenu(false);
-                        onOpenConversationOption?.(option.id);
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        width: "100%",
-                        padding: "8px 14px",
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "var(--text)",
-                        fontSize: "0.82rem",
-                        textAlign: "left",
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-surface)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                    >
-                      <Clock3 size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-                      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {option.title || "Untitled"}
-                        </span>
-                        <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>{timeAgo(option.updated_at)}</span>
-                      </span>
+                    <button key={option.id} onClick={() => { setShowConversationMenu(false); onOpenConversationOption?.(option.id); }} style={interactiveRow(false)} onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgSurface; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+                      <Clock3 size={15} style={{ flexShrink: 0, color: colors.textMuted }} />
+                      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}><span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.title || "Untitled"}</span><span style={{ fontSize: "0.72rem", color: colors.textMuted }}>{timeAgo(option.updated_at)}</span></span>
                     </button>
                   ))}
                 </ListModal>
               ) : (
-                <div style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
-                  right: 0,
-                  width: "min(360px, 82vw)",
-                  maxHeight: "min(420px, 60vh)",
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "10px",
-                  boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                  zIndex: 20,
-                }}>
-                  <div style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    padding: "10px 14px",
-                    borderBottom: "1px solid var(--border)",
-                    fontSize: "0.82rem",
-                    color: "var(--text-muted)",
-                  }}>
-                    <span>Conversations for this file</span>
-                  </div>
+                <div style={conversationPopoverStyle}>
+                  <div style={overlayHeader}><span>Conversations for this file</span></div>
                   <div style={{ overflowY: "auto", flex: 1 }}>
-                    {onStartConversation && (
-                      <button
-                        onClick={() => {
-                          setShowConversationMenu(false);
-                          onStartConversation();
-                        }}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          width: "100%",
-                          padding: "8px 14px",
-                          background: "transparent",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "var(--text)",
-                          fontSize: "0.82rem",
-                          textAlign: "left",
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-surface)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                      >
-                        <MessageSquare size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-                        <span style={{ fontWeight: 500 }}>New conversation about this file</span>
-                      </button>
-                    )}
-                    {visibleConversationOptions.length > 0 && (
-                      <div style={{ padding: "6px 14px 4px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", borderTop: onStartConversation ? "1px solid var(--border)" : "none" }}>
-                        {conversationOptionsLabel}
-                      </div>
-                    )}
+                    {onStartConversation && conversationActionRow(<MessageSquare size={15} style={{ flexShrink: 0, color: colors.textMuted }} />, <span style={{ fontWeight: 500 }}>New conversation about this file</span>, () => { setShowConversationMenu(false); onStartConversation(); })}
+                    {visibleConversationOptions.length > 0 && <div style={{ padding: "6px 14px 4px", fontSize: "0.7rem", color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", borderTop: onStartConversation ? `1px solid ${colors.border}` : "none" }}>{conversationOptionsLabel}</div>}
                     {visibleConversationOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        onClick={() => {
-                          setShowConversationMenu(false);
-                          onOpenConversationOption?.(option.id);
-                        }}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          width: "100%",
-                          padding: "8px 14px",
-                          background: "transparent",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "var(--text)",
-                          fontSize: "0.82rem",
-                          textAlign: "left",
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-surface)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                      >
-                        <Clock3 size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-                        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
-                          <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {option.title || "Untitled"}
-                          </span>
-                          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>{timeAgo(option.updated_at)}</span>
-                        </span>
+                      <button key={option.id} onClick={() => { setShowConversationMenu(false); onOpenConversationOption?.(option.id); }} style={interactiveRow(false)} onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgSurface; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+                        <Clock3 size={15} style={{ flexShrink: 0, color: colors.textMuted }} />
+                        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}><span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.title || "Untitled"}</span><span style={{ fontSize: "0.72rem", color: colors.textMuted }}>{timeAgo(option.updated_at)}</span></span>
                       </button>
                     ))}
                   </div>
@@ -523,159 +279,37 @@ export function FilePanel({
           </div>
         )}
 
-        <button onClick={download} style={iconBtnStyle} data-tooltip="Download file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-          <Download size={15} />
-        </button>
-
-        {!previewFile && (
-          <button onClick={copy} style={iconBtnStyle} data-tooltip={copied ? "Copied!" : "Copy"} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-            {copied ? <Check size={15} /> : <Copy size={15} />}
-          </button>
-        )}
-
-        <button onClick={onClose} style={iconBtnStyle} data-tooltip="Close panel" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-          <X size={16} />
-        </button>
+        <button onClick={download} style={iconBtnStyle} data-tooltip="Download file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><Download size={15} /></button>
+        {!previewFile && <button onClick={copy} style={iconBtnStyle} data-tooltip={copied ? "Copied!" : "Copy"} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>{copied ? <Check size={15} /> : <Copy size={15} />}</button>}
+        <button onClick={onClose} style={iconBtnStyle} data-tooltip="Close panel" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><X size={16} /></button>
       </div>
 
       {(externalChange || saveError) && (
-        <div style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "6px",
-          padding: "8px 12px",
-          background: saveError ? "rgba(196, 85, 77, 0.10)" : "#d9a75422",
-          borderBottom: "1px solid var(--border)",
-          fontSize: "0.75rem",
-          color: "var(--text)",
-          flexShrink: 0,
-        }}>
-          {saveError && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ flex: 1 }}>{saveError}</span>
-              <button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}>
-                <RotateCcw size={12} /> Reload
-              </button>
-            </div>
-          )}
-          {externalChange && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ flex: 1 }}>This file was modified by the agent.</span>
-              {!saveError && (
-                <button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}>
-                  <RotateCcw size={12} /> Reload
-                </button>
-              )}
-              <button onClick={onDismissExternal} style={{ ...btnStyle, fontSize: "0.72rem" }}>
-                Dismiss
-              </button>
-            </div>
-          )}
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 12px", background: saveError ? `color-mix(in srgb, ${colors.danger} 10%, transparent)` : colors.warningSoft, borderBottom: `1px solid ${colors.border}`, fontSize: "0.75rem", color: colors.text, flexShrink: 0 }}>
+          {saveError && <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ flex: 1 }}>{saveError}</span><button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}><RotateCcw size={12} /> Reload</button></div>}
+          {externalChange && <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ flex: 1 }}>This file was modified by the agent.</span>{!saveError && <button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}><RotateCcw size={12} /> Reload</button>}<button onClick={onDismissExternal} style={{ ...btnStyle, fontSize: "0.72rem" }}>Dismiss</button></div>}
         </div>
       )}
 
       <div style={{ flex: 1, overflow: "hidden" }}>
         {docxFile ? (
-          <div style={{ height: "100%", overflowY: "auto", background: "var(--bg)" }}>
+          <div style={{ height: "100%", overflowY: "auto", background: colors.bg }}>
             {docxLoading ? (
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                color: "var(--text-muted)",
-                fontSize: "0.8rem",
-              }}>
-                Loading Word preview...
-              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: colors.textMuted, fontSize: "0.8rem" }}>Loading Word preview...</div>
             ) : docxError ? (
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                padding: "24px",
-                color: "var(--text-muted)",
-                fontSize: "0.85rem",
-                textAlign: "center",
-              }}>
-                <div style={{ maxWidth: 420 }}>
-                  <div>Could not preview this Word document. Try downloading it instead.</div>
-                  {docxError && (
-                    <div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>
-                      {docxError}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "24px", color: colors.textMuted, fontSize: "0.85rem", textAlign: "center" }}><div style={{ maxWidth: 420 }}><div>Could not preview this Word document. Try downloading it instead.</div>{docxError && <div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>{docxError}</div>}</div></div>
             ) : (
               <div>
-                {docxMessages.length > 0 && (
-                  <div style={{
-                    margin: "16px 16px 0",
-                    padding: "10px 12px",
-                    border: "1px solid var(--border)",
-                    borderRadius: "10px",
-                    background: "var(--bg-surface)",
-                    color: "var(--text-muted)",
-                    fontSize: "0.78rem",
-                  }}>
-                    Preview note: some Word formatting may not render exactly.
-                  </div>
-                )}
+                {docxMessages.length > 0 && <div style={{ margin: "16px 16px 0", padding: "10px 12px", border: `1px solid ${colors.border}`, borderRadius: radius.xl, background: colors.bgSurface, color: colors.textMuted, fontSize: "0.78rem" }}>Preview note: some Word formatting may not render exactly.</div>}
                 <div className="docx-preview" dangerouslySetInnerHTML={{ __html: docxHtml }} />
               </div>
             )}
           </div>
         ) : pdfFile ? (
-          pdfPreviewUrl ? (
-            <iframe
-              title={file.path}
-              src={pdfPreviewUrl}
-              style={{
-                width: "100%",
-                height: "100%",
-                border: "none",
-                background: "var(--bg)",
-              }}
-            />
-          ) : (
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              height: "100%",
-              padding: "24px",
-              color: "var(--text-muted)",
-              fontSize: "0.85rem",
-              textAlign: "center",
-            }}>
-              <div style={{ maxWidth: 420 }}>
-                <div>Could not preview this PDF. Try downloading it instead.</div>
-                <div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>
-                  Missing auth token.
-                </div>
-              </div>
-            </div>
-          )
+          pdfPreviewUrl ? <iframe title={file.path} src={pdfPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: colors.bg }} /> : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "24px", color: colors.textMuted, fontSize: "0.85rem", textAlign: "center" }}><div style={{ maxWidth: 420 }}><div>Could not preview this PDF. Try downloading it instead.</div><div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>Missing auth token.</div></div></div>
         ) : (
-          <Suspense fallback={
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              height: "100%",
-              color: "var(--text-muted)",
-              fontSize: "0.8rem",
-            }}>Loading editor...</div>
-          }>
-            <CodeMirrorEditor
-              code={file.content}
-              language={file.language}
-              readOnly={!editMode}
-              onChange={onContentChange}
-              onSave={onSave}
-            />
+          <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: colors.textMuted, fontSize: "0.8rem" }}>Loading editor...</div>}>
+            <CodeMirrorEditor code={file.content} language={file.language} readOnly={!editMode} onChange={onContentChange} onSave={onSave} />
           </Suspense>
         )}
       </div>

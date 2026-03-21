@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Terminal, FileText, Pencil, Search, Settings, ChevronDown, ChevronUp, Minimize2, Globe, ExternalLink } from "lucide-react";
 
 import { CodeBlock } from "./components/CodeBlock";
-import { btnPrimary } from "./styles";
+import { btnPrimary, btnSubtle, colors, radius } from "./styles";
 import type { ApprovalScope, StreamBlock } from "./chatState";
 
 interface ToolCall {
@@ -19,6 +19,15 @@ const toolIcons: Record<string, React.FC<{ size?: number }>> = {
   bash: Terminal, read_file: FileText, write_file: Pencil,
   edit_file: Pencil, glob: Search, grep: Search, compact: Minimize2,
   web_search: Globe,
+};
+
+const toolChipShell: React.CSSProperties = {
+  background: colors.bgSurface,
+  border: `1px solid ${colors.border}`,
+  borderRadius: radius.md,
+  color: colors.textMuted,
+  fontSize: "0.78rem",
+  overflow: "hidden",
 };
 
 function parseToolInput(input?: string): Record<string, any> | null {
@@ -99,35 +108,24 @@ function buildEditDiffPreview(diff?: string): EditDiffPreview | null {
       }
       continue;
     }
-    if (line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("\\ No newline")) {
-      continue;
-    }
+    if (line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("\\ No newline")) continue;
     if (line.startsWith("+")) {
       additions += 1;
-      if (previewLines.length < maxRenderedRows) {
-        previewLines.push({ type: "add", lineNumber: newLineNumber || null, tokens: [{ text: line.slice(1), kind: "add" }] });
-      } else {
-        truncated = true;
-      }
+      if (previewLines.length < maxRenderedRows) previewLines.push({ type: "add", lineNumber: newLineNumber || null, tokens: [{ text: line.slice(1), kind: "add" }] });
+      else truncated = true;
       newLineNumber += 1;
       continue;
     }
     if (line.startsWith("-")) {
       deletions += 1;
-      if (previewLines.length < maxRenderedRows) {
-        previewLines.push({ type: "remove", lineNumber: oldLineNumber || null, tokens: [{ text: line.slice(1), kind: "remove" }] });
-      } else {
-        truncated = true;
-      }
+      if (previewLines.length < maxRenderedRows) previewLines.push({ type: "remove", lineNumber: oldLineNumber || null, tokens: [{ text: line.slice(1), kind: "remove" }] });
+      else truncated = true;
       oldLineNumber += 1;
       continue;
     }
     if (line.startsWith(" ")) {
-      if (previewLines.length < maxRenderedRows) {
-        previewLines.push({ type: "context", lineNumber: oldLineNumber || null, tokens: [{ text: line.slice(1), kind: "equal" }] });
-      } else {
-        truncated = true;
-      }
+      if (previewLines.length < maxRenderedRows) previewLines.push({ type: "context", lineNumber: oldLineNumber || null, tokens: [{ text: line.slice(1), kind: "equal" }] });
+      else truncated = true;
       oldLineNumber += 1;
       newLineNumber += 1;
     }
@@ -137,11 +135,7 @@ function buildEditDiffPreview(diff?: string): EditDiffPreview | null {
   const summaryBits: string[] = [];
   if (additions > 0) summaryBits.push(`+${additions}`);
   if (deletions > 0) summaryBits.push(`-${deletions}`);
-  return {
-    summary: summaryBits.length > 0 ? summaryBits.join(" ") : "edited",
-    lines: previewLines,
-    truncated,
-  };
+  return { summary: summaryBits.length > 0 ? summaryBits.join(" ") : "edited", lines: previewLines, truncated };
 }
 
 export function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespond, autonomousToolsEnabled }: {
@@ -173,9 +167,7 @@ export function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespon
   const displayContent = isStreaming ? tool.liveOutput : (tool.output || "");
 
   useEffect(() => {
-    if (isStreaming && preRef.current) {
-      preRef.current.scrollTop = preRef.current.scrollHeight;
-    }
+    if (isStreaming && preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
   }, [isStreaming, tool.liveOutput]);
 
   const handleOpenFile = (e: React.MouseEvent) => {
@@ -189,32 +181,14 @@ export function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespon
   };
 
   return (
-    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0, maxWidth: "100%" }}>
+    <div style={{ fontSize: "0.78rem", color: colors.textMuted, flexShrink: 0, maxWidth: "100%" }}>
       <button
         onClick={() => tool.name !== "edit_file" && hasDetail && setManualOpen(!manualOpen)}
-        style={{
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "6px",
-          padding: tool.name === "edit_file" && hasDiffPreview ? "0" : "4px 8px",
-          cursor: tool.name !== "edit_file" && hasDetail ? "pointer" : "default",
-          color: "var(--text-muted)",
-          fontSize: "0.78rem",
-          display: "inline-flex",
-          alignItems: tool.name === "edit_file" && hasDiffPreview ? "stretch" : "center",
-          gap: tool.name === "edit_file" && hasDiffPreview ? "0" : "6px",
-          flexWrap: "nowrap",
-          maxWidth: "100%",
-          minWidth: 0,
-          overflow: "hidden",
-          textAlign: "left",
-          minHeight: tool.name === "edit_file" && hasDiffPreview ? undefined : "28px",
-          width: tool.name === "edit_file" && hasDiffPreview ? "100%" : undefined,
-        }}
+        style={{ ...toolChipShell, padding: tool.name === "edit_file" && hasDiffPreview ? "0" : "4px 8px", cursor: tool.name !== "edit_file" && hasDetail ? "pointer" : "default", display: "inline-flex", alignItems: tool.name === "edit_file" && hasDiffPreview ? "stretch" : "center", gap: tool.name === "edit_file" && hasDiffPreview ? "0" : "6px", flexWrap: "nowrap", maxWidth: "100%", minWidth: 0, textAlign: "left", minHeight: tool.name === "edit_file" && hasDiffPreview ? undefined : "28px", width: tool.name === "edit_file" && hasDiffPreview ? "100%" : undefined }}
       >
         {tool.name === "edit_file" && hasDiffPreview && editDiff ? (
           <div style={{ width: "100%" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "4px 8px", borderBottom: "1px solid var(--border)", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "4px 8px", borderBottom: `1px solid ${colors.border}`, minWidth: 0 }}>
               <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon size={13} /></span>
               <span style={{ fontFamily: "monospace", flexShrink: 0 }}>{tool.name}</span>
               {summary && <span style={{ fontFamily: "monospace", opacity: 0.7, flex: "1 1 auto", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{summary}</span>}
@@ -224,21 +198,21 @@ export function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespon
             </div>
             <div style={{ maxHeight: "220px", overflowY: "auto", fontFamily: "monospace", fontSize: "0.75rem" }}>
               {editDiff.lines.map((line, idx) => {
-                const rowBg = line.type === "add" ? "rgba(77, 147, 117, 0.12)" : line.type === "remove" ? "rgba(196, 85, 77, 0.12)" : "transparent";
-                const tokenBg = line.type === "add" ? "rgba(77, 147, 117, 0.28)" : line.type === "remove" ? "rgba(196, 85, 77, 0.28)" : "transparent";
+                const rowBg = line.type === "add" ? colors.successSoft : line.type === "remove" ? colors.dangerSoft : "transparent";
+                const tokenBg = line.type === "add" ? `color-mix(in srgb, ${colors.success} 28%, transparent)` : line.type === "remove" ? `color-mix(in srgb, ${colors.danger} 28%, transparent)` : "transparent";
                 const sigil = line.type === "add" ? "+" : line.type === "remove" ? "-" : " ";
-                const sigilColor = line.type === "add" ? "#4d9375" : line.type === "remove" ? "#c4554d" : "transparent";
+                const sigilColor = line.type === "add" ? colors.success : line.type === "remove" ? colors.danger : "transparent";
                 return (
-                  <div key={`${line.type}-${line.lineNumber}-${idx}`} style={{ display: "grid", gridTemplateColumns: "34px 12px minmax(0, 1fr)", alignItems: "start", columnGap: "6px", padding: "1px 8px", background: rowBg, color: "var(--text)" }}>
-                    <span style={{ color: "var(--text-muted)", textAlign: "right", userSelect: "none" }}>{line.lineNumber ?? ""}</span>
+                  <div key={`${line.type}-${line.lineNumber}-${idx}`} style={{ display: "grid", gridTemplateColumns: "34px 12px minmax(0, 1fr)", alignItems: "start", columnGap: "6px", padding: "1px 8px", background: rowBg, color: colors.text }}>
+                    <span style={{ color: colors.textMuted, textAlign: "right", userSelect: "none" }}>{line.lineNumber ?? ""}</span>
                     <span style={{ color: sigilColor, userSelect: "none" }}>{sigil}</span>
-                    <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", textIndent: 0, paddingLeft: 0, marginLeft: 0 }}>
+                    <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                       {line.tokens.map((token, tokenIdx) => <span key={tokenIdx} style={token.kind === "equal" ? undefined : { background: tokenBg, borderRadius: "3px" }}>{token.text}</span>)}
                     </span>
                   </div>
                 );
               })}
-              {editDiff.truncated && <div style={{ padding: "4px 8px", color: "var(--text-muted)", fontSize: "0.72rem" }}>… diff truncated</div>}
+              {editDiff.truncated && <div style={{ padding: "4px 8px", color: colors.textMuted, fontSize: "0.72rem" }}>… diff truncated</div>}
             </div>
           </div>
         ) : (
@@ -247,7 +221,7 @@ export function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespon
             <span style={{ fontFamily: "monospace", flexShrink: 0 }}>{tool.name}</span>
             {summary && <span style={{ fontFamily: "monospace", opacity: 0.7, flex: "1 1 auto", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{summary}</span>}
             <span style={{ width: 12, height: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              {live ? <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#d9a754", display: "inline-block", animation: "pulse 1.5s infinite" }} /> : tool.output ? <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span> : approvalPending ? <span style={{ opacity: 0.7, lineHeight: 1, color: "var(--accent)" }} title="Waiting for approval">!</span> : approvalDenied ? <span style={{ opacity: 0.7, lineHeight: 1, color: "#c4554d" }} title="Denied">×</span> : approvalApproved ? <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span> : isShareLink ? <span onClick={handleOpenShare} style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }} data-tooltip="Open published page"><ExternalLink size={12} /></span> : isFileOp && onOpenFile ? <span onClick={handleOpenFile} style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }} data-tooltip="Open in panel"><ExternalLink size={12} /></span> : showStatusSlot ? null : null}
+              {live ? <span style={{ width: 6, height: 6, borderRadius: "50%", background: colors.warning, display: "inline-block", animation: "pulse 1.5s infinite" }} /> : tool.output ? <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span> : approvalPending ? <span style={{ opacity: 0.7, lineHeight: 1, color: colors.accent }} title="Waiting for approval">!</span> : approvalDenied ? <span style={{ opacity: 0.7, lineHeight: 1, color: colors.danger }} title="Denied">×</span> : approvalApproved ? <span style={{ opacity: 0.5, lineHeight: 1 }}>&#10003;</span> : isShareLink ? <span onClick={handleOpenShare} style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }} data-tooltip="Open published page"><ExternalLink size={12} /></span> : isFileOp && onOpenFile ? <span onClick={handleOpenFile} style={{ display: "inline-flex", alignItems: "center", opacity: 0.5 }} data-tooltip="Open in panel"><ExternalLink size={12} /></span> : showStatusSlot ? null : null}
             </span>
             <span style={{ width: 13, height: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: hasDetail ? 0.5 : 0 }}>
               {hasDetail && (open ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
@@ -256,16 +230,16 @@ export function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespon
         )}
       </button>
       {approvalPending && tool.tool_call_id && onRespond && (
-        <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "6px", padding: "6px 10px", marginTop: "4px", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-          <button onClick={() => onRespond(tool.tool_call_id!, true, "once")} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "4px 8px", borderRadius: "6px" }}>Allow once</button>
-          {tool.canTurnOnAuto && (!autoTurnedOn ? <button onClick={() => onRespond(tool.tool_call_id!, true, "auto")} style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}>Turn on auto</button> : <span style={{ fontSize: "0.75rem", color: "var(--accent)", padding: "4px 2px" }}>Auto mode on</span>)}
-          {tool.canAllowProject && <button onClick={() => onRespond(tool.tool_call_id!, true, "project")} style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}>Allow in project</button>}
-          <button onClick={() => onRespond(tool.tool_call_id!, false, "once")} style={{ background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", fontSize: "0.75rem", cursor: "pointer" }}>Deny</button>
+        <div style={{ ...toolChipShell, padding: "6px 10px", marginTop: "4px", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+          <button onClick={() => onRespond(tool.tool_call_id!, true, "once")} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "4px 8px", borderRadius: radius.md }}>Allow once</button>
+          {tool.canTurnOnAuto && (!autoTurnedOn ? <button onClick={() => onRespond(tool.tool_call_id!, true, "auto")} style={{ ...btnSubtle, padding: "4px 8px" }}>Turn on auto</button> : <span style={{ fontSize: "0.75rem", color: colors.accent, padding: "4px 2px" }}>Auto mode on</span>)}
+          {tool.canAllowProject && <button onClick={() => onRespond(tool.tool_call_id!, true, "project")} style={{ ...btnSubtle, padding: "4px 8px" }}>Allow in project</button>}
+          <button onClick={() => onRespond(tool.tool_call_id!, false, "once")} style={{ ...btnSubtle, padding: "4px 8px" }}>Deny</button>
         </div>
       )}
       {tool.name !== "edit_file" && open && (hasDetail || isStreaming) && (
-        <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "6px", marginTop: "4px", maxWidth: "100%", overflow: "hidden" }}>
-          {(isStreaming || (tool.input || tool.output)) && <pre ref={preRef} style={{ margin: 0, padding: "6px 10px", fontSize: "0.75rem", whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%", maxHeight: isStreaming ? "5lh" : "200px", overflowX: "hidden", overflowY: "auto", color: "var(--text)" }}>{isStreaming ? displayContent : (tool.input ? tool.input + (tool.output ? "\n---\n" : "") : "") + (tool.output || "")}</pre>}
+        <div style={{ ...toolChipShell, marginTop: "4px", maxWidth: "100%" }}>
+          {(isStreaming || (tool.input || tool.output)) && <pre ref={preRef} style={{ margin: 0, padding: "6px 10px", fontSize: "0.75rem", whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%", maxHeight: isStreaming ? "5lh" : "200px", overflowX: "hidden", overflowY: "auto", color: colors.text }}>{isStreaming ? displayContent : (tool.input ? tool.input + (tool.output ? "\n---\n" : "") : "") + (tool.output || "")}</pre>}
         </div>
       )}
     </div>
@@ -282,21 +256,17 @@ function makeMdComponents(onOpenSnippet?: (code: string, language: string) => vo
         return <CodeBlock code={code} language={lang} onOpen={onOpenSnippet ? (c, l) => onOpenSnippet(c, l) : undefined} />;
       }
       const text = extractTextContent(children);
-      if (text) {
-        return <CodeBlock code={text} language="text" onOpen={onOpenSnippet ? (c, l) => onOpenSnippet(c, l) : undefined} />;
-      }
-      return <pre style={{ background: "var(--code-bg)", borderRadius: "6px", padding: "10px 12px", overflowX: "auto", fontSize: "0.82rem", margin: "6px 0" }}>{children}</pre>;
+      if (text) return <CodeBlock code={text} language="text" onOpen={onOpenSnippet ? (c, l) => onOpenSnippet(c, l) : undefined} />;
+      return <pre style={{ background: colors.codeBg, borderRadius: radius.md, padding: "10px 12px", overflowX: "auto", fontSize: "0.82rem", margin: "6px 0" }}>{children}</pre>;
     },
     code: ({ children, className }: any) => {
-      if (className?.startsWith("language-")) {
-        return <code className={className}>{children}</code>;
-      }
-      return <code style={{ background: "var(--code-bg)", borderRadius: "3px", padding: "1px 4px", fontSize: "0.85em", fontFamily: "monospace" }}>{children}</code>;
+      if (className?.startsWith("language-")) return <code className={className}>{children}</code>;
+      return <code style={{ background: colors.codeBg, borderRadius: "3px", padding: "1px 4px", fontSize: "0.85em", fontFamily: "monospace" }}>{children}</code>;
     },
-    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>{children}</a>,
+    a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: colors.accent }}>{children}</a>,
     table: ({ children }: any) => <div style={{ overflowX: "auto", margin: "6px 0" }}><table style={{ borderCollapse: "collapse", width: "100%", minWidth: "max-content", fontSize: "0.85rem" }}>{children}</table></div>,
-    th: ({ children }: any) => <th style={{ border: "1px solid var(--border)", padding: "4px 8px", textAlign: "left", background: "var(--bg)" }}>{children}</th>,
-    td: ({ children }: any) => <td style={{ border: "1px solid var(--border)", padding: "4px 8px" }}>{children}</td>,
+    th: ({ children }: any) => <th style={{ border: `1px solid ${colors.border}`, padding: "4px 8px", textAlign: "left", background: colors.bg }}>{children}</th>,
+    td: ({ children }: any) => <td style={{ border: `1px solid ${colors.border}`, padding: "4px 8px" }}>{children}</td>,
   };
 }
 
@@ -315,9 +285,5 @@ export function compactSkillDescription(description: string, maxLength = 72): st
 
 export function MdContent({ text, onOpenSnippet }: { text: string; onOpenSnippet?: (code: string, language: string) => void }) {
   const components = useMemo(() => makeMdComponents(onOpenSnippet), [onOpenSnippet]);
-  return (
-    <div style={{ lineHeight: 1.55 }} className="md-content">
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>{text}</Markdown>
-    </div>
-  );
+  return <div style={{ lineHeight: 1.55 }} className="md-content"><Markdown remarkPlugins={[remarkGfm]} components={components}>{text}</Markdown></div>;
 }
