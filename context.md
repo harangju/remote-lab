@@ -87,3 +87,5 @@
 - Improved the chat/file panel resizer for PDF preview and other file panels: wider hit target, small activation threshold to reduce jitter, active drag visual state, bounded min/max widths, and temporary pointer-event suppression on the panel while dragging to avoid iframe interference.
 - Chat panel width is now being persisted as a viewport ratio in localStorage and restored/clamped on refresh/resize so the file-panel size survives reloads.
 - Agreed refactor approach is structural decomposition first, with a targeted regression suite added before major splits: backend pytest coverage for storage/mentions/skills/context and core authenticated API flows, then frontend state tests around extracted chat logic.
+- Composer autocomplete now explicitly maps `Ctrl-P`/`Ctrl-N` (and `Cmd-P`/`Cmd-N`) to previous/next selection for both `@` mention results and `/` slash-command results, matching existing arrow-key behavior.
+- Composer autocomplete lists now also auto-scroll the active `@`/`/` selection into view as keyboard navigation changes the highlighted row, using list refs plus `scrollIntoView({ block: "nearest" })`.

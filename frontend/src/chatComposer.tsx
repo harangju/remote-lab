@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Terminal, FileText, Square, Paperclip, X, Mic, ArrowUp } from "lucide-react";
 import { input as inputStyle, btnPrimary } from "./styles";
 import { compactSkillDescription } from "./chatUi";
@@ -65,6 +65,8 @@ export function ChatComposer({
   const [dragDepth, setDragDepth] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const slashListRef = useRef<HTMLDivElement>(null);
+  const mentionListRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -131,6 +133,10 @@ export function ChatComposer({
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const ctrlOrCmd = e.ctrlKey || e.metaKey;
+    const isNextPickerItem = e.key === "ArrowDown" || (ctrlOrCmd && e.key.toLowerCase() === "n");
+    const isPrevPickerItem = e.key === "ArrowUp" || (ctrlOrCmd && e.key.toLowerCase() === "p");
+
     if (e.key === "Enter" && !e.shiftKey && slashQuery === null && mentionQuery === null) {
       e.preventDefault();
       const text = input.trim();
@@ -142,12 +148,12 @@ export function ChatComposer({
       return;
     }
     if (slashQuery !== null && slashMatches.length > 0) {
-      if (e.key === "ArrowDown") {
+      if (isNextPickerItem) {
         e.preventDefault();
         setSlashIdx((i) => Math.min(i + 1, slashMatches.length - 1));
         return;
       }
-      if (e.key === "ArrowUp") {
+      if (isPrevPickerItem) {
         e.preventDefault();
         setSlashIdx((i) => Math.max(i - 1, 0));
         return;
@@ -164,12 +170,12 @@ export function ChatComposer({
       }
     }
     if (mentionQuery !== null && mentionMatches.length > 0) {
-      if (e.key === "ArrowDown") {
+      if (isNextPickerItem) {
         e.preventDefault();
         setMentionIdx((i) => Math.min(i + 1, mentionMatches.length - 1));
         return;
       }
-      if (e.key === "ArrowUp") {
+      if (isPrevPickerItem) {
         e.preventDefault();
         setMentionIdx((i) => Math.max(i - 1, 0));
         return;
@@ -195,6 +201,16 @@ export function ChatComposer({
     sendText(text).then((ok) => { if (ok) setInput(""); });
   };
 
+  useEffect(() => {
+    const rows = slashListRef.current?.querySelectorAll<HTMLElement>("[data-selectable-row='true']");
+    rows?.[slashIdx]?.scrollIntoView({ block: "nearest" });
+  }, [slashIdx, slashMatches.length]);
+
+  useEffect(() => {
+    const rows = mentionListRef.current?.querySelectorAll<HTMLElement>("[data-selectable-row='true']");
+    rows?.[mentionIdx]?.scrollIntoView({ block: "nearest" });
+  }, [mentionIdx, mentionMatches.length]);
+
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   const isBashMode = input.startsWith("!");
   const inputPlaceholder = busy || uploadingAttachments
@@ -213,9 +229,9 @@ export function ChatComposer({
     <div style={{ flexShrink: 0, padding: "0 1.5rem 12px" }}>
       <div style={{ position: "relative", maxWidth: "64rem", width: "100%", margin: "0 auto" }}>
         {slashQuery !== null && slashMatches.length > 0 && (
-          <div style={{ position: "absolute", bottom: "100%", left: 14, marginBottom: 4, background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 0", minWidth: 240, maxHeight: 300, overflowY: "auto", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", zIndex: 100 }}>
+          <div ref={slashListRef} style={{ position: "absolute", bottom: "100%", left: 14, marginBottom: 4, background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 0", minWidth: 240, maxHeight: 300, overflowY: "auto", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", zIndex: 100 }}>
             {slashMatches.map((s, i) => (
-              <div key={s.name} onMouseDown={(e) => { e.preventDefault(); insertSlashCommand(s); }} style={{ padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", background: i === slashIdx ? "var(--bg-user)" : "transparent" }}>
+              <div data-selectable-row="true" key={s.name} onMouseDown={(e) => { e.preventDefault(); insertSlashCommand(s); }} style={{ padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", background: i === slashIdx ? "var(--bg-user)" : "transparent" }}>
                 <span style={{ fontWeight: 600, fontFamily: "monospace" }}>/{s.name}</span>
                 <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: "1 1 auto" }}>{compactSkillDescription(s.description)}</span>
               </div>
@@ -227,11 +243,11 @@ export function ChatComposer({
           const fileMatches = mentionMatches.filter((m): m is MentionMatch & { type: "file" } => m.type === "file");
           let idx = 0;
           return (
-            <div style={{ position: "absolute", bottom: "100%", left: 14, marginBottom: 4, background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 0", minWidth: 220, maxHeight: 300, overflowY: "auto", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", zIndex: 100 }}>
+            <div ref={mentionListRef} style={{ position: "absolute", bottom: "100%", left: 14, marginBottom: 4, background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 0", minWidth: 220, maxHeight: 300, overflowY: "auto", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", zIndex: 100 }}>
               {agentMatches.length > 0 && fileMatches.length > 0 && <div style={{ padding: "4px 12px 2px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Agents</div>}
               {agentMatches.map((m) => {
                 const i = idx++;
-                return <div key={`a-${m.agent.id}`} onMouseDown={(e) => { e.preventDefault(); insertMention(m); }} style={{ padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", background: i === mentionIdx ? "var(--bg-user)" : "transparent" }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: m.agent.color || "var(--text-muted)", flexShrink: 0 }} /><span style={{ fontWeight: 600 }}>@{m.agent.id}</span><span style={{ color: "var(--text-muted)" }}>{m.agent.name}</span></div>;
+                return <div data-selectable-row="true" key={`a-${m.agent.id}`} onMouseDown={(e) => { e.preventDefault(); insertMention(m); }} style={{ padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", background: i === mentionIdx ? "var(--bg-user)" : "transparent" }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: m.agent.color || "var(--text-muted)", flexShrink: 0 }} /><span style={{ fontWeight: 600 }}>@{m.agent.id}</span><span style={{ color: "var(--text-muted)" }}>{m.agent.name}</span></div>;
               })}
               {fileMatches.length > 0 && agentMatches.length > 0 && <div style={{ padding: "4px 12px 2px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", borderTop: "1px solid var(--border)", marginTop: 2 }}>Files</div>}
               {fileMatches.length > 0 && agentMatches.length === 0 && mentionQuery !== "" && <div style={{ padding: "4px 12px 2px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Files</div>}
@@ -240,7 +256,7 @@ export function ChatComposer({
                 const parts = m.path.split("/");
                 const filename = parts.pop() || m.path;
                 const dir = parts.join("/");
-                return <div key={`f-${m.path}`} onMouseDown={(e) => { e.preventDefault(); insertMention(m); }} style={{ padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", background: i === mentionIdx ? "var(--bg-user)" : "transparent" }}><FileText size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} /><span style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{dir && <span style={{ color: "var(--text-muted)" }}>{dir}/</span>}{filename}</span></div>;
+                return <div data-selectable-row="true" key={`f-${m.path}`} onMouseDown={(e) => { e.preventDefault(); insertMention(m); }} style={{ padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", background: i === mentionIdx ? "var(--bg-user)" : "transparent" }}><FileText size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} /><span style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{dir && <span style={{ color: "var(--text-muted)" }}>{dir}/</span>}{filename}</span></div>;
               })}
             </div>
           );
