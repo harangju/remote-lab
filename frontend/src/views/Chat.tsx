@@ -22,7 +22,7 @@ import { usePanel } from "../hooks/usePanel";
 import { extractFilePath } from "../chatUi";
 import { ChatComposer } from "../chatComposer";
 import { ChatMessages } from "../chatMessages";
-import { useChatSession } from "../useChatSession";
+import { useChatSession } from "../hooks/useChatSession";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,6 +101,7 @@ export function Chat() {
   const {
     messages,
     streamBlocks,
+    waitingForModel,
     input,
     setInput,
     busy,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { connectWs, getConvo, listFiles, listProjectAgents, listSkills, updateConvo, uploadFiles, type AgentConfig, type Attachment, type Skill, type WsEvent } from "./api";
-import { buildDisplayMessages, mergeAssistantMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "./chatState";
-import type { ComposerAttachment } from "./chatComposer";
+import { connectWs, getConvo, listFiles, listProjectAgents, listSkills, updateConvo, uploadFiles, type AgentConfig, type Attachment, type Skill, type WsEvent } from "../api";
+import { buildDisplayMessages, mergeAssistantMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "../chatState";
+import type { ComposerAttachment } from "../chatComposer";
 
 const MIN_USER_MESSAGE_TOP_OFFSET_PX = 24;
 const MAX_USER_MESSAGE_TOP_OFFSET_PX = 72;
