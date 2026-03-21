@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { connectWs, getConvo, listFiles, listProjectAgents, listSkills, updateConvo, uploadFiles, type AgentConfig, type Attachment, type WsEvent } from "./api";
+import { connectWs, getConvo, listFiles, listProjectAgents, listSkills, updateConvo, uploadFiles, type AgentConfig, type Attachment, type Skill, type WsEvent } from "./api";
 import { buildDisplayMessages, mergeAssistantMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "./chatState";
 import type { ComposerAttachment } from "./chatComposer";
 
@@ -14,7 +14,6 @@ const OLDER_HISTORY_PAGE_SIZE = 100;
 export function useChatSession(projectId?: string, convId?: string) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamBlocks, setStreamBlocks] = useState<StreamBlock[]>([]);
-  const [thinking, setThinking] = useState(false);
   const [waitingForModel, setWaitingForModel] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,7 +26,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   const [wsAttempt, setWsAttempt] = useState(0);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [projectFiles, setProjectFiles] = useState<string[]>([]);
-  const [skills, setSkills] = useState<any[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const mentionRefreshInFlightRef = useRef(false);
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<{ message_id: string; text: string; attachments?: Attachment[] }[]>([]);
@@ -228,7 +227,6 @@ export function useChatSession(projectId?: string, convId?: string) {
   useEffect(() => {
     if (!convId) return;
     const clearConnectionOnlyState = () => {
-      setThinking(false);
       setWaitingForModel(false);
       setCurrentRunId(null);
       setBusy(false);
@@ -254,10 +252,10 @@ export function useChatSession(projectId?: string, convId?: string) {
           const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color };
           activeAgentRef.current = ag; setActiveAgent(ag); break;
         }
-        case "thinking-delta": if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break; setThinking(true); break;
+        case "thinking-delta": if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break; break;
         case "text-delta": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
-          setThinking(false); setWaitingForModel(false);
+          setWaitingForModel(false);
           const blocks = blocksRef.current; const last = blocks[blocks.length - 1];
           if (last && last.type === "text") last.content += data.delta; else blocks.push({ type: "text", content: data.delta });
           blocksRef.current = [...blocks]; setStreamBlocks(blocksRef.current); break;
@@ -317,7 +315,7 @@ export function useChatSession(projectId?: string, convId?: string) {
             const finalMessage: DisplayMessage = { role: "assistant", blocks: [...finalBlocks], agent_id: data.agent_id || ag?.id, agent_name: ag?.name, agent_color: ag?.color, defaultExpandedTools: onlyBashOutput };
             setMessages((msgs) => msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]);
           }
-          blocksRef.current = []; setStreamBlocks([]); setThinking(false); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null); setMeta({ turns: data.turns, context_tokens: data.context_tokens, context_limit: data.context_limit }); setBusy(false); setCurrentRunId(null); break;
+          blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null); setMeta({ turns: data.turns, context_tokens: data.context_tokens, context_limit: data.context_limit }); setBusy(false); setCurrentRunId(null); break;
         }
         case "compacted": setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev); setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }] }]); setWaitingForModel(false); setBusy(false); break;
         case "skill-result": setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: data.skill, input: data.output }] }]); setWaitingForModel(false); setBusy(false); break;
@@ -327,7 +325,7 @@ export function useChatSession(projectId?: string, convId?: string) {
           if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);
           if (blocksRef.current.length > 0) setMessages((msgs) => { const finalMessage: DisplayMessage = { role: "assistant", blocks: [...blocksRef.current] }; return msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]; });
-          blocksRef.current = []; setStreamBlocks([]); setThinking(false); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null); setBusy(false); setCurrentRunId(null);
+          blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null); setBusy(false); setCurrentRunId(null);
           if (data.recoverable && convId) reloadConversation().catch((e) => setError(e.message));
           break;
       }
@@ -361,7 +359,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   const stop = useCallback(() => {
     const ws = wsRef.current; const runId = activeRunIdRef.current;
     if (ws && ws.readyState === WebSocket.OPEN && runId) ws.send(JSON.stringify({ type: "stop", run_id: runId }));
-    setBusy(false); setThinking(false); setWaitingForModel(false);
+    setBusy(false); setWaitingForModel(false);
   }, []);
 
   const handleToolApproval = useCallback(async (toolCallId: string, approved: boolean, scope: ApprovalScope = "once") => {
@@ -440,7 +438,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   }, [convId, autonomousToolsEnabled, savingAutonomy]);
 
   return {
-    messages, streamBlocks, thinking, waitingForModel, input, setInput, busy, meta,
+    messages, streamBlocks, waitingForModel, input, setInput, busy, meta,
     autonomousToolsEnabled, savingAutonomy, error, connected, title, setTitle,
     agents, projectFiles, skills, activeAgent, hasMoreHistory, loadingOlder,
     composerAttachments, uploadingAttachments, voiceUiActive, voiceElapsedSec,
