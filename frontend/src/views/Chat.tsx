@@ -535,7 +535,7 @@ export function Chat() {
         <div style={{ borderBottom: `1px solid ${colors.border}`, flexShrink: 0, position: "relative", zIndex: 2 }}>
           <div style={{ padding: "8px 1.5rem", minHeight: "51px", maxWidth: CHAT_HEADER_MAX_WIDTH, margin: "0 auto" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-              <Link to={`/${projectId}`} style={{ ...headerIconBtnStyle, color: colors.textMuted, textDecoration: "none" }} data-tooltip="Conversations" aria-label="Conversations" onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
+              <Link to={`/${projectId}`} style={{ ...headerIconBtnStyle, color: colors.textMuted, textDecoration: "none" }} aria-label="Conversations" onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
                 <span style={{ fontSize: "1rem", lineHeight: 1 }}>&larr;</span>
               </Link>
               <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0, flexShrink: 1 }}>
