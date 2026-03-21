@@ -308,6 +308,7 @@ export function FilePanel({
           </div>
         )}
 
+        <button onClick={() => { void handleReload(); }} style={iconBtnStyle} data-tooltip="Refresh file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><RotateCcw size={15} /></button>
         <button onClick={download} style={iconBtnStyle} data-tooltip="Download file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><Download size={15} /></button>
         {!previewFile && <button onClick={copy} style={iconBtnStyle} data-tooltip={copied ? "Copied!" : "Copy"} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>{copied ? <Check size={15} /> : <Copy size={15} />}</button>}
         <button onClick={onClose} style={iconBtnStyle} data-tooltip="Close panel" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><X size={16} /></button>
