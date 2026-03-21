@@ -109,6 +109,11 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
     },
   }), []);
 
+  const initialCodeRef = useRef(code);
+  useEffect(() => {
+    initialCodeRef.current = code;
+  }, [code]);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -116,7 +121,7 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
     const saveKeymap = keymap.of([{ key: "Mod-s", run: () => { onSaveRef.current?.(); return true; } }]);
 
     const state = EditorState.create({
-      doc: code,
+      doc: initialCodeRef.current,
       extensions: [
         lineNumbers(),
         highlightActiveLine(),
@@ -152,7 +157,7 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
       view.destroy();
       viewRef.current = null;
     };
-  }, [code, language, isDark]);
+  }, [language, isDark]);
 
   useEffect(() => {
     const view = viewRef.current;
