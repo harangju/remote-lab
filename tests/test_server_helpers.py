@@ -73,7 +73,9 @@ def test_build_shared_context_summarizes_tools_and_filters_server_commands(serve
     storage.append_event(convo.id, {"type": "tool-result", "role": "tool", "name": "read_file", "output": "done", "tool_call_id": "tc1"})
     storage.append_event(convo.id, {"type": "assistant-message", "role": "assistant", "content": "answer", "agent_id": "worker"})
 
-    shared = server._build_shared_context(convo.id, agent_id=None)
+    from backend.runtime.helpers import build_shared_context
+
+    shared = build_shared_context(convo.id, agent_id=None)
     assert "User: real question" in shared
     assert "Tool read_file input=src/app.py output=done" in shared
     assert "[@worker]: answer" in shared
