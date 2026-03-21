@@ -65,7 +65,6 @@ export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
-  const [composerFocusKey, setComposerFocusKey] = useState(0);
   const [editValue, setEditValue] = useState("");
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
   const [currentArchivedConvo, setCurrentArchivedConvo] = useState<ConvoMeta | null>(null);
@@ -213,7 +212,6 @@ export function Chat() {
     if (!projectId) return;
     try {
       const convo = await createConvo(projectId);
-      setComposerFocusKey(Date.now());
       navigate(`/${projectId}/${convo.id}`);
     } catch (e: any) {
       setError(e.message || "Failed to create conversation");
@@ -527,7 +525,7 @@ export function Chat() {
           projectFiles={projectFiles}
           skills={skills}
           refreshMentionFiles={refreshMentionFiles}
-          focusKey={composerFocusKey}
+          focusKey={convId}
         />
       </div>
 
