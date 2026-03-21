@@ -474,9 +474,9 @@ export function Chat() {
                     minHeight: `${CONVO_RAIL_ROW_HEIGHT}px`,
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: railCollapsed ? "center" : undefined,
-                    gap: railCollapsed ? 0 : "10px",
-                    padding: railCollapsed ? 0 : "0 36px 0 10px",
+                    justifyContent: undefined,
+                    gap: "10px",
+                    padding: railCollapsed ? "0 10px" : "0 36px 0 10px",
                     borderRadius: "10px",
                     border: "none",
                     background: isActive ? colors.bgSurface : "transparent",
@@ -486,7 +486,7 @@ export function Chat() {
                     overflow: "hidden",
                   }}
                 >
-                  <span style={{ position: "relative", width: 18, height: 18, flexShrink: 0, marginTop: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ width: 18, minWidth: 18, position: "relative", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                     <IdentityIcon size={16} style={{ color: isActive ? colors.text : colors.textMuted, flexShrink: 0 }} />
                     <span style={{ position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 0 2px ${isActive ? colors.bgSurface : colors.bg}` }} />
                   </span>
