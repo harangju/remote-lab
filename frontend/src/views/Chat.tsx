@@ -254,13 +254,12 @@ export function Chat() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      const primaryMod = e.metaKey || e.ctrlKey;
-      if (primaryMod && !e.shiftKey && key === "p") {
+      if (e.metaKey && !e.ctrlKey && !e.shiftKey && key === "p") {
         e.preventDefault();
         panel.toggleFileFinder();
         return;
       }
-      if (primaryMod && e.shiftKey && key === "m") {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "m") {
         e.preventDefault();
         void handleNewConversation();
       }
