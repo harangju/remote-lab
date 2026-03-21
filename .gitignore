@@ -2,9 +2,9 @@
 __pycache__/
 *.pyc
 .venv/
-data/
-!data/.gitkeep
-!data/skills/
+/data/
+!/data/.gitkeep
+!/data/skills/
 frontend/node_modules/
 frontend/dist/
 frontend/bun.lock
