@@ -248,7 +248,7 @@ export type WsEvent =
   | { type: "voice-state"; state: "starting" | "listening" | "stopped" }
   | { type: "voice-transcript"; text: string; is_final: boolean }
   | { type: "running"; run_id: string }
-  | { type: "agent-start"; run_id: string; agent_id: string; agent_name: string; agent_color?: string }
+  | { type: "agent-start"; run_id: string; agent_id: string; agent_name: string; agent_color?: string; agent_model?: string }
   | { type: "thinking-delta"; run_id: string; delta: string; agent_id?: string }
   | { type: "text-delta"; run_id: string; delta: string; agent_id?: string }
   | { type: "tool-use"; run_id: string; name: string; input?: string; tool_call_id?: string; agent_id?: string }
@@ -256,7 +256,7 @@ export type WsEvent =
   | { type: "tool-output"; run_id: string; name: string; output: string; tool_call_id?: string; agent_id?: string }
   | { type: "file-changed"; run_id: string; path: string; change: "created" | "updated"; agent_id?: string }
   | { type: "tool-confirm"; run_id: string; tool_call_id: string; name: string; args?: string; agent_id?: string; can_allow_project?: boolean }
-  | { type: "done"; run_id: string; turns: number; context_tokens: number; context_limit: number; agent_id?: string }
+  | { type: "done"; run_id: string; turns: number; context_tokens: number; context_limit: number; agent_id?: string; status?: "ok" | "cancelled" | "error"; error_message?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "skill-result"; skill: string; output: string }
   | { type: "title-updated"; title: string }

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
-from pydantic_ai.messages import BinaryImage, ModelResponse, ModelMessagesTypeAdapter, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ThinkingPartDelta, ToolCallPart, UserContent, FunctionToolCallEvent, FunctionToolResultEvent
+from pydantic_ai.messages import BinaryImage, ModelMessage, ModelRequest, ModelResponse, ModelMessagesTypeAdapter, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ThinkingPartDelta, ToolCallPart, ToolReturnPart, UserContent, FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
 
 from backend.agent import tools as agent_tools
@@ -17,6 +17,56 @@ from backend.agent.permissions import build_project_rule, is_tool_auto_allowed, 
 from backend.data.models import ConvoStatus
 from backend.data.protocol import Compacted, Done, TextDelta, ThinkingDelta, ToolConfirm, ToolResult
 from backend.runtime.state import RunState, sessions
+
+
+def sanitize_history(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Ensure every ToolCallPart has a matching ToolReturnPart.
+
+    Walks backward from the tail, removing any ModelResponse whose
+    ToolCallParts lack corresponding ToolReturnParts in the next
+    ModelRequest.  This keeps agent history valid for PydanticAI's
+    iter() which rejects histories with unresolved tool calls.
+    """
+    while len(messages) >= 1:
+        last = messages[-1]
+        if not isinstance(last, ModelResponse):
+            break
+        call_ids = {p.tool_call_id for p in last.parts if isinstance(p, ToolCallPart)}
+        if not call_ids:
+            break
+        # Check if a subsequent ModelRequest has all matching returns
+        if len(messages) >= 2 and isinstance(messages[-2], ModelResponse):
+            # Two responses in a row — the earlier one is orphaned
+            messages.pop()
+            continue
+        # No following request at all — orphaned
+        messages.pop()
+        continue
+
+    # Also handle case: ModelRequest with ToolReturnParts but no
+    # preceding ModelResponse with the matching ToolCallParts
+    while len(messages) >= 1:
+        last = messages[-1]
+        if not isinstance(last, ModelRequest):
+            break
+        has_tool_returns = any(isinstance(p, ToolReturnPart) for p in last.parts)
+        if not has_tool_returns:
+            break
+        # Check if preceding message is a ModelResponse with matching calls
+        if len(messages) >= 2 and isinstance(messages[-2], ModelResponse):
+            call_ids = {p.tool_call_id for p in messages[-2].parts if isinstance(p, ToolCallPart)}
+            return_ids = {p.tool_call_id for p in last.parts if isinstance(p, ToolReturnPart)}
+            if return_ids.issubset(call_ids):
+                break  # All returns match — history is clean
+        # Orphaned returns without matching calls — remove
+        messages.pop()
+        # And remove the now-trailing response if it has orphaned calls
+        if messages and isinstance(messages[-1], ModelResponse):
+            call_ids = {p.tool_call_id for p in messages[-1].parts if isinstance(p, ToolCallPart)}
+            if call_ids:
+                messages.pop()
+
+    return messages
 
 
 async def _finalize_run_session(convo_id: str, run: RunState) -> None:
@@ -175,18 +225,18 @@ async def run_bash_command_task(
     except asyncio.CancelledError:
         run.status = "error"
         await update_conversation_status(convo_id, ConvoStatus.idle)
-        event = system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=False)
-        await append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
+        done = Done(turns=0, run_id=run.run_id, status="cancelled")
+        run.done_event = done.model_dump()
+        await _emit(done.model_dump_json())
         await _finalize_run_session(convo_id, run)
         raise
     except Exception as e:
         run.error_msg = str(e)
         run.status = "error"
         await update_conversation_status(convo_id, ConvoStatus.error)
-        event = system_event(str(e), event_type="run-error", run_id=run.run_id, recoverable=True)
-        await append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
+        done = Done(turns=0, run_id=run.run_id, status="error", error_message=str(e))
+        run.done_event = done.model_dump()
+        await _emit(done.model_dump_json())
     finally:
         agent_tools.clear_broadcast()
         if run.status != "error":
@@ -405,32 +455,46 @@ async def run_agent_task(
     except asyncio.CancelledError:
         run.status = "error"
         await update_conversation_status(convo_id, ConvoStatus.idle)
-        event = system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=False)
-        await append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
+        # Emit a Done with status="cancelled" so the frontend can
+        # cleanly flush stream blocks without needing reloadConversation.
+        done = Done(
+            turns=total_turns, run_id=run.run_id,
+            context_tokens=run.last_context_tokens, context_limit=get_context_limit(),
+            agent_id=agent_id, status="cancelled",
+        )
+        run.done_event = done.model_dump()
+        await _emit(done.model_dump_json())
         await _finalize_run_session(convo_id, run)
         raise
     except Exception as e:
         run.error_msg = str(e)
         run.status = "error"
         await update_conversation_status(convo_id, ConvoStatus.error)
-        event = system_event(str(e), event_type="run-error", run_id=run.run_id, recoverable=True)
-        await append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
+        done = Done(
+            turns=total_turns, run_id=run.run_id,
+            context_tokens=run.last_context_tokens, context_limit=get_context_limit(),
+            agent_id=agent_id, status="error", error_message=str(e),
+        )
+        run.done_event = done.model_dump()
+        await _emit(done.model_dump_json())
     finally:
         agent_tools.clear_broadcast()
+        # Persist a run-done event to JSONL so buildDisplayMessages
+        # knows where run boundaries are (flushes orphaned tool blocks).
+        try:
+            await append_event(convo_id, {
+                "type": "run-done",
+                "run_id": run.run_id,
+                "status": run.status,
+                "timestamp": iso_now(),
+                **({"agent_id": agent_id} if agent_id else {}),
+            })
+        except Exception:
+            pass
         # Save agent history even on cancel/error so the next run
         # doesn't lose tool results and re-read the same files.
-        # Strip trailing ModelResponses with unprocessed tool calls —
-        # PydanticAI rejects new user prompts if the history ends with
-        # tool calls that have no matching tool results.
         if run.message_history:
-            while run.message_history and isinstance(run.message_history[-1], ModelResponse):
-                last = run.message_history[-1]
-                if any(isinstance(p, ToolCallPart) for p in last.parts):
-                    run.message_history.pop()
-                else:
-                    break
+            sanitize_history(run.message_history)
         if run.message_history:
             try:
                 await save_agent_history(

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { connectWs, getConvo, listFiles, listProjectAgents, listSkills, updateConvo, uploadFiles, type AgentConfig, type Attachment, type Skill, type WsEvent } from "../api";
-import { buildDisplayMessages, mergeAssistantMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "../chatState";
+import { buildDisplayMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "../chatState";
 import type { ComposerAttachment } from "../chatComposer";
 import { getBottomSlackPx, getUserMessageTopOffsetPx } from "../chatSessionState";
 
@@ -24,7 +24,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   const [projectFiles, setProjectFiles] = useState<string[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const mentionRefreshInFlightRef = useRef(false);
-  const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string } | null>(null);
+  const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string; model?: string } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<{ message_id: string; text: string; attachments?: Attachment[] }[]>([]);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
@@ -39,7 +39,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   const [voiceTranscriptText, setVoiceTranscriptText] = useState("");
   const [voiceStatusText, setVoiceStatusText] = useState("Listening…");
 
-  const activeAgentRef = useRef<{ id: string; name: string; color?: string } | null>(null);
+  const activeAgentRef = useRef<{ id: string; name: string; color?: string; model?: string } | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessagesRef = useRef<{ message_id: string; text: string; attachments?: Attachment[] }[]>([]);
@@ -177,7 +177,10 @@ export function useChatSession(projectId?: string, convId?: string) {
     setAutonomousToolsEnabled(rebuilt.autonomousToolsEnabled);
     setHasMoreHistory(detail.has_more);
     setHistoryCursor(detail.next_before);
-    setMessages((prev) => mergeAssistantMessages(rebuilt.messages, prev.filter((msg) => msg.pending)));
+    setMessages((prev) => {
+      const pending = prev.filter((msg) => msg.pending);
+      return [...rebuilt.messages, ...pending];
+    });
     setMeta(rebuilt.meta);
     blocksRef.current = [];
     setStreamBlocks([]);
@@ -242,7 +245,7 @@ export function useChatSession(projectId?: string, convId?: string) {
         case "running": setCurrentRunId(data.run_id); setBusy(true); setWaitingForModel(true); break;
         case "agent-start": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
-          const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color };
+          const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color, model: data.agent_model };
           activeAgentRef.current = ag; setActiveAgent(ag); break;
         }
         case "thinking-delta": if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break; break;
@@ -301,6 +304,8 @@ export function useChatSession(projectId?: string, convId?: string) {
         }
         case "done": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
+          const status = data.status || "ok";
+          if (status === "error" && data.error_message) setError(data.error_message);
           const finalBlocks = blocksRef.current;
           if (finalBlocks.length > 0) {
             const ag = activeAgentRef.current;
@@ -308,7 +313,9 @@ export function useChatSession(projectId?: string, convId?: string) {
             const finalMessage: DisplayMessage = { role: "assistant", blocks: [...finalBlocks], agent_id: data.agent_id || ag?.id, agent_name: ag?.name, agent_color: ag?.color, defaultExpandedTools: onlyBashOutput };
             setMessages((msgs) => msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]);
           }
-          blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null); setMeta({ turns: data.turns, context_tokens: data.context_tokens, context_limit: data.context_limit }); setBusy(false); setCurrentRunId(null); break;
+          blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null);
+          if (data.context_limit > 0) setMeta({ turns: data.turns, context_tokens: data.context_tokens, context_limit: data.context_limit });
+          setBusy(false); setCurrentRunId(null); break;
         }
         case "compacted": setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev); setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }] }]); setWaitingForModel(false); setBusy(false); break;
         case "skill-result": setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: data.skill, input: data.output }] }]); setWaitingForModel(false); setBusy(false); break;
@@ -317,10 +324,11 @@ export function useChatSession(projectId?: string, convId?: string) {
           if (!data.run_id && data.message.startsWith("Voice input failed")) { setVoiceError(data.message); setVoiceUiActive(false); break; }
           if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);
-          if (blocksRef.current.length > 0) setMessages((msgs) => { const finalMessage: DisplayMessage = { role: "assistant", blocks: [...blocksRef.current] }; return msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]; });
-          const shouldReloadFromHistory = data.recoverable && convId && data.message !== "Run stopped";
-          blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null); setBusy(false); setCurrentRunId(null);
-          if (shouldReloadFromHistory) reloadConversation().catch((e) => setError(e.message));
+          // Non-run errors (e.g. "Agent is still running") — clean up UI state.
+          // Run errors are handled by the Done event with status="error"|"cancelled".
+          if (!data.run_id) {
+            blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); setBusy(false); setCurrentRunId(null);
+          }
           break;
       }
     });

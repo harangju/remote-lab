@@ -50,98 +50,6 @@ export function messageIdentity(message: DisplayMessage): string {
   return `${message.role}:${message.agent_id || ""}:${message.message_id || ""}:${message.blocks.map(blockIdentity).join("|")}`;
 }
 
-export function mergeAssistantMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayMessage[] {
-  const result = [...prev];
-  const firstToolMessageIndexByName = new Map<string, number>();
-  const lastToolMessageIndexByName = new Map<string, number>();
-  const indexByToolCallId = new Map<string, number>();
-
-  for (let i = 0; i < result.length; i += 1) {
-    const message = result[i];
-    if (message.role !== "assistant") continue;
-    for (const block of message.blocks) {
-      if (block.type !== "tool") continue;
-      if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, i);
-      if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, i);
-      lastToolMessageIndexByName.set(block.name, i);
-    }
-  }
-
-  for (const message of next) {
-    if (message.role !== "assistant") {
-      result.push(message);
-      continue;
-    }
-    const toolBlocks = message.blocks.filter((block): block is Extract<StreamBlock, { type: "tool" }> => block.type === "tool");
-    const toolCallIds = toolBlocks.filter((block) => !!block.tool_call_id).map((block) => block.tool_call_id!);
-    const existingIdxById = toolCallIds.map((id) => indexByToolCallId.get(id)).find((idx): idx is number => idx != null);
-    const shouldPreferFirstByName = toolBlocks.some((block) => !!block.output || !!block.liveOutput || block.awaitingApproval || block.approvalStatus === "approved" || block.approvalStatus === "denied");
-    const existingIdxByName = toolBlocks
-      .map((block) => shouldPreferFirstByName ? firstToolMessageIndexByName.get(block.name) : lastToolMessageIndexByName.get(block.name))
-      .find((idx): idx is number => idx != null);
-    const existingIdx = existingIdxById ?? existingIdxByName;
-    if (existingIdx == null) {
-      result.push(message);
-      const newIndex = result.length - 1;
-      for (const block of toolBlocks) {
-        if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, newIndex);
-        if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, newIndex);
-        lastToolMessageIndexByName.set(block.name, newIndex);
-      }
-      continue;
-    }
-
-    const existing = result[existingIdx];
-    const mergedBlocks = [...existing.blocks];
-    const blockIndexByToolCallId = new Map<string, number>();
-    const firstBlockIndexByName = new Map<string, number>();
-    const lastBlockIndexByName = new Map<string, number>();
-    for (let i = 0; i < mergedBlocks.length; i += 1) {
-      const block = mergedBlocks[i];
-      if (block.type !== "tool") continue;
-      if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, i);
-      if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, i);
-      lastBlockIndexByName.set(block.name, i);
-    }
-
-    for (const block of message.blocks) {
-      if (block.type === "tool") {
-        const targetIndex = block.tool_call_id && blockIndexByToolCallId.has(block.tool_call_id)
-          ? blockIndexByToolCallId.get(block.tool_call_id)!
-          : (shouldPreferFirstByName ? firstBlockIndexByName.get(block.name) : lastBlockIndexByName.get(block.name));
-        if (targetIndex != null) {
-          mergedBlocks[targetIndex] = { ...mergedBlocks[targetIndex], ...block };
-          if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, targetIndex);
-          if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, targetIndex);
-          lastBlockIndexByName.set(block.name, targetIndex);
-          continue;
-        }
-      }
-      if (!mergedBlocks.some((existingBlock) => blockIdentity(existingBlock) === blockIdentity(block))) {
-        mergedBlocks.push(block);
-        if (block.type === "tool") {
-          const idx = mergedBlocks.length - 1;
-          if (block.tool_call_id) blockIndexByToolCallId.set(block.tool_call_id, idx);
-          if (!firstBlockIndexByName.has(block.name)) firstBlockIndexByName.set(block.name, idx);
-          lastBlockIndexByName.set(block.name, idx);
-        }
-      }
-    }
-
-    result[existingIdx] = {
-      ...existing,
-      ...message,
-      blocks: mergedBlocks,
-    };
-    for (const block of toolBlocks) {
-      if (block.tool_call_id) indexByToolCallId.set(block.tool_call_id, existingIdx);
-      if (!firstToolMessageIndexByName.has(block.name)) firstToolMessageIndexByName.set(block.name, existingIdx);
-      lastToolMessageIndexByName.set(block.name, existingIdx);
-    }
-  }
-
-  return result;
-}
 
 export function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig[]): { messages: DisplayMessage[]; meta: MetaInfo | null; title: string; autonomousToolsEnabled: boolean } {
   const msgs: DisplayMessage[] = [];
@@ -220,6 +128,12 @@ export function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig
       } else {
         pendingBlocks.push({ type: "tool", name: mAny.name, input: mAny.input, output: mAny.output, diff: typeof mAny.diff === "string" ? mAny.diff : undefined, tool_call_id: mAny.tool_call_id || undefined, run_id: mAny.run_id || undefined });
       }
+      continue;
+    }
+
+    if (type === "run-done") {
+      // Run boundary — flush any orphaned tool blocks from cancelled/errored runs
+      flushPending();
       continue;
     }
 

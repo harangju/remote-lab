@@ -23,7 +23,7 @@ from backend.data import storage
 from backend.data.models import ConvoStatus
 from backend.data.protocol import AgentStart, AuthOk, Compacted, Error, MessageAck, Running, SkillResult, VoiceState, VoiceTranscript
 from backend.runtime.runner import build_multimodal_prompt, run_agent_task, run_bash_command_task
-from backend.runtime.state import RunState, get_session, processed_message_ids, sessions
+from backend.runtime.state import RunState, get_session, processed_message_ids, seen_tool_call_ids, sessions
 from backend.voice.stt import DeepgramSTTSession
 
 
@@ -144,6 +144,16 @@ def create_ws_handler(
                 _cached_messages = None
 
             _load_history(None)
+
+            # Seed seen_tool_call_ids from JSONL to prevent post-restart
+            # duplicate tool-call events.
+            existing_tc_ids = seen_tool_call_ids(convo_id)
+            if not existing_tc_ids:
+                for evt in _get_cached_messages():
+                    if evt.get("type") == "tool-call":
+                        tc_id = evt.get("tool_call_id")
+                        if tc_id:
+                            existing_tc_ids.add(tc_id)
 
             existing_run = session.run
             if existing_run and existing_run.status == "running":
@@ -541,7 +551,7 @@ def create_ws_handler(
                                             agent_prompt_local = f"[Conversation context]\n{shared_ctx}\n\n[Handoff from another agent]\n{agent_prompt_local}"
                                         else:
                                             agent_prompt_local = f"[Conversation context]\n{shared_ctx}\n\n[New message from user]\n{agent_prompt_local}"
-                                await run_context.broadcast(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color).model_dump_json())
+                                await run_context.broadcast(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color, agent_model=ac.model).model_dump_json())
 
                             agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
                             _agent_cache[ac.id if ac else None] = agent_instance

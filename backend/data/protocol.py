@@ -41,6 +41,8 @@ class Done(BaseModel):
     context_tokens: int = 0
     context_limit: int = 0
     agent_id: str | None = None
+    status: Literal["ok", "cancelled", "error"] = "ok"
+    error_message: str | None = None
 
 
 class Compacted(BaseModel):
@@ -62,6 +64,7 @@ class AgentStart(BaseModel):
     agent_id: str
     agent_name: str
     agent_color: str | None = None
+    agent_model: str | None = None
 
 
 class ToolResult(BaseModel):
