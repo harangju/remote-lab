@@ -5,6 +5,7 @@ __pycache__/
 /data/
 !/data/.gitkeep
 !/data/skills/
+backend/data/agents/
 frontend/node_modules/
 frontend/dist/
 frontend/bun.lock
