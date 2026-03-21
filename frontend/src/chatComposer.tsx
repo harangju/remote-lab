@@ -3,6 +3,7 @@ import { Terminal, FileText, Square, Paperclip, X, Mic, ArrowUp } from "lucide-r
 import { input as inputStyle, btnPrimary } from "./styles";
 import { compactSkillDescription } from "./chatUi";
 import type { AgentConfig, Skill } from "./api";
+import { getMentionMatches, getSlashMatches } from "./chatComposerState";
 
 export interface ComposerAttachment {
   file: File;
@@ -72,38 +73,9 @@ export function ChatComposer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
-  const mentionMatches = useMemo((): MentionMatch[] => {
-    if (mentionQuery === null) return [];
-    const q = mentionQuery.toLowerCase();
-    const results: MentionMatch[] = [];
-    for (const a of agents) {
-      if (a.id.toLowerCase().startsWith(q) || a.name.toLowerCase().startsWith(q)) {
-        results.push({ type: "agent", agent: a });
-      }
-    }
-    if (projectFiles.length > 0) {
-      const fileMatches: string[] = [];
-      for (const f of projectFiles) {
-        const lower = f.toLowerCase();
-        const basename = lower.split("/").pop() || lower;
-        if (lower.startsWith(q) || basename.startsWith(q) || lower.includes(q)) {
-          fileMatches.push(f);
-        }
-        if (fileMatches.length >= 10) break;
-      }
-      for (const f of fileMatches) {
-        results.push({ type: "file", path: f });
-      }
-    }
-    if (q === "" && results.length > 20) return results.slice(0, 20);
-    return results;
-  }, [mentionQuery, agents, projectFiles]);
+  const mentionMatches = useMemo((): MentionMatch[] => getMentionMatches(mentionQuery, agents, projectFiles), [mentionQuery, agents, projectFiles]);
 
-  const slashMatches = useMemo((): Skill[] => {
-    if (slashQuery === null) return [];
-    const q = slashQuery.toLowerCase();
-    return skills.filter((s) => s.name.toLowerCase().startsWith(q));
-  }, [slashQuery, skills]);
+  const slashMatches = useMemo((): Skill[] => getSlashMatches(slashQuery, skills), [slashQuery, skills]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;

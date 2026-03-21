@@ -4,6 +4,7 @@ import { input as inputStyle, btnPrimary } from "./styles";
 import { MdContent, ToolChip } from "./chatUi";
 import type { Attachment } from "./api";
 import type { ApprovalScope, DisplayMessage, StreamBlock } from "./chatState";
+import { buildLiveMessageRows } from "./chatMessagesState";
 
 const MESSAGE_MAX_WIDTH = "92%";
 const CHAT_MESSAGES_MAX_WIDTH = "64rem";
@@ -212,29 +213,25 @@ export function ChatMessages({
           </React.Fragment>
         ))}
 
-        {(() => {
-          const reconnectPreview = !connected && streamBlocks.length > 0 ? [{ role: "assistant" as const, blocks: streamBlocks, agent_id: activeAgent?.id, agent_name: activeAgent?.name, agent_color: activeAgent?.color }] : [];
-          const liveRows = connected && streamBlocks.length > 0 ? [{ role: "assistant" as const, blocks: streamBlocks, agent_id: activeAgent?.id, agent_name: activeAgent?.name, agent_color: activeAgent?.color, live: true }] : [];
-          return [...reconnectPreview, ...liveRows].map((m, idx) => (
-            <React.Fragment key={`live-${idx}`}>
-              {renderAgentLabel(m.agent_name, m.agent_color)}
-              {m.blocks.map((b, j) => (
-                b.type === "tool" ? (
-                  <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
-                    <ToolChip tool={b} live={!!(m as any).live && !b.output} defaultOpen={!!(m as any).defaultExpandedTools} onOpenFile={onOpenFile} onRespond={onToolApproval} autonomousToolsEnabled={autonomousToolsEnabled} />
-                  </div>
-                ) : b.type === "system" ? (
-                  <div key={j} style={{ alignSelf: "center", fontSize: "0.8rem", color: b.tone === "error" ? "#c4554d" : "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", padding: "6px 10px", margin: "6px 0", maxWidth: "100%" }}>{b.content}</div>
-                ) : b.type === "text" && b.content ? (
-                  <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
-                    <div style={{ ...msgBubble("assistant", m.agent_color), maxWidth: "100%", paddingRight: "42px" }}><MdContent text={b.content} /></div>
-                    <button onClick={() => navigator.clipboard.writeText(b.content)} data-tooltip="Copy message" style={assistantCopyBtnStyle} onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}><Copy size={12} /></button>
-                  </div>
-                ) : null
-              ))}
-            </React.Fragment>
-          ));
-        })()}
+        {buildLiveMessageRows(connected, streamBlocks, activeAgent).map((m, idx) => (
+          <React.Fragment key={`live-${idx}`}>
+            {renderAgentLabel(m.agent_name, m.agent_color)}
+            {m.blocks.map((b, j) => (
+              b.type === "tool" ? (
+                <div key={j} style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignSelf: "flex-start", margin: "4px 0 2px", maxWidth: MESSAGE_MAX_WIDTH }}>
+                  <ToolChip tool={b} live={!!m.live && !b.output} defaultOpen={false} onOpenFile={onOpenFile} onRespond={onToolApproval} autonomousToolsEnabled={autonomousToolsEnabled} />
+                </div>
+              ) : b.type === "system" ? (
+                <div key={j} style={{ alignSelf: "center", fontSize: "0.8rem", color: b.tone === "error" ? "#c4554d" : "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", padding: "6px 10px", margin: "6px 0", maxWidth: "100%" }}>{b.content}</div>
+              ) : b.type === "text" && b.content ? (
+                <div key={j} style={{ position: "relative", maxWidth: MESSAGE_MAX_WIDTH, alignSelf: "flex-start" }}>
+                  <div style={{ ...msgBubble("assistant", m.agent_color), maxWidth: "100%", paddingRight: "42px" }}><MdContent text={b.content} /></div>
+                  <button onClick={() => navigator.clipboard.writeText(b.content)} data-tooltip="Copy message" style={assistantCopyBtnStyle} onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}><Copy size={12} /></button>
+                </div>
+              ) : null
+            ))}
+          </React.Fragment>
+        ))}
 
         {waitingForModel && (
           <div style={{ alignSelf: "flex-start", padding: "10px 14px", color: "var(--text-muted)", display: "flex", alignItems: "center" }}>
