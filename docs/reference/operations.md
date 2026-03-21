@@ -10,6 +10,15 @@ cd frontend && bun install && bun run build && cd ..
 sudo systemctl restart remote-lab
 ```
 
+## Restarting services
+
+```bash
+sudo systemctl restart remote-lab
+sudo systemctl status remote-lab
+sudo systemctl restart remote-lab-docs
+sudo systemctl restart remote-lab remote-lab-docs
+```
+
 ## Logs
 
 ```bash
