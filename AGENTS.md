@@ -106,6 +106,11 @@ marp --html slides.md -o /srv/remote-lab/public/slides.html
 
 Source files use standard Markdown with `marp: true` front matter. Slides are separated by `---`. Built HTML files in `public/` are served at the site root (e.g. `/week1.html`).
 
+## Branching
+
+- **`main`** — stable, deployable. Do not commit directly to main.
+- **`dev`** — active development. All work happens here. Merge to main when stable.
+
 ## Conventions
 
 - **Align before acting** — understand the problem and agree on the approach before making changes. Ask questions, don't assume.
