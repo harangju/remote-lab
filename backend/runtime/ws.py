@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic_ai.messages import ModelMessagesTypeAdapter
@@ -15,12 +16,19 @@ from backend.agent.context import build_project_instructions
 from backend.agent.mentions import extract_file_mentions, parse_mentions
 from backend.agent.permissions import add_project_rule
 from backend.agent.skills import SkillType, get_skill
+from backend.agent import tools as agent_tools
+from backend.runtime.commands import handle_share, handle_shares, handle_unshare
+from pydantic_ai.messages import UserContent
 from backend.data import storage
 from backend.data.models import ConvoStatus
 from backend.data.protocol import AgentStart, AuthOk, Compacted, Error, MessageAck, Running, SkillResult, VoiceState, VoiceTranscript
 from backend.runtime.runner import build_multimodal_prompt, run_agent_task, run_bash_command_task
 from backend.runtime.state import RunState, get_session, processed_message_ids, sessions
 from backend.voice.stt import DeepgramSTTSession
+
+
+def new_run_id() -> str:
+    return uuid4().hex[:12]
 
 
 def create_ws_handler(
