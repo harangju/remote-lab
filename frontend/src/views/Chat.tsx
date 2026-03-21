@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { FileText, Pencil, FolderOpen, Sparkles, Archive } from "lucide-react";
-import { listConvos, createConvo, updateConvo, type ConvoMeta } from "../api";
+import { listConvos, createConvo, getConvo, updateConvo, type ConvoMeta } from "../api";
 import { btnIcon, colors, input as inputStyle } from "../styles";
 import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
@@ -67,6 +67,7 @@ export function Chat() {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
+  const [currentArchivedConvo, setCurrentArchivedConvo] = useState<ConvoMeta | null>(null);
   const [archivingConvoId, setArchivingConvoId] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -279,7 +280,32 @@ export function Chat() {
           ...convo,
           last_event_at: convo.last_event_at || convo.updated_at,
         }));
-        if (!cancelled) setProjectConvos(normalized.filter((convo) => !convo.archived_at));
+        if (cancelled) return;
+        const activeConvos = normalized.filter((convo) => !convo.archived_at);
+        setProjectConvos(activeConvos);
+
+        if (convId) {
+          const activeCurrent = activeConvos.find((convo) => convo.id === convId) || null;
+          if (activeCurrent) {
+            setCurrentArchivedConvo(null);
+          } else {
+            try {
+              const current = await getConvo(convId);
+              if (!cancelled && current.archived_at) {
+                setCurrentArchivedConvo({
+                  ...current,
+                  last_event_at: current.last_event_at || current.updated_at,
+                });
+              } else if (!cancelled) {
+                setCurrentArchivedConvo(null);
+              }
+            } catch {
+              if (!cancelled) setCurrentArchivedConvo(null);
+            }
+          }
+        } else {
+          setCurrentArchivedConvo(null);
+        }
       } catch {}
     };
 
@@ -291,7 +317,7 @@ export function Chat() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [projectId]);
+  }, [convId, projectId]);
 
   const [panelWidth, setPanelWidth] = useState(() => {
     if (typeof window === "undefined") return 500;
@@ -352,7 +378,13 @@ export function Chat() {
     return () => window.removeEventListener("resize", onResize);
   }, [panel.file]);
 
-  const visibleConvos = useMemo(() => projectConvos.slice(0, 12), [projectConvos]);
+  const visibleConvos = useMemo(() => {
+    const baseConvos = projectConvos.slice(0, 12);
+    if (currentArchivedConvo && !baseConvos.some((convo) => convo.id === currentArchivedConvo.id)) {
+      return [currentArchivedConvo, ...baseConvos];
+    }
+    return baseConvos;
+  }, [currentArchivedConvo, projectConvos]);
   const railWidth = railCollapsed ? CONVO_RAIL_COLLAPSED_WIDTH : CONVO_RAIL_WIDTH;
 
   return (

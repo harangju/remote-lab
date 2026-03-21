@@ -163,9 +163,12 @@ export function ChatConvoRail({
           const statusColor = railStatusColor(tone);
           const isActive = convo.id === convId;
           const IdentityIcon = railIdentityIcon(convo.id);
-          const sublabel = convo.status === "running"
-            ? "running"
-            : timeAgo(convo.last_event_at || convo.updated_at);
+          const isArchived = Boolean(convo.archived_at);
+          const sublabel = isArchived
+            ? "archived"
+            : convo.status === "running"
+              ? "running"
+              : timeAgo(convo.last_event_at || convo.updated_at);
           return (
             <div
               key={convo.id}
@@ -195,15 +198,15 @@ export function ChatConvoRail({
                 }}
               >
                 <span style={{ width: 18, minWidth: 18, position: "relative", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                  <IdentityIcon size={16} style={{ color: isActive ? colors.text : colors.textMuted, flexShrink: 0 }} />
-                  <span style={{ position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 0 2px ${isActive ? colors.bgSurface : colors.bg}` }} />
+                  <IdentityIcon size={16} style={{ color: isActive ? colors.text : colors.textMuted, flexShrink: 0, opacity: isArchived ? 0.7 : 1 }} />
+                  <span style={{ position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: "50%", background: isArchived ? colors.textMuted : statusColor, boxShadow: `0 0 0 2px ${isActive ? colors.bgSurface : colors.bg}` }} />
                 </span>
                 {!railCollapsed && (
                   <span style={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", gap: "2px", overflow: "hidden" }}>
                     <span style={{ fontSize: "0.84rem", fontWeight: isActive ? 600 : 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {convo.title || "Untitled"}
                     </span>
-                    <span style={{ fontSize: "0.72rem", color: statusColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: "lowercase" }}>
+                    <span style={{ fontSize: "0.72rem", color: isArchived ? colors.textMuted : statusColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: "lowercase" }}>
                       {sublabel}
                     </span>
                   </span>
