@@ -318,8 +318,9 @@ export function useChatSession(projectId?: string, convId?: string) {
           if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);
           if (blocksRef.current.length > 0) setMessages((msgs) => { const finalMessage: DisplayMessage = { role: "assistant", blocks: [...blocksRef.current] }; return msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]; });
+          const shouldReloadFromHistory = data.recoverable && convId && data.message !== "Run stopped";
           blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null); setBusy(false); setCurrentRunId(null);
-          if (data.recoverable && convId) reloadConversation().catch((e) => setError(e.message));
+          if (shouldReloadFromHistory) reloadConversation().catch((e) => setError(e.message));
           break;
       }
     });

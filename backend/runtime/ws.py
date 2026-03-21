@@ -98,7 +98,7 @@ def create_ws_handler(
 
             if convo.status == ConvoStatus.running and session.run is None:
                 await update_conversation_status(convo_id, ConvoStatus.error)
-                restart_event = system_event("Server restarted during run", event_type="run-error", recoverable=True)
+                restart_event = system_event("Server restarted during run", event_type="run-error", recoverable=False)
                 await append_event(convo_id, restart_event)
                 await ws.send_text(json.dumps(restart_event | {"type": "error"}))
                 convo = storage.get_conversation(convo_id)

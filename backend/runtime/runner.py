@@ -19,6 +19,14 @@ from backend.data.protocol import Compacted, Done, TextDelta, ThinkingDelta, Too
 from backend.runtime.state import RunState, sessions
 
 
+async def _finalize_run_session(convo_id: str, run: RunState) -> None:
+    session = sessions.get(convo_id)
+    if session and session.run is run:
+        session.run = None
+        if not session.subscribers and session.controller is None:
+            sessions.pop(convo_id, None)
+
+
 def build_multimodal_prompt(prompt: str, attachments: list[dict[str, Any]], project_path: Path) -> str | list[UserContent]:
     if not attachments:
         return prompt
@@ -167,9 +175,10 @@ async def run_bash_command_task(
     except asyncio.CancelledError:
         run.status = "error"
         await update_conversation_status(convo_id, ConvoStatus.idle)
-        event = system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=True)
+        event = system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=False)
         await append_event(convo_id, event)
         await _emit(json.dumps({**event, "type": "error"}))
+        await _finalize_run_session(convo_id, run)
         raise
     except Exception as e:
         run.error_msg = str(e)
@@ -180,12 +189,9 @@ async def run_bash_command_task(
         await _emit(json.dumps({**event, "type": "error"}))
     finally:
         agent_tools.clear_broadcast()
-        await asyncio.sleep(10)
-        session = sessions.get(convo_id)
-        if session and session.run is run:
-            session.run = None
-            if not session.subscribers and session.controller is None:
-                sessions.pop(convo_id, None)
+        if run.status != "error":
+            await asyncio.sleep(10)
+        await _finalize_run_session(convo_id, run)
 
 
 async def run_agent_task(
@@ -315,7 +321,10 @@ async def run_agent_task(
                                     await _emit(json.dumps(ev))
 
                 usage = agent_run.usage()
-                total_turns += len([m for m in agent_run.all_messages() if isinstance(m, ModelResponse)])
+                # Snapshot history after each iteration so cancelled runs
+                # preserve tool results for the next run.
+                run.message_history = agent_run.all_messages()
+                total_turns += len([m for m in run.message_history if isinstance(m, ModelResponse)])
 
                 result = agent_run.result
                 if result and isinstance(result.output, DeferredToolRequests) and result.output.approvals:
@@ -365,7 +374,6 @@ async def run_agent_task(
 
         context_tokens = usage.request_tokens or 0
         context_limit = get_context_limit()
-        run.message_history = agent_run.all_messages()
         run.last_context_tokens = context_tokens
 
         await save_agent_history(
@@ -397,9 +405,10 @@ async def run_agent_task(
     except asyncio.CancelledError:
         run.status = "error"
         await update_conversation_status(convo_id, ConvoStatus.idle)
-        event = system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=True)
+        event = system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=False)
         await append_event(convo_id, event)
         await _emit(json.dumps({**event, "type": "error"}))
+        await _finalize_run_session(convo_id, run)
         raise
     except Exception as e:
         run.error_msg = str(e)
@@ -410,9 +419,17 @@ async def run_agent_task(
         await _emit(json.dumps({**event, "type": "error"}))
     finally:
         agent_tools.clear_broadcast()
-        await asyncio.sleep(10)
-        session = sessions.get(convo_id)
-        if session and session.run is run:
-            session.run = None
-            if not session.subscribers and session.controller is None:
-                sessions.pop(convo_id, None)
+        # Save agent history even on cancel/error so the next run
+        # doesn't lose tool results and re-read the same files.
+        if run.message_history:
+            try:
+                await save_agent_history(
+                    convo_id,
+                    ModelMessagesTypeAdapter.dump_json(run.message_history),
+                    agent_id=agent_id,
+                )
+            except Exception:
+                pass
+        if run.status != "error":
+            await asyncio.sleep(10)
+        await _finalize_run_session(convo_id, run)

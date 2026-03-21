@@ -1,106 +1,44 @@
 # Current context
 
-- Product-design workflow is now explicit in `AGENTS.md`: Mental model → Manifest → Desired state → Delta → Implementation.
-- `Manifest` is clarified as felt reality in use, not features/layout/implementation.
-- Current product-shaping discussion status:
-  - Step 1 (Mental model): aligned enough.
-  - Step 2 (Manifest): aligned around documents needing to feel inhabitable rather than auxiliary.
-  - Step 3 (Desired state): converging on a simple model:
-    - Project mode
-    - File-only mode
-    - Conversation mode
-  - Candidate desired state:
-    - Project mode can open files directly via explicit file entry (`Cmd+P` / folder icon / open file).
-    - File-only mode is a real surface, likely reusing/adapting the mobile file view.
-    - Conversation mode remains the unit of work, but can transition cleanly to file-only mode and back.
-    - Starting/opening a conversation from file-only mode should preserve the file as the current object.
-- Issue #36 tracks the first-principles document UX exploration.
-- Diagnosed long-conversation performance: chat currently loads and renders the full event history with no pagination/virtualization. Likely frontend memory/render cost, not backend storage size.
-- Agreed next step: design the minimal paginated conversation history shape before implementation.
-- Implemented minimal conversation pagination: backend `GET /api/convos/{id}` now supports `limit` and `before`, returns `has_more` and `next_before`; chat loads recent history first and can prepend older messages via a top "Load older messages" button with scroll preservation.
-- In-progress implementation for #36 adds explicit file entry from project mode and a first standalone file-only route (`/:projectId/file`) that can open a file via `?path=` and start a conversation from that file.
-- Conversation mode now also reads and writes `?path=` so file-only → conversation preserves the active file, and conversation can cleanly promote the current file into a primary view.
-- `Cmd+P` / file picker is being shifted from flat command-palette results toward an explorer-like modal with folder structure and search-as-filter; folders now start collapsed.
-- Project mode no longer needs a lightweight Documents strip; explicit file entry is now carried by the file button / `Cmd+P` flow instead.
-- The project-page ellipsis affordance was a bad fit; secondary sections are now explicit collapsible sections instead of being hidden behind a second-layer reveal.
-- Those secondary sections are now placed below the main conversation list rather than in the primary top area.
-- File-only mode header actions are now folded into the actual file-panel header so there is one real header with file-picker and conversation actions, rather than a separate shell.
-- File-panel primary actions are being unified as larger icon buttons (no mixed text-button styling) to reduce visual weirdness and improve mobile tap targets.
-- Those header icon buttons now opt out of the generic global press animation and use their own simpler hover treatment, with more spacing between buttons.
-- The apparent remaining "press bar" was tooltip clipping; the file-panel header now keeps normal downward tooltips, but the header layer is allowed to render visibly above the editor instead of clipping them.
-- Project-mode and file-panel icon buttons are now being normalized to the same shared visual size/style so the interaction language stays consistent.
-- The actual conversation page header (`Chat.tsx`) now uses the same icon-button language and hover treatment as the file and project surfaces, while keeping the back/title area as a page header.
-- File-panel header ordering is being adjusted so the edit/save/cancel cluster sits immediately to the right of the filename, while file/conversation/copy/close remain in the right-side utility cluster.
-- The file-view conversation action is being shifted from silent auto-match to an explicit anchored popover with "new conversation" plus recent conversations that used the file.
-- That conversation chooser is now shifting further toward the file explorer interaction model: modal overlay treatment, fallback to recent conversations when file-linked ones don't exist, and existing-conversation opens can prefill `@file` in chat.
-- The chooser list is being simplified to reduce redundant message icons.
-- Chooser recency should reflect the last actual conversation event/message timestamp rather than blindly using `ConvoMeta.updated_at`, which can drift.
-- A single icon remains appropriate for the explicit "new conversation about this file" action; the redundancy was mainly in repeating the same message icon on every existing conversation row.
-- File-only mode also had a redundant double-header (route shell + file panel header); the temporary shell header has been removed so only the real file-panel header remains once a file is open.
-- File finder overlay now uses a clearly top-layer z-index so its backdrop covers app chrome consistently.
-- Header button appearing above the file-finder dimmer was caused by the global tooltip hover rule forcing hovered `[data-tooltip]` elements to `z-index: 99999`; that z-index boost has been removed.
-- Tooltip bubbles themselves now render at an explicit top-layer z-index so they appear above app chrome when shown.
-- Chat message bubbles now establish their own local stacking context (`position: relative; z-index: 0`) so hovered tooltip pseudo-elements paint above adjacent messages instead of being visually occluded by neighboring bubbles.
-- Global tooltip anchors now always establish `position: relative` (not only on `:hover`), which avoids pseudo-element stacking glitches on other surfaces like project/conversation cards and code blocks.
-- The real issue for the chat-header tooltips was header/message layering, not tooltip direction: the chat header now establishes its own higher stacking layer above the scrollable message region, and header controls go back to normal downward tooltips.
-- Agreed chat→file-only transition should be a mode-switch action, not a second back action: `Chat.tsx` keeps the existing folder button for browsing files within chat, and adds a separate file icon in the right-side utility cluster to open the current file in standalone file-only mode.
-- File-panel header now includes a direct download action alongside copy/close so file view supports saving the currently open file locally.
-- That download action now targets the backend raw-file endpoint so it downloads the actual on-disk bytes (including binary files like `.docx`) rather than serializing the editor text.
-- Passing auth via a tokenized download URL was unreliable in the browser save flow; the file-view download now uses an authenticated `fetch` for the raw bytes and then saves the returned blob locally instead.
-- The fetch-based download must include the normal bearer auth header; omitting it made the button appear inert because the raw-file endpoint still sits behind API auth.
-- `AGENTS.md` now explicitly requires rebuilding the frontend after frontend changes before reporting completion.
-- Added global prompt skills in `data/skills/` for `docx`, `pdf`, `xlsx`, and `pptx`, sourced from Anthropic's public `skills` repo so these slash skills are now available across projects.
-- Fixed prompt skill loading to parse YAML front matter in `data/skills/*.md` files; without that, imported Anthropic skills were loaded with names/descriptions embedded in the prompt body instead of exposing the intended slash commands like `/docx`.
-- Skill loading now supports packaged skill directories (`<skills-root>/<name>/SKILL.md` plus companion markdown and `scripts/`), not just flat `*.md` files. Anthropic's `docx`, `pdf`, `xlsx`, and `pptx` skills are now mirrored under `data/skills/<name>/...` in that packaged format.
-- Project instructions now explicitly enumerate available slash skills/commands so the model knows `/docx`, `/pdf`, `/xlsx`, `/pptx`, etc. are valid server-side chat commands even though they are not callable tools in the tool list.
-- Slash-command autocomplete in `Chat.tsx` now keys off the `/token` immediately before the cursor anywhere in the composer, not just when `/` is the first character, and the popover shows a truncated single-line description preview instead of the full long skill description.
-- Dynamic project context now puts slash-skill availability at the very top of injected instructions and explicitly tells the model that packaged skill assets live under `data/skills/<skill>/...`, so it should not falsely require those helper scripts to be present in the current project root before honoring `/docx`-style commands.
-- Prompt skills like `/docx` no longer inject full skill bodies as fake user chat. The backend now exposes a real `activate_skill` tool that returns structured skill content (`<skill_content ...>`) plus resource listings and skill-directory context; `/docx`-style slash activation now just nudges the model to call that tool.
-- Base agent system prompt now explicitly defaults to very brief responses, preferring a single sentence or short bullet list unless the user asks for detail.
-- The agent prompt now explicitly treats on-disk file contents as the source of truth: it must re-read a file immediately before any edit/write and preserve direct user edits unless the user explicitly asked to remove them. That same instruction is also injected when prompt skills are activated.
-- File panel now supports read-only `.docx` preview by fetching raw file bytes and rendering them client-side with Mammoth; download remains the fallback for unsupported Word features/layout.
-- File panel now also supports read-only `.pdf` preview via a lightweight `iframe` to a new tokenized same-origin embed route (`/api/projects/{project_id}/file/embed`), avoiding a heavy PDF.js dependency while preserving download fallback.
-- File panel now supports read-only `.html` / `.htm` preview via a sandboxed iframe backed by the same tokenized embed route; HTML embeds get a restrictive CSP (`default-src 'none'`, no forms/connect/frame escalation, self/data/blob-only assets) so project HTML renders as HTML without entering the app DOM.
-- Conversation auto-titling now starts immediately after the first user message is appended (instead of waiting for the first assistant response), still preferring `gpt-5-nano` with existing fallback models.
-- File finder hidden-file UX is now simplified and robust: frontend always fetches the full file list (including dotfiles), while the finder only reveals hidden paths when the search query contains `.`; no special key interception or separate hold/toggle state remains.
-- Project conversation list now supports `Cmd+Shift+M` as a keyboard shortcut for creating a new conversation, while avoiding interception inside editable fields.
-- Conversation list cards now use icon-only archive/restore controls and always show a trash icon there as well, matching the compact action style requested for ConvoList.
-- Chat view header now includes a direct archive button to the left of the auto-mode button; archiving from chat immediately returns to the conversation list.
-- Tool chips in chat now start surfacing `edit_file` changes more transparently: the chip summary includes a compact `(+/-)` change count and the expanded body shows a capped inline before/after diff preview above the raw tool payload.
-- The next refinement for `edit_file` chips is richer diff rendering: default-expanded chips, per-line rows with line numbers, transparent add/remove row colors, and stronger word-level add/remove highlights inside changed lines.
-- `edit_file` chips now suppress the raw JSON payload in normal view, tighten the diff gutter/layout, and use a more robust line-alignment pass so diffs appear for more edit shapes instead of only simple contiguous replacements.
-- Follow-up refinement: for `edit_file`, the diff is now the chip body itself rather than a separate expanded panel below the header, matching the user's intent that the visible chip/gutter should be the diff instead of any raw JSON or detached detail area.
-- Fixed live conversation auto-title updates: auto-title no longer tries to broadcast via a speculative `RunState` created before the real run exists. It now broadcasts directly to the conversation session subscribers (and appends into the active run buffer when present), so first-message title updates reach the live chat header without requiring reload.
-- Project list cards now match ConvoList’s compact actions: archive/restore is icon-only and a trash icon is always shown alongside it.
-- `docs/getting-started.md` step 5 (Configure Caddy) now explains the concrete actions: set the DNS `A` record for the subdomain, edit `/etc/caddy/Caddyfile`, add a reverse-proxy block for the domain, and reload Caddy.
-- `docs/getting-started.md` and `docs/reference/deployment.md` now make the `uv` install path explicit by copying `~/.local/bin/uv` to `/usr/local/bin/uv`, so the documented systemd `ExecStart=/usr/local/bin/uv ...` matches fresh installs.
-- `docs/reference/operations.md` now includes an explicit "Restarting services" section with `systemctl restart/status` commands for `remote-lab`, `remote-lab-docs`, and both together.
-- Those docs now also require `sudo chown -R www-data:www-data /var/www` so `uv` can create its cache under `/var/www/.cache/uv` when the service runs as `www-data`.
-- Agent image attachments now flow into PydanticAI as real multimodal `BinaryImage` content instead of only textual `[Attached image: ...]` markers, while non-image attachments still remain path references. Conversation compaction was updated to summarize binary attachments safely.
-- Diagnosed a PWA/service-worker bug affecting chat reconnect and WebSockets: `frontend/public/sw.js` was intercepting navigation-like requests and could return an invalid fetch result (`Failed to convert value to 'Response'`), which broke app routes and WS setup. The service worker now bypasses navigations as well as `/api/` and `/ws/` paths.
-- Fixed stale `@file` autocomplete in chat: `Chat.tsx` now updates its `projectFiles` state when a live `file-changed` websocket event arrives, so newly created files appear in `@` suggestions without reload. Deletion handling is still separate/follow-up work.
-- Made `@file` autocomplete more robust frontend-side: when `@` mention mode opens in chat, `Chat.tsx` now re-fetches the project file list on demand (guarded against concurrent refreshes). This covers bash-created, renamed, or deleted files without requiring backend filesystem events for every mutation source.
-- File-panel saving is now conflict-aware and stale-state-safe: `usePanel` tracks the latest editor content in refs, re-reads the on-disk file immediately before save, aborts if disk content diverged from the editor’s original snapshot, and ignores stale async open responses so older file loads can’t overwrite the current panel.
-- File-panel save conflicts/failures are now surfaced inline in the panel itself via a small error banner with reload affordance, so a correct save refusal reads as an explicit alignment conflict instead of a silent no-op.
-- File-panel header now also has an always-visible manual refresh icon that reloads the current file/preview on demand, complementing the existing agent-change banner reload flow.
-- Fixed approval recovery after refresh: `Chat.tsx` history reconstruction now recognizes persisted `tool-confirm` events and rebuilds pending approval tool chips/buttons from conversation history, so reloading mid-approval no longer strands the run without visible approval controls.
-- Fixed post-approval bash rendering in live chat: when a pending approval transitions into a real `tool-use`/`tool-result`, `Chat.tsx` now preserves the matched chip and also creates a fallback chip if a `tool-result` arrives without a currently open placeholder, so commands like `git status` still appear after approval instead of silently disappearing.
-- Fixed the remaining “shows for 100ms then disappears” case: live tool output could be wiped by the auth-time history reload replacing local assistant state. `Chat.tsx` now merges rebuilt assistant messages with any existing live assistant/tool messages by `tool_call_id` instead of replacing them, so approved bash output persists through the post-connect reload.
-- Approval chips now also include an inline `Turn on auto mode` action that enables conversation auto mode from the approval moment, updates the header state immediately, and collapses to `Auto mode on` once enabled.
-- Improved the chat/file panel resizer for PDF preview and other file panels: wider hit target, small activation threshold to reduce jitter, active drag visual state, bounded min/max widths, and temporary pointer-event suppression on the panel while dragging to avoid iframe interference.
-- Chat panel width is now being persisted as a viewport ratio in localStorage and restored/clamped on refresh/resize so the file-panel size survives reloads.
-- Agreed refactor approach is structural decomposition first, with a targeted regression suite added before major splits: backend pytest coverage for storage/mentions/skills/context and core authenticated API flows, then frontend state tests around extracted chat logic.
-- Composer autocomplete now explicitly maps `Ctrl-P`/`Ctrl-N` (and `Cmd-P`/`Cmd-N`) to previous/next selection for both `@` mention results and `/` slash-command results, matching existing arrow-key behavior.
-- Composer autocomplete lists now also auto-scroll the active `@`/`/` selection into view as keyboard navigation changes the highlighted row, using list refs plus `scrollIntoView({ block: "nearest" })`.
-- Began a lightweight frontend style-system cleanup rather than a CSS rewrite: `frontend/src/styles.ts` now carries broader design tokens (semantic colors, radii, shadows, overlay/z-index primitives, reusable overlay/header/row styles), and shared modal/finder/code/chat header surfaces are starting to consume those tokens instead of ad hoc inline color/shadow constants.
-- That style cleanup now also covers the three heaviest remaining styling surfaces: `chatComposer.tsx`, `chatUi.tsx`, and `components/FilePanel.tsx` now largely consume semantic tokens/shared primitives for popovers, status colors, chip shells, banners, and repeated button treatments instead of hardcoded hex values and duplicated overlay/button blocks.
-- Added `docs/style-guide.md` documenting the intended frontend styling discipline: semantic tokens from `frontend/src/styles.ts`, when to use shared primitives, what literal styles to avoid, and the default inline-style + token architecture for future frontend work.
-- Refactored the file editor toward real CodeMirror ownership: `usePanel` no longer mirrors every keystroke into React file state, save/cancel/reload now operate on explicit content values, `FilePanel` reads/copies/saves from an editor ref, and `CodeMirrorEditor` exposes imperative `getValue` / `replaceContent` APIs so external file resets can happen explicitly instead of through a controlled `code` prop loop.
-- The deeper remaining undo bug was that the editor never had CodeMirror history enabled at all; adding `history()` + `historyKeymap` restores full undo/redo stacks so early edits like the first typed character on each line are undoable.
-- Chat and file-only route effects were also narrowed to stable panel members instead of the whole hook object, reducing incidental reruns around file-open lifecycle paths.
-- Conversation-mode multitasking is now being explored as a persistent left conversation rail inside `Chat.tsx`, reusing ConvoList-like rows rather than introducing files or a separate workspace model into the rail. Current accepted refinements: same status colors as ConvoList, hidden on mobile, exact header-height alignment, rail label `Chats`, wider chat content (`72rem`), and no literal `done` sublabel (done rows fall back to recency text).
-- Chat now supports `Cmd+Shift+A` to archive the current conversation from the chat view (without firing inside editable fields), and the archive button tooltip advertises that shortcut.
-- Selecting any chat now re-focuses/selects the composer (not just freshly created chats), so moving between conversations or doing `Cmd+Shift+A`, `Cmd+Shift+M` drops you straight back into typing.
-- Fixed file-panel manual refresh for preview-only files (`.html`, `.htm`, `.pdf`, `.docx`): `usePanel.reloadFile()` now treats preview files as reloadable panel state instead of incorrectly calling the text-file read endpoint.
-- Preview refresh for iframe-backed files now also busts the embed URL in `FilePanel.tsx` with a versioned query param on manual reload, so HTML/PDF previews like Marp-generated slides actually re-request the updated document instead of showing a cached iframe.
-- Added OpenAI `gpt-5.4-mini` and `gpt-5.4-nano` model IDs to backend model availability so they now appear in `/model`/`/api/models`; auto-titling now prefers `gpt-5.4-nano` but still falls back to legacy `gpt-5-nano` for compatibility.
+## Product direction
+- Product-design workflow is explicit in `AGENTS.md`: Mental model → Manifest → Desired state → Delta → Implementation.
+- Current UX exploration centers on Issue #36: documents should feel primary and inhabitable, not auxiliary.
+- Desired mode model is converging on:
+  - Project mode
+  - File-only mode
+  - Conversation mode
+- Important interaction consequences already established:
+  - Project mode opens files explicitly (`Cmd+P`, file button, open-file flow).
+  - File-only mode is a real standalone surface.
+  - Conversation mode can move cleanly to/from file-only mode while preserving the active file via `?path=`.
+
+## Key implemented behavior
+- Conversation history is paginated: `GET /api/convos/{id}` supports `limit` and `before`; chat loads recent history first and can prepend older messages.
+- File-only mode exists and is integrated with conversation mode.
+- File finder has shifted toward an explorer-style modal with search-as-filter.
+- Chat, project, and file surfaces now share a more consistent icon-button language and tooltip layering behavior.
+- File panel supports preview/download flows for `.docx`, `.pdf`, `.html`, and `.htm` with safe sandboxing/authenticated fetch where needed.
+- Slash skills are available globally (`/docx`, `/pdf`, `/xlsx`, `/pptx`) via the `activate_skill` tool and packaged skill directories under `data/skills/<name>/...`.
+- Conversation auto-titling starts after the first user message.
+- `@file` autocomplete refreshes robustly and file-panel saves are conflict-aware.
+- Approval chips survive refresh and approved tool output persists correctly through reconnect/history reload.
+- Chat/file panel width persists across reloads.
+- OpenAI `gpt-5.4-mini` and `gpt-5.4-nano` are now available in `/model` and `/api/models`; auto-title prefers `gpt-5.4-nano` with fallback to legacy `gpt-5-nano`.
+
+## Styling / frontend discipline
+- Frontend uses inline styles with semantic tokens and shared primitives from `frontend/src/styles.ts`.
+- `docs/style-guide.md` documents the intended styling discipline.
+- CodeMirror now owns editor state properly, with undo/redo history enabled.
+
+## Docs / ops notes
+- Docs now clarify Caddy setup, explicit `uv` install path, restart commands, and `www-data` ownership needs under `/var/www`.
+- Marp is installed globally and HTML slide outputs in `public/` are served at the site root.
+
+## Current diagnosis relevant to looping/runs
+- `context.md` had grown into a changelog-like prompt artifact and was pruned down for relevance.
+- The more important loop cause is run lifecycle behavior, not `context.md` size alone:
+  - interrupted runs emit recoverable `run-error`
+  - `session.run` cleanup is delayed
+  - reconnect/reload restores prior history and project instructions
+  - this can encourage the model to reconstruct and repeat the same inspection pattern after interruption
+- Chat rendering may also feel repetitive because assistant text streams incrementally while tool events interleave, then history reload/merge can make the same content feel repeated even when it is partly a live-stream + rebuild effect.
