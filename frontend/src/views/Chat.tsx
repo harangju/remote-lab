@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { FileText, Pencil, FolderOpen, Sparkles, Archive } from "lucide-react";
-import { listConvos, updateConvo, type ConvoMeta } from "../api";
+import { FileText, Pencil, FolderOpen, Sparkles, Archive, MessageSquarePlus, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { listConvos, createConvo, updateConvo, type ConvoMeta } from "../api";
 import { btnIcon, colors, input as inputStyle } from "../styles";
 import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
@@ -49,6 +49,8 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
 
 const CHAT_HEADER_MAX_WIDTH = "72rem";
 const CONVO_RAIL_WIDTH = 240;
+const CONVO_RAIL_COLLAPSED_WIDTH = 52;
+const CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY = "remote-lab:chat-convo-rail-collapsed";
 const PANEL_MIN_WIDTH = 320;
 const PANEL_MAX_WIDTH_RATIO = 0.75;
 const PANEL_DEFAULT_WIDTH_RATIO = 0.36;
@@ -60,9 +62,11 @@ const CHAT_PANEL_RATIO_STORAGE_KEY = "remote-lab:chat-panel-width-ratio";
 type RailStatusTone = "running" | "done" | "error" | "idle";
 
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const timestamp = new Date(iso).getTime();
+  if (!Number.isFinite(timestamp)) return "recently";
+  const diff = Math.max(0, Date.now() - timestamp);
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
+  if (mins < 1) return "1m ago";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
@@ -89,6 +93,10 @@ export function Chat() {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) === "true";
+  });
   const panel = usePanel(projectId);
 
   const {
@@ -217,6 +225,26 @@ export function Chat() {
     }
   }, [convId, navigate, projectId, setError]);
 
+  const handleNewConversation = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const convo = await createConvo(projectId);
+      navigate(`/${projectId}/${convo.id}`);
+    } catch (e: any) {
+      setError(e.message || "Failed to create conversation");
+    }
+  }, [navigate, projectId, setError]);
+
+  const toggleRailCollapsed = useCallback(() => {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY, String(next));
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "p") {
@@ -235,7 +263,11 @@ export function Chat() {
     const loadConvos = async () => {
       try {
         const next = await listConvos(projectId);
-        if (!cancelled) setProjectConvos(next.filter((convo) => !convo.archived_at));
+        const normalized = next.map((convo) => ({
+          ...convo,
+          last_event_at: convo.last_event_at || convo.updated_at,
+        }));
+        if (!cancelled) setProjectConvos(normalized.filter((convo) => !convo.archived_at));
       } catch {}
     };
 
@@ -309,58 +341,96 @@ export function Chat() {
   }, [panel.file]);
 
   const visibleConvos = useMemo(() => projectConvos.slice(0, 12), [projectConvos]);
+  const railWidth = railCollapsed ? CONVO_RAIL_COLLAPSED_WIDTH : CONVO_RAIL_WIDTH;
 
   return (
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       <div style={{
-        width: `${CONVO_RAIL_WIDTH}px`,
+        width: `${railWidth}px`,
         flexShrink: 0,
         borderRight: `1px solid ${colors.border}`,
         background: colors.bg,
         display: "none",
         flexDirection: "column",
         minWidth: 0,
+        transition: "width 140ms ease",
       }} className="chat-convo-rail">
-        <div style={{ padding: "8px 12px", height: "52px", borderBottom: `1px solid ${colors.border}`, display: "flex", alignItems: "center", boxSizing: "border-box" }}>
-          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: colors.textMuted }}>Chats</div>
+        <div style={{ padding: railCollapsed ? "8px" : "8px 12px", height: "52px", borderBottom: `1px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: railCollapsed ? "center" : "space-between", gap: "8px", boxSizing: "border-box" }}>
+          {!railCollapsed && <div style={{ fontSize: "0.78rem", fontWeight: 600, color: colors.textMuted }}>Chats</div>}
+          <button
+            onClick={toggleRailCollapsed}
+            aria-label={railCollapsed ? "Expand chats" : "Collapse chats"}
+            style={{ ...headerIconBtnStyle, color: colors.textMuted, flexShrink: 0 }}
+            onMouseEnter={headerHoverIn}
+            onMouseLeave={headerHoverOut}
+          >
+            {railCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+          </button>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px" }}>
+        {!railCollapsed && (
+          <div style={{ padding: "8px", borderBottom: `1px solid ${colors.border}` }}>
+            <button
+              onClick={() => { void handleNewConversation(); }}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                padding: "10px 12px",
+                borderRadius: "10px",
+                border: `1px solid ${colors.border}`,
+                background: colors.bgSurface,
+                color: colors.text,
+                fontSize: "0.84rem",
+                fontWeight: 500,
+              }}
+            >
+              <MessageSquarePlus size={15} />
+              <span>New message</span>
+            </button>
+          </div>
+        )}
+        <div style={{ flex: 1, overflowY: "auto", padding: railCollapsed ? "8px 6px" : "8px" }}>
           {visibleConvos.map((convo) => {
             const tone = railStatusTone(convo);
             const statusColor = railStatusColor(tone);
             const isActive = convo.id === convId;
             const sublabel = convo.status === "running"
               ? "running"
-              : convo.status === "done"
-                ? timeAgo(convo.updated_at)
-                : convo.status;
+              : timeAgo(convo.last_event_at || convo.updated_at);
             return (
               <button
                 key={convo.id}
                 onClick={() => navigate(`/${projectId}/${convo.id}${panel.file ? `?path=${encodeURIComponent(panel.file.path)}` : ""}`)}
+                aria-label={convo.title || "Untitled conversation"}
+                title={railCollapsed ? (convo.title || "Untitled") : undefined}
                 style={{
                   width: "100%",
                   display: "flex",
-                  alignItems: "flex-start",
-                  gap: "10px",
-                  padding: "10px 10px",
+                  alignItems: railCollapsed ? "center" : "flex-start",
+                  justifyContent: railCollapsed ? "center" : undefined,
+                  gap: railCollapsed ? 0 : "10px",
+                  padding: railCollapsed ? "10px 0" : "10px 10px",
                   borderRadius: "10px",
                   border: "none",
                   background: isActive ? colors.bgSurface : "transparent",
                   color: colors.text,
-                  textAlign: "left",
+                  textAlign: railCollapsed ? "center" : "left",
                   marginBottom: "4px",
                 }}
               >
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, flexShrink: 0, marginTop: 5 }} />
-                <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
-                  <span style={{ fontSize: "0.84rem", fontWeight: isActive ? 600 : 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {convo.title || "Untitled"}
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, flexShrink: 0, marginTop: railCollapsed ? 0 : 5 }} />
+                {!railCollapsed && (
+                  <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                    <span style={{ fontSize: "0.84rem", fontWeight: isActive ? 600 : 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {convo.title || "Untitled"}
+                    </span>
+                    <span style={{ fontSize: "0.72rem", color: statusColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: "lowercase" }}>
+                      {sublabel}
+                    </span>
                   </span>
-                  <span style={{ fontSize: "0.72rem", color: statusColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: "lowercase" }}>
-                    {sublabel}
-                  </span>
-                </span>
+                )}
               </button>
             );
           })}

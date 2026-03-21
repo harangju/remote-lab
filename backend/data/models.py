@@ -76,6 +76,7 @@ class ConvoMeta(BaseModel):
     status: ConvoStatus = ConvoStatus.idle
     created_at: str
     updated_at: str
+    last_event_at: Optional[str] = None
     archived_at: Optional[str] = None
     autonomous_tools_enabled: bool = False
 

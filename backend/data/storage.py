@@ -255,6 +255,32 @@ def _write_meta(meta: ConvoMeta) -> None:
     _meta_path(meta.id).write_text(json.dumps(meta.model_dump(), indent=2))
 
 
+def _event_timestamp(event: dict) -> str | None:
+    for key in ("timestamp", "created_at", "updated_at", "time", "ts"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _compute_last_event_at(convo_id: str, meta: ConvoMeta | None = None) -> str:
+    events = read_events(convo_id)
+    for event in reversed(events):
+        ts = _event_timestamp(event)
+        if ts:
+            return ts
+    base = meta or _read_meta(convo_id)
+    if base is not None:
+        return base.updated_at
+    return _now()
+
+
+def _hydrate_convo_meta(meta: ConvoMeta) -> ConvoMeta:
+    if meta.last_event_at:
+        return meta
+    return meta.model_copy(update={"last_event_at": _compute_last_event_at(meta.id, meta)})
+
+
 # ---------------------------------------------------------------------------
 # Conversation CRUD
 # ---------------------------------------------------------------------------
@@ -264,10 +290,10 @@ def list_conversations(project_id: str) -> list[ConvoMeta]:
     _ensure_dirs()
     results: list[ConvoMeta] = []
     for f in CONVOS_DIR.glob("*.meta.json"):
-        meta = ConvoMeta(**json.loads(f.read_text()))
+        meta = _hydrate_convo_meta(ConvoMeta(**json.loads(f.read_text())))
         if meta.project_id == project_id:
             results.append(meta)
-    results.sort(key=lambda m: m.updated_at, reverse=True)
+    results.sort(key=lambda m: m.last_event_at or m.updated_at, reverse=True)
     return results
 
 
@@ -307,6 +333,7 @@ def get_conversation(convo_id: str, before: int | None = None, limit: int | None
     meta = _read_meta(convo_id)
     if meta is None:
         return None
+    meta = _hydrate_convo_meta(meta)
     events = read_events(convo_id)
     total = len(events)
     end = total if before is None else max(0, min(before, total))
