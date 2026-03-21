@@ -191,14 +191,21 @@ export function Chat() {
   };
 
   const archiveConversation = useCallback(async () => {
-    if (!convId) return;
+    if (!convId || !projectId) return;
+    const remainingConvos = projectConvos.filter((convo) => convo.id !== convId);
+    const nextConvo = remainingConvos[0];
     try {
       await updateConvo(convId, { archived_at: new Date().toISOString() });
-      navigate(`/${projectId}`);
+      setProjectConvos(remainingConvos);
+      if (nextConvo) {
+        navigate(`/${projectId}/${nextConvo.id}${panel.file ? `?path=${encodeURIComponent(panel.file.path)}` : ""}`);
+      } else {
+        navigate(`/${projectId}`);
+      }
     } catch (e: any) {
       setError(e.message || "Failed to archive conversation");
     }
-  }, [convId, navigate, projectId, setError]);
+  }, [convId, navigate, panel.file, projectConvos, projectId, setError]);
 
   const handleNewConversation = useCallback(async () => {
     if (!projectId) return;
@@ -211,16 +218,27 @@ export function Chat() {
   }, [navigate, projectId, setError]);
 
   const archiveConvoFromRail = useCallback(async (targetConvoId: string) => {
+    if (!projectId) return;
+    const remainingConvos = projectConvos.filter((convo) => convo.id !== targetConvoId);
+    const targetWasActive = targetConvoId === convId;
+    const nextConvo = targetWasActive ? remainingConvos[0] : null;
     try {
       setArchivingConvoId(targetConvoId);
       await updateConvo(targetConvoId, { archived_at: new Date().toISOString() });
-      setProjectConvos((prev) => prev.filter((convo) => convo.id !== targetConvoId));
+      setProjectConvos(remainingConvos);
+      if (targetWasActive) {
+        if (nextConvo) {
+          navigate(`/${projectId}/${nextConvo.id}${panel.file ? `?path=${encodeURIComponent(panel.file.path)}` : ""}`);
+        } else {
+          navigate(`/${projectId}`);
+        }
+      }
     } catch (e: any) {
       setError(e.message || "Failed to archive conversation");
     } finally {
       setArchivingConvoId((current) => (current === targetConvoId ? null : current));
     }
-  }, [setError]);
+  }, [convId, navigate, panel.file, projectConvos, projectId, setError]);
 
   const toggleRailCollapsed = useCallback(() => {
     setRailCollapsed((prev) => {
