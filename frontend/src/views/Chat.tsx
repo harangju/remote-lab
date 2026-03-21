@@ -488,7 +488,7 @@ export function Chat() {
                 >
                   <span style={{ position: "relative", width: 18, height: 18, flexShrink: 0, marginTop: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                     <IdentityIcon size={16} style={{ color: isActive ? colors.text : colors.textMuted, flexShrink: 0 }} />
-                    <span style={{ position: "absolute", top: railCollapsed ? 0 : -1, right: railCollapsed ? -1 : -2, width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 0 2px ${isActive ? colors.bgSurface : colors.bg}` }} />
+                    <span style={{ position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 0 2px ${isActive ? colors.bgSurface : colors.bg}` }} />
                   </span>
                   {!railCollapsed && (
                     <span style={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", gap: "2px", overflow: "hidden" }}>
