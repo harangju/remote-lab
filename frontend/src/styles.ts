@@ -199,6 +199,14 @@ export function injectTheme() {
         width: 100% !important;
         z-index: 100;
       }
+      .chat-convo-rail {
+        display: none !important;
+      }
+    }
+    @media (min-width: 769px) {
+      .chat-convo-rail {
+        display: flex !important;
+      }
     }
     .md-content p { margin: 0 0 0.4em; }
     .md-content p:last-child { margin-bottom: 0; }

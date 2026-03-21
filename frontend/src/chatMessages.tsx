@@ -7,7 +7,7 @@ import type { ApprovalScope, DisplayMessage, StreamBlock } from "./chatState";
 import { buildLiveMessageRows } from "./chatMessagesState";
 
 const MESSAGE_MAX_WIDTH = "92%";
-const CHAT_MESSAGES_MAX_WIDTH = "64rem";
+const CHAT_MESSAGES_MAX_WIDTH = "72rem";
 
 interface ChatMessagesProps {
   projectId?: string;

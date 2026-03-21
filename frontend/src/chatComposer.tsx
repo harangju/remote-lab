@@ -266,7 +266,7 @@ export function ChatComposer({
 
   return (
     <div style={{ flexShrink: 0, padding: "0 1.5rem 12px" }}>
-      <div style={{ position: "relative", maxWidth: "64rem", width: "100%", margin: "0 auto" }}>
+      <div style={{ position: "relative", maxWidth: "72rem", width: "100%", margin: "0 auto" }}>
         {slashQuery !== null && slashMatches.length > 0 && (
           <div ref={slashListRef} style={{ ...pickerPanelStyle, minWidth: 240, maxHeight: 300 }}>
             {slashMatches.map((s, i) => (
