@@ -99,6 +99,11 @@ function isPdf(path: string): boolean {
   return path.toLowerCase().endsWith(".pdf");
 }
 
+function isHtml(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".html") || lower.endsWith(".htm");
+}
+
 export function FilePanel({
   file, editMode, dirty, saving, saveError, externalChange,
   onToggleEdit, onContentChange, onSave, onCancel, onClose,
@@ -117,9 +122,10 @@ export function FilePanel({
   const visibleConversationOptions = useMemo(() => conversationOptions.slice(0, 4), [conversationOptions]);
   const docxFile = isDocx(file.path);
   const pdfFile = isPdf(file.path);
-  const previewFile = docxFile || pdfFile;
+  const htmlFile = isHtml(file.path);
+  const previewFile = docxFile || pdfFile || htmlFile;
   const embedToken = getToken();
-  const pdfPreviewUrl = pdfFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}` : null;
+  const embedPreviewUrl = previewFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}` : null;
 
   useEffect(() => {
     if (!showConversationMenu) return;
@@ -230,7 +236,7 @@ export function FilePanel({
         {dirty && <span style={{ width: 6, height: 6, borderRadius: "50%", background: colors.accent, display: "inline-block", flexShrink: 0 }} data-tooltip="Unsaved changes" />}
 
         {previewFile ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "0.72rem", color: colors.textMuted, padding: "0 2px", flexShrink: 0 }} data-tooltip={docxFile ? "Read-only Word preview" : "Read-only PDF preview"}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "0.72rem", color: colors.textMuted, padding: "0 2px", flexShrink: 0 }} data-tooltip={docxFile ? "Read-only Word preview" : htmlFile ? "Read-only HTML preview" : "Read-only PDF preview"}>
             <FileText size={14} />
             <span>Preview</span>
           </span>
@@ -306,7 +312,9 @@ export function FilePanel({
             )}
           </div>
         ) : pdfFile ? (
-          pdfPreviewUrl ? <iframe title={file.path} src={pdfPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: colors.bg }} /> : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "24px", color: colors.textMuted, fontSize: "0.85rem", textAlign: "center" }}><div style={{ maxWidth: 420 }}><div>Could not preview this PDF. Try downloading it instead.</div><div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>Missing auth token.</div></div></div>
+          embedPreviewUrl ? <iframe title={file.path} src={embedPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: colors.bg }} /> : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "24px", color: colors.textMuted, fontSize: "0.85rem", textAlign: "center" }}><div style={{ maxWidth: 420 }}><div>Could not preview this PDF. Try downloading it instead.</div><div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>Missing auth token.</div></div></div>
+        ) : htmlFile ? (
+          embedPreviewUrl ? <iframe title={file.path} src={embedPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: colors.bg }} /> : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "24px", color: colors.textMuted, fontSize: "0.85rem", textAlign: "center" }}><div style={{ maxWidth: 420 }}><div>Could not preview this HTML file. Try downloading it instead.</div><div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>Missing auth token.</div></div></div>
         ) : (
           <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: colors.textMuted, fontSize: "0.8rem" }}>Loading editor...</div>}>
             <CodeMirrorEditor code={file.content} language={file.language} readOnly={!editMode} onChange={onContentChange} onSave={onSave} />

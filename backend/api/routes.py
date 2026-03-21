@@ -289,7 +289,10 @@ def create_api_router(*, check_token, resolve_project_file):
                 break
         return {"root": proj.path, "files": sorted(files)}
 
-    @api.get("/api/projects/{project_id}/file/embed")
+    # Embed route on a separate router (no Bearer auth — uses query-string token for iframe access)
+    embed = APIRouter(prefix="/api")
+
+    @embed.get("/projects/{project_id}/file/embed")
     async def api_read_file_embed(project_id: str, path: str, token: str):
         if not check_token(token):
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -298,6 +301,10 @@ def create_api_router(*, check_token, resolve_project_file):
         response = FileResponse(target, media_type=media_type or "application/octet-stream")
         response.headers["Content-Disposition"] = f'inline; filename="{target.name}"'
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        if target.suffix.lower() in {".html", ".htm"}:
+            response.headers["Content-Security-Policy"] = "default-src 'self' 'unsafe-inline' data: blob:; connect-src 'none'; frame-ancestors 'self'; form-action 'none'"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
-    return api
+    return api, embed

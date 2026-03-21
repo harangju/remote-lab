@@ -111,8 +111,9 @@ def _resolve_project_file(project_id: str, path: str) -> tuple[Path, Path]:
     return project_path, target
 
 
-api = create_api_router(check_token=check_token, resolve_project_file=_resolve_project_file)
+api, embed = create_api_router(check_token=check_token, resolve_project_file=_resolve_project_file)
 app.include_router(api)
+app.include_router(embed)
 
 
 @app.get("/{rest:path}", response_class=HTMLResponse)
