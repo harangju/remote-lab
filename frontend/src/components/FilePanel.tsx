@@ -1,9 +1,10 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download, FileText } from "lucide-react";
 import type { PanelFile } from "../hooks/usePanel";
 import { getToken } from "../api";
 import { btnIcon, colors, interactiveRow, overlayHeader, overlayPanel, radius, shadow } from "../styles";
 import { ListModal } from "./ListModal";
+import type { CodeMirrorEditorHandle } from "./CodeMirrorEditor";
 
 const CodeMirrorEditor = lazy(() =>
   import("./CodeMirrorEditor").then((m) => ({ default: m.CodeMirrorEditor }))
@@ -24,10 +25,10 @@ interface FilePanelProps {
   externalChange: boolean;
   onToggleEdit: () => void;
   onContentChange: (content: string) => void;
-  onSave: () => void;
-  onCancel: () => void;
+  onSave: (content?: string) => void | Promise<void>;
+  onCancel: () => string;
   onClose: () => void;
-  onReload: () => void;
+  onReload: () => Promise<string | null>;
   onDismissExternal: () => void;
   onOpenFileFinder?: () => void;
   onStartConversation?: () => void;
@@ -110,6 +111,7 @@ export function FilePanel({
   onReload, onDismissExternal, onOpenFileFinder, onStartConversation, conversationDisabled,
   conversationOptions = [], conversationOptionsLabel = "Recent conversations using this file", conversationModal = false, onOpenConversationOption,
 }: FilePanelProps) {
+  const editorRef = useRef<CodeMirrorEditorHandle | null>(null);
   const [copied, setCopied] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [docxHtml, setDocxHtml] = useState<string>("");
@@ -184,11 +186,32 @@ export function FilePanel({
     return () => controller.abort();
   }, [docxFile, file.path, file.projectId]);
 
-  const copy = () => {
-    navigator.clipboard.writeText(file.content);
+  const copy = useCallback(() => {
+    const value = editorRef.current?.getValue() ?? file.content;
+    navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
-  };
+  }, [file.content]);
+
+  const handleSave = useCallback(() => {
+    void onSave(editorRef.current?.getValue());
+  }, [onSave]);
+
+  const handleCancel = useCallback(() => {
+    const original = onCancel();
+    editorRef.current?.replaceContent(original, { addToHistory: false });
+  }, [onCancel]);
+
+  const handleReload = useCallback(async () => {
+    const content = await onReload();
+    if (content !== null) {
+      editorRef.current?.replaceContent(content, { addToHistory: false });
+    }
+  }, [onReload]);
+
+  useEffect(() => {
+    editorRef.current?.replaceContent(file.content, { addToHistory: false });
+  }, [file.path, file.content]);
 
   const download = async () => {
     const token = getToken();
@@ -242,8 +265,8 @@ export function FilePanel({
           </span>
         ) : editMode ? (
           <>
-            <button onClick={onSave} disabled={saving || !dirty} style={{ ...iconBtnActiveStyle, opacity: (saving || !dirty) ? 0.5 : 1, cursor: (saving || !dirty) ? "default" : "pointer" }} data-tooltip={saving ? "Saving..." : "Save (⌘S)"}><Save size={15} /></button>
-            <button onClick={onCancel} style={iconBtnDangerStyle} data-tooltip="Cancel edit"><X size={16} /></button>
+            <button onClick={handleSave} disabled={saving || !dirty} style={{ ...iconBtnActiveStyle, opacity: (saving || !dirty) ? 0.5 : 1, cursor: (saving || !dirty) ? "default" : "pointer" }} data-tooltip={saving ? "Saving..." : "Save (⌘S)"}><Save size={15} /></button>
+            <button onClick={handleCancel} style={iconBtnDangerStyle} data-tooltip="Cancel edit"><X size={16} /></button>
           </>
         ) : (
           <button onClick={onToggleEdit} style={iconBtnStyle} data-tooltip="Edit file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><Pencil size={15} /></button>
@@ -292,8 +315,8 @@ export function FilePanel({
 
       {(externalChange || saveError) && (
         <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 12px", background: saveError ? `color-mix(in srgb, ${colors.danger} 10%, transparent)` : colors.warningSoft, borderBottom: `1px solid ${colors.border}`, fontSize: "0.75rem", color: colors.text, flexShrink: 0 }}>
-          {saveError && <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ flex: 1 }}>{saveError}</span><button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}><RotateCcw size={12} /> Reload</button></div>}
-          {externalChange && <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ flex: 1 }}>This file was modified by the agent.</span>{!saveError && <button onClick={onReload} style={{ ...btnStyle, fontSize: "0.72rem" }}><RotateCcw size={12} /> Reload</button>}<button onClick={onDismissExternal} style={{ ...btnStyle, fontSize: "0.72rem" }}>Dismiss</button></div>}
+          {saveError && <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ flex: 1 }}>{saveError}</span><button onClick={() => { void handleReload(); }} style={{ ...btnStyle, fontSize: "0.72rem" }}><RotateCcw size={12} /> Reload</button></div>}
+          {externalChange && <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ flex: 1 }}>This file was modified by the agent.</span>{!saveError && <button onClick={() => { void handleReload(); }} style={{ ...btnStyle, fontSize: "0.72rem" }}><RotateCcw size={12} /> Reload</button>}<button onClick={onDismissExternal} style={{ ...btnStyle, fontSize: "0.72rem" }}>Dismiss</button></div>}
         </div>
       )}
 
@@ -317,7 +340,7 @@ export function FilePanel({
           embedPreviewUrl ? <iframe title={file.path} src={embedPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: colors.bg }} /> : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "24px", color: colors.textMuted, fontSize: "0.85rem", textAlign: "center" }}><div style={{ maxWidth: 420 }}><div>Could not preview this HTML file. Try downloading it instead.</div><div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>Missing auth token.</div></div></div>
         ) : (
           <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: colors.textMuted, fontSize: "0.8rem" }}>Loading editor...</div>}>
-            <CodeMirrorEditor code={file.content} language={file.language} readOnly={!editMode} onChange={onContentChange} onSave={onSave} />
+            <CodeMirrorEditor ref={editorRef} code={file.content} language={file.language} readOnly={!editMode} onChange={onContentChange} onSave={handleSave} />
           </Suspense>
         )}
       </div>

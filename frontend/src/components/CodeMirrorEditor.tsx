@@ -1,12 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view";
-import { EditorState, Compartment } from "@codemirror/state";
-import { defaultKeymap, indentWithTab } from "@codemirror/commands";
+import { EditorState, Compartment, Annotation, Transaction } from "@codemirror/state";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { search, searchKeymap } from "@codemirror/search";
 
-// Language imports — loaded statically since CodeMirror is already lazy-loaded at the panel level
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
 import { css } from "@codemirror/lang-css";
@@ -22,6 +21,11 @@ interface CodeMirrorEditorProps {
   onSave?: () => void;
 }
 
+export interface CodeMirrorEditorHandle {
+  getValue: () => string;
+  replaceContent: (value: string, options?: { addToHistory?: boolean }) => void;
+}
+
 const langExtensions: Record<string, () => ReturnType<typeof javascript>> = {
   javascript: () => javascript(),
   jsx: () => javascript({ jsx: true }),
@@ -34,9 +38,10 @@ const langExtensions: Record<string, () => ReturnType<typeof javascript>> = {
   markdown: () => markdown(),
 };
 
+const externalChangeAnnotation = Annotation.define<boolean>();
+
 function getThemeExtension(isDark: boolean) {
   if (isDark) return oneDark;
-  // Light theme — minimal custom styling to match app theme
   return EditorView.theme({
     "&": {
       backgroundColor: "var(--bg)",
@@ -65,21 +70,50 @@ function getThemeExtension(isDark: boolean) {
   });
 }
 
-export function CodeMirrorEditor({ code, language, readOnly, onChange, onSave }: CodeMirrorEditorProps) {
+export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEditorProps>(function CodeMirrorEditor(
+  { code, language, readOnly, onChange, onSave },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const editableComp = useRef(new Compartment());
   const readOnlyComp = useRef(new Compartment());
+  const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
   const [isDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
 
-  // Create editor on mount
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
+  useImperativeHandle(ref, () => ({
+    getValue: () => viewRef.current?.state.doc.toString() ?? "",
+    replaceContent: (value: string, options?: { addToHistory?: boolean }) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const currentDoc = view.state.doc.toString();
+      if (currentDoc === value) return;
+      const annotations = [externalChangeAnnotation.of(true)];
+      if (options?.addToHistory === false) {
+        annotations.push(Transaction.addToHistory.of(false));
+      }
+      view.dispatch({
+        changes: { from: 0, to: currentDoc.length, insert: value },
+        annotations,
+        userEvent: options?.addToHistory === false ? "input.external" : "input",
+      });
+    },
+  }), []);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
     const langExt = langExtensions[language]?.() || [];
-    const saveKeymap = onSave
-      ? keymap.of([{ key: "Mod-s", run: () => { onSave(); return true; } }])
-      : [];
+    const saveKeymap = keymap.of([{ key: "Mod-s", run: () => { onSaveRef.current?.(); return true; } }]);
 
     const state = EditorState.create({
       doc: code,
@@ -87,19 +121,20 @@ export function CodeMirrorEditor({ code, language, readOnly, onChange, onSave }:
         lineNumbers(),
         highlightActiveLine(),
         highlightActiveLineGutter(),
+        history(),
         bracketMatching(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         search(),
-        keymap.of([...defaultKeymap, ...searchKeymap, indentWithTab]),
+        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
         saveKeymap,
         langExt,
         getThemeExtension(isDark),
         editableComp.current.of(EditorView.editable.of(!readOnly)),
         readOnlyComp.current.of(EditorState.readOnly.of(readOnly)),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged && onChange) {
-            onChange(update.state.doc.toString());
-          }
+          if (!update.docChanged) return;
+          if (update.transactions.some((tr) => tr.annotation(externalChangeAnnotation))) return;
+          onChangeRef.current?.(update.state.doc.toString());
         }),
         EditorView.lineWrapping,
         EditorView.theme({
@@ -117,9 +152,8 @@ export function CodeMirrorEditor({ code, language, readOnly, onChange, onSave }:
       view.destroy();
       viewRef.current = null;
     };
-  }, [language, isDark]); // Recreate on language or theme change
+  }, [code, language, isDark]);
 
-  // Update readOnly without recreating
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
@@ -131,17 +165,5 @@ export function CodeMirrorEditor({ code, language, readOnly, onChange, onSave }:
     });
   }, [readOnly]);
 
-  // Update content when code changes externally (file switch, reload)
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const currentDoc = view.state.doc.toString();
-    if (currentDoc !== code) {
-      view.dispatch({
-        changes: { from: 0, to: currentDoc.length, insert: code },
-      });
-    }
-  }, [code]);
-
   return <div ref={containerRef} style={{ height: "100%", overflow: "hidden" }} />;
-}
+});

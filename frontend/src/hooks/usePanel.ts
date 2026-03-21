@@ -8,7 +8,6 @@ class FileSaveConflictError extends Error {
   }
 }
 
-
 export interface PanelFile {
   projectId: string;
   path: string;
@@ -31,21 +30,20 @@ export interface PanelState {
 
 export interface PanelActions {
   openFile: (path: string) => void;
-  closePanel: () => boolean; // returns false if blocked by dirty state
+  closePanel: () => boolean;
   setEditMode: (on: boolean) => void;
   updateContent: (content: string) => void;
-  saveFile: () => Promise<void>;
-  cancelEdit: () => void;
+  saveFile: (content?: string) => Promise<void>;
+  cancelEdit: () => string;
   toggleFileFinder: () => void;
   setShowHiddenFiles: (on: boolean) => void;
-  applyExternalChange: (path: string) => void;
-  reloadFile: () => void;
+  applyExternalChange: (path: string) => Promise<string | null>;
+  reloadFile: () => Promise<string | null>;
   dismissExternalChange: () => void;
   upsertFileInList: (path: string) => void;
   forceClose: () => void;
 }
 
-/** Guess language from file extension. */
 export function langFromPath(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const map: Record<string, string> = {
@@ -62,7 +60,7 @@ export function langFromPath(path: string): string {
 
 function isPreviewOnlyPath(path: string): boolean {
   const lower = path.toLowerCase();
-  return lower.endsWith(".pdf") || lower.endsWith(".docx");
+  return lower.endsWith(".pdf") || lower.endsWith(".docx") || lower.endsWith(".html") || lower.endsWith(".htm");
 }
 
 export function usePanel(projectId: string | undefined): PanelState & PanelActions {
@@ -75,22 +73,23 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const [showFileFinder, setShowFileFinder] = useState(false);
   const [fileList, setFileList] = useState<string[] | null>(null);
   const [fileListLoading, setFileListLoading] = useState(false);
-  const originalContentRef = useRef<string>("");
-  const latestContentRef = useRef<string>("");
+  const originalContentRef = useRef("");
+  const latestContentRef = useRef("");
   const fileRef = useRef<PanelFile | null>(null);
   const dirtyRef = useRef(false);
   const openRequestIdRef = useRef(0);
 
   useEffect(() => {
     fileRef.current = file;
-    latestContentRef.current = file?.content ?? "";
+    if (!dirtyRef.current) {
+      latestContentRef.current = file?.content ?? "";
+    }
   }, [file]);
 
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
 
-  // beforeunload guard when dirty
   useEffect(() => {
     if (!dirty) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -100,10 +99,8 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
-  // Mobile back button support
   useEffect(() => {
     if (!file) return;
-    // Push a state entry when panel opens
     history.pushState({ panel: true }, "");
     const handler = (e: PopStateEvent) => {
       if (e.state?.panel || file) {
@@ -116,7 +113,7 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
-  }, [file?.path]); // only re-run when a different file opens
+  }, [file?.path]);
 
   const openFile = useCallback((path: string) => {
     if (!projectId) return;
@@ -141,6 +138,7 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
         latestContentRef.current = res.content;
         setEditModeRaw(false);
         setDirty(false);
+        setSaveError(null);
         setExternalChange(false);
       })
       .catch((err) => {
@@ -148,12 +146,15 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
         setFile({ projectId, path, content: `Error: ${err.message}`, language: "text" });
         originalContentRef.current = "";
         latestContentRef.current = "";
+        setEditModeRaw(false);
+        setDirty(false);
         setSaveError(null);
+        setExternalChange(false);
       });
   }, [projectId]);
 
   const closePanel = useCallback((): boolean => {
-    if (dirty) return false; // caller should confirm
+    if (dirty) return false;
     setFile(null);
     setEditModeRaw(false);
     setDirty(false);
@@ -177,15 +178,14 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
 
   const updateContent = useCallback((content: string) => {
     latestContentRef.current = content;
-    setFile((prev) => prev ? { ...prev, content } : null);
     setDirty(content !== originalContentRef.current);
     setSaveError(null);
   }, []);
 
-  const saveFile = useCallback(async () => {
+  const saveFile = useCallback(async (content?: string) => {
     const currentFile = fileRef.current;
     if (!projectId || !currentFile) return;
-    const latestContent = latestContentRef.current;
+    const latestContent = content ?? latestContentRef.current;
     setSaving(true);
     try {
       const diskFile = await readFile(projectId, currentFile.path);
@@ -211,10 +211,10 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
 
   const cancelEdit = useCallback(() => {
     latestContentRef.current = originalContentRef.current;
-    setFile((prev) => prev ? { ...prev, content: originalContentRef.current } : null);
     setDirty(false);
     setSaveError(null);
     setEditModeRaw(false);
+    return originalContentRef.current;
   }, []);
 
   const refreshFileList = useCallback(() => {
@@ -245,36 +245,55 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     });
   }, []);
 
-  const applyExternalChange = useCallback((path: string) => {
+  const applyExternalChange = useCallback(async (path: string): Promise<string | null> => {
     upsertFileInList(path);
     const currentFile = fileRef.current;
-    if (currentFile && currentFile.path === path) {
-      if (dirtyRef.current) {
-        setExternalChange(true);
-      } else if (projectId) {
-        readFile(projectId, path)
-          .then((res) => {
-            setFile((prev) => prev && prev.path === path
-              ? { ...prev, content: res.content, language: langFromPath(path) }
-              : prev);
-            originalContentRef.current = res.content;
-            latestContentRef.current = res.content;
-            setSaveError(null);
-            setExternalChange(false);
-            setDirty(false);
-          })
-          .catch(() => {
-            setExternalChange(true);
-          });
-      }
+    if (!currentFile || currentFile.path !== path) return null;
+    if (dirtyRef.current) {
+      setExternalChange(true);
+      return null;
+    }
+    if (!projectId) return null;
+    try {
+      const res = await readFile(projectId, path);
+      if (fileRef.current?.path !== path) return null;
+      setFile((prev) => prev && prev.path === path
+        ? { ...prev, content: res.content, language: langFromPath(path) }
+        : prev);
+      originalContentRef.current = res.content;
+      latestContentRef.current = res.content;
+      setSaveError(null);
+      setExternalChange(false);
+      setDirty(false);
+      return res.content;
+    } catch {
+      setExternalChange(true);
+      return null;
     }
   }, [projectId, upsertFileInList]);
 
-  const reloadFile = useCallback(() => {
-    if (file) {
-      openFile(file.path);
+  const reloadFile = useCallback(async (): Promise<string | null> => {
+    const currentFile = fileRef.current;
+    if (!projectId || !currentFile) return null;
+    const requestId = ++openRequestIdRef.current;
+    try {
+      const res = await readFile(projectId, currentFile.path);
+      if (openRequestIdRef.current !== requestId || fileRef.current?.path !== currentFile.path) return null;
+      setFile((prev) => prev && prev.path === currentFile.path
+        ? { ...prev, content: res.content, language: langFromPath(currentFile.path) }
+        : prev);
+      originalContentRef.current = res.content;
+      latestContentRef.current = res.content;
+      setEditModeRaw(false);
+      setDirty(false);
+      setSaveError(null);
+      setExternalChange(false);
+      return res.content;
+    } catch (err: any) {
+      setSaveError(err?.message || "Could not reload this file.");
+      return null;
     }
-  }, [file, openFile]);
+  }, [projectId]);
 
   const dismissExternalChange = useCallback(() => {
     setExternalChange(false);

@@ -16,7 +16,7 @@ export function ProjectFile() {
     if (path && (!panel.file || panel.file.path !== path)) {
       panel.openFile(path);
     }
-  }, [panel]);
+  }, [panel.file, panel.openFile]);
 
   useEffect(() => {
     openFromQuery();
@@ -27,7 +27,7 @@ export function ProjectFile() {
       if (!window.confirm("You have unsaved changes. Discard?")) return;
     }
     navigate(`/${projectId}`);
-  }, [navigate, panel, projectId]);
+  }, [navigate, panel.dirty, projectId]);
 
   const handleToggleEdit = useCallback(() => {
     if (panel.editMode && panel.dirty) {
@@ -36,7 +36,7 @@ export function ProjectFile() {
     } else {
       panel.setEditMode(!panel.editMode);
     }
-  }, [panel]);
+  }, [panel.dirty, panel.editMode, panel.cancelEdit, panel.setEditMode]);
 
   const handleOpenFile = useCallback((path: string) => {
     if (panel.dirty) {
@@ -44,7 +44,7 @@ export function ProjectFile() {
     }
     navigate(`/${projectId}/file?path=${encodeURIComponent(path)}`);
     panel.openFile(path);
-  }, [navigate, panel, projectId]);
+  }, [navigate, panel.dirty, panel.openFile, projectId]);
 
   const [conversationOptions, setConversationOptions] = React.useState<ConvoMeta[]>([]);
   const [conversationOptionLabel, setConversationOptionLabel] = React.useState("Recent conversations using this file");
