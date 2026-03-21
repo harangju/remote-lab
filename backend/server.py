@@ -18,23 +18,7 @@ load_dotenv()
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, Response
 import mimetypes
-from pydantic_ai.messages import (
-    BinaryImage,
-    ModelRequest,
-    ModelResponse,
-    ModelMessagesTypeAdapter,
-    TextPart,
-    UserContent,
-    UserPromptPart,
-    PartStartEvent,
-    PartDeltaEvent,
-    TextPartDelta,
-    ThinkingPartDelta,
-    FunctionToolCallEvent,
-    FunctionToolResultEvent,
-)
-
-from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
+from pydantic_ai.messages import UserContent
 
 from backend.agent.agent_config import AgentConfig
 from backend.agent.agents import agent, create_agent, USAGE_LIMITS, get_context_limit
@@ -55,6 +39,7 @@ from backend.voice.stt import DeepgramSTTSession
 from backend.api.routes import create_api_router
 from backend.runtime.state import ConversationSession, RunState, get_convo_lock, get_session, processed_message_ids, seen_tool_call_ids, sessions
 from backend.runtime.commands import handle_share, handle_shares, handle_unshare
+from backend.runtime.runner import build_multimodal_prompt, run_agent_task, run_bash_command_task
 
 
 def get_workdir() -> Path:
@@ -338,382 +323,6 @@ def _build_shared_context(convo_id: str, agent_id: str | None, max_messages: int
     return "\n".join(lines)
 
 
-async def _run_bash_command_task(run: RunState, command: str, convo_id: str) -> None:
-    async def _emit(msg_str: str):
-        try:
-            payload = json.loads(msg_str)
-        except Exception:
-            payload = None
-        if isinstance(payload, dict):
-            payload.setdefault("run_id", run.run_id)
-            if payload.get("type") == "tool-output":
-                await _append_event(convo_id, {
-                    "type": "tool-output",
-                    "name": payload.get("name", ""),
-                    "output": payload.get("output", ""),
-                    "timestamp": _iso_now(),
-                    "run_id": payload.get("run_id"),
-                })
-            msg_str = json.dumps(payload)
-        run.events.append(msg_str)
-        await run.broadcast(msg_str)
-
-    async def _wait_for_approval(tool_call_id: str, command_input: dict[str, str]) -> bool:
-        convo_meta = storage._read_meta(convo_id)
-        convo_autonomous = bool(convo_meta.autonomous_tools_enabled) if convo_meta else False
-        if is_tool_auto_allowed(get_workdir(), convo_autonomous, "bash", command_input):
-            return True
-
-        run.pending_approvals = {tool_call_id}
-        run.pending_approval_details = {tool_call_id: {"name": "bash", "args": command_input}}
-        run.approval_decisions = {}
-        run.approval_event = asyncio.Event()
-        always_confirm = tool_is_always_confirmed("bash", command_input)
-        await _emit(ToolConfirm(
-            tool_call_id=tool_call_id,
-            name="bash",
-            run_id=run.run_id,
-            args=json.dumps(command_input),
-            can_allow_project=not always_confirm,
-            can_turn_on_auto=not always_confirm,
-        ).model_dump_json())
-        await run.approval_event.wait()
-        approved = bool(run.approval_decisions.get(tool_call_id, False))
-        run.pending_approvals.clear()
-        run.pending_approval_details.clear()
-        return approved
-
-    agent_tools.set_broadcast(_emit)
-    try:
-        command_input = {"command": command}
-        tool_call_id = f"bash-{uuid4().hex[:8]}"
-        tool_call_event = {
-            "type": "tool-call",
-            "role": "tool",
-            "name": "bash",
-            "input": json.dumps(command_input),
-            "tool_call_id": tool_call_id,
-            "timestamp": _iso_now(),
-            "run_id": run.run_id,
-        }
-        await _append_event(convo_id, tool_call_event)
-        await _emit(json.dumps({**tool_call_event, "type": "tool-use"}))
-
-        approved = await _wait_for_approval(tool_call_id, command_input)
-        if not approved:
-            event = _system_event("User denied this tool call", event_type="run-error", run_id=run.run_id, recoverable=True)
-            await _append_event(convo_id, event)
-            await _emit(json.dumps({**event, "type": "error"}))
-            run.status = "error"
-            await _update_conversation_status(convo_id, ConvoStatus.idle)
-            return
-
-        if build_project_rule("bash", command_input) is None:
-            event = _system_event("Invalid bash command", event_type="run-error", run_id=run.run_id, recoverable=True)
-            await _append_event(convo_id, event)
-            await _emit(json.dumps({**event, "type": "error"}))
-            run.status = "error"
-            await _update_conversation_status(convo_id, ConvoStatus.error)
-            return
-
-        result = await agent_tools._bash(SimpleNamespace(), command)
-        output = result[:500] if result else "OK"
-        await _append_event(convo_id, {
-            "type": "tool-result",
-            "role": "tool",
-            "name": "bash",
-            "output": output,
-            "tool_call_id": tool_call_id,
-            "timestamp": _iso_now(),
-            "run_id": run.run_id,
-        })
-        await _emit(ToolResult(name="bash", output=output, run_id=run.run_id).model_dump_json())
-
-        meta_msg = {
-            "type": "assistant-message",
-            "role": "assistant",
-            "content": "",
-            "timestamp": _iso_now(),
-            "turns": 0,
-            "context_tokens": 0,
-            "context_limit": 0,
-            "run_id": run.run_id,
-        }
-        await _append_message(convo_id, meta_msg)
-
-        done = Done(turns=0, run_id=run.run_id, context_tokens=0, context_limit=0)
-        run.done_event = done.model_dump()
-        run.status = "done"
-        await _emit(done.model_dump_json())
-        await _update_conversation_status(convo_id, ConvoStatus.done)
-    except asyncio.CancelledError:
-        run.status = "error"
-        await _update_conversation_status(convo_id, ConvoStatus.idle)
-        event = _system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=True)
-        await _append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
-        raise
-    except Exception as e:
-        run.error_msg = str(e)
-        run.status = "error"
-        await _update_conversation_status(convo_id, ConvoStatus.error)
-        event = _system_event(str(e), event_type="run-error", run_id=run.run_id, recoverable=True)
-        await _append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
-    finally:
-        agent_tools.clear_broadcast()
-        await asyncio.sleep(10)
-        session = sessions.get(convo_id)
-        if session and session.run is run:
-            session.run = None
-            if not session.subscribers and session.controller is None:
-                sessions.pop(convo_id, None)
-
-
-def _build_multimodal_prompt(
-    prompt: str,
-    attachments: list[dict[str, Any]],
-    project_path: Path,
-) -> str | list[UserContent]:
-    if not attachments:
-        return prompt
-
-    content: list[UserContent] = [prompt]
-    for attachment in attachments:
-        rel_path = str(attachment.get("path", "")).strip()
-        kind = str(attachment.get("kind", "file")).strip() or "file"
-        mime_type = str(attachment.get("mime_type", "application/octet-stream")).strip() or "application/octet-stream"
-        if not rel_path:
-            continue
-        target = (project_path / rel_path).resolve()
-        if not str(target).startswith(str(project_path.resolve())) or not target.is_file():
-            continue
-        if kind == "image":
-            try:
-                content.append(BinaryImage(data=target.read_bytes(), media_type=mime_type, identifier=rel_path))
-            except Exception:
-                content.append(f"[Attached image could not be loaded: {rel_path}]")
-        else:
-            content.append(f"[Attached file: {rel_path}]")
-    return content
-
-
-async def _run_agent_task(
-    run: RunState, prompt: str | list[UserContent], message_history: list, convo_id: str,
-    instructions: str | None = None,
-    agent_instance: "Agent | None" = None,
-    agent_id: str | None = None,
-):
-    active_agent = agent_instance or agent
-
-    async def _emit(msg_str: str):
-        try:
-            payload = json.loads(msg_str)
-        except Exception:
-            payload = None
-        if isinstance(payload, dict):
-            payload.setdefault("run_id", run.run_id)
-            if agent_id and payload.get("agent_id") is None:
-                payload["agent_id"] = agent_id
-            if payload.get("type") == "tool-output":
-                await _append_event(convo_id, {
-                    "type": "tool-output",
-                    "name": payload.get("name", ""),
-                    "output": payload.get("output", ""),
-                    "timestamp": _iso_now(),
-                    "run_id": payload.get("run_id"),
-                    **({"agent_id": agent_id} if agent_id else {}),
-                })
-            msg_str = json.dumps(payload)
-        run.events.append(msg_str)
-        await run.broadcast(msg_str)
-
-    agent_tools.set_broadcast(_emit)
-
-    try:
-        current_prompt: str | list[UserContent] | None = prompt
-        current_history = message_history if message_history else None
-        deferred_results: DeferredToolResults | None = None
-        total_turns = 0
-
-        while True:
-            iter_kwargs: dict = dict(
-                message_history=current_history,
-                usage_limits=USAGE_LIMITS,
-                instructions=instructions,
-            )
-            if deferred_results:
-                iter_kwargs["deferred_tool_results"] = deferred_results
-                deferred_results = None
-
-            async with active_agent.iter(current_prompt, **iter_kwargs) as agent_run:
-                async for node in agent_run:
-                    if active_agent.is_model_request_node(node):
-                        segment_text = ""
-                        async with node.stream(agent_run.ctx) as stream:
-                            async for event in stream:
-                                if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart) and event.part.content:
-                                    segment_text += event.part.content
-                                    run.full_text += event.part.content
-                                    await _emit(TextDelta(delta=event.part.content, run_id=run.run_id, agent_id=agent_id).model_dump_json())
-                                elif isinstance(event, PartDeltaEvent):
-                                    if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
-                                        segment_text += event.delta.content_delta
-                                        run.full_text += event.delta.content_delta
-                                        await _emit(TextDelta(delta=event.delta.content_delta, run_id=run.run_id, agent_id=agent_id).model_dump_json())
-                                    elif isinstance(event.delta, ThinkingPartDelta):
-                                        await _emit(ThinkingDelta(delta=event.delta.content_delta or "", run_id=run.run_id, agent_id=agent_id).model_dump_json())
-                        if segment_text:
-                            msg: dict = {
-                                "type": "assistant-message",
-                                "role": "assistant",
-                                "content": segment_text,
-                                "timestamp": _iso_now(),
-                                "run_id": run.run_id,
-                            }
-                            if agent_id:
-                                msg["agent_id"] = agent_id
-                            await _append_message(convo_id, msg)
-                    elif active_agent.is_call_tools_node(node):
-                        async with node.stream(agent_run.ctx) as tool_stream:
-                            async for event in tool_stream:
-                                if isinstance(event, FunctionToolCallEvent):
-                                    tool_call_id = getattr(event.part, "tool_call_id", "") or ""
-                                    ev = {
-                                        "type": "tool-call",
-                                        "role": "tool",
-                                        "name": event.part.tool_name,
-                                        "input": str(event.part.args)[:200],
-                                        "tool_call_id": tool_call_id,
-                                        "timestamp": _iso_now(),
-                                        "run_id": run.run_id,
-                                    }
-                                    if agent_id:
-                                        ev["agent_id"] = agent_id
-                                    await _append_event(convo_id, ev)
-                                    await _emit(json.dumps({**ev, "type": "tool-use"}))
-                                elif isinstance(event, FunctionToolResultEvent):
-                                    tool_name = event.result.tool_name if hasattr(event.result, "tool_name") else ""
-                                    raw_content = getattr(event.result, "content", None)
-                                    if raw_content is None:
-                                        raw_content = event.content
-                                    output, diff = _parse_tool_content(tool_name, raw_content)
-                                    ev = {
-                                        "type": "tool-result",
-                                        "name": tool_name,
-                                        "output": output,
-                                        "tool_call_id": getattr(event.result, "tool_call_id", "") or "",
-                                        "timestamp": _iso_now(),
-                                        "run_id": run.run_id,
-                                    }
-                                    if diff is not None:
-                                        ev["diff"] = diff
-                                    if agent_id:
-                                        ev["agent_id"] = agent_id
-                                    await _append_event(convo_id, ev)
-                                    await _emit(json.dumps(ev))
-
-                usage = agent_run.usage()
-                total_turns += len([m for m in agent_run.all_messages() if isinstance(m, ModelResponse)])
-
-                result = agent_run.result
-                if result and isinstance(result.output, DeferredToolRequests) and result.output.approvals:
-                    approvals_needed = result.output.approvals
-                    run.pending_approvals = set()
-                    run.pending_approval_details = {}
-                    run.approval_decisions = {}
-                    run.approval_event = asyncio.Event()
-
-                    convo_meta = storage._read_meta(convo_id)
-                    convo_autonomous = bool(convo_meta.autonomous_tools_enabled) if convo_meta else False
-                    for tool_call in approvals_needed:
-                        if is_tool_auto_allowed(get_workdir(), convo_autonomous, tool_call.tool_name, tool_call.args):
-                            run.approval_decisions[tool_call.tool_call_id] = True
-                            continue
-                        run.pending_approvals.add(tool_call.tool_call_id)
-                        run.pending_approval_details[tool_call.tool_call_id] = {
-                            "name": tool_call.tool_name,
-                            "args": tool_call.args,
-                        }
-                        always_confirm = tool_is_always_confirmed(tool_call.tool_name, tool_call.args)
-                        await _emit(ToolConfirm(
-                            tool_call_id=tool_call.tool_call_id,
-                            name=tool_call.tool_name,
-                            run_id=run.run_id,
-                            args=str(tool_call.args)[:500] if tool_call.args else None,
-                            agent_id=agent_id,
-                            can_allow_project=not always_confirm,
-                            can_turn_on_auto=not always_confirm,
-                        ).model_dump_json())
-
-                    if run.pending_approvals:
-                        await run.approval_event.wait()
-
-                    approval_map: dict = {}
-                    for tc_id, approved in run.approval_decisions.items():
-                        approval_map[tc_id] = ToolApproved() if approved else ToolDenied(message="User denied this tool call")
-
-                    deferred_results = DeferredToolResults(approvals=approval_map)
-                    current_history = agent_run.all_messages()
-                    current_prompt = None
-                    continue
-
-                break
-
-        context_tokens = usage.request_tokens or 0
-        context_limit = get_context_limit()
-        run.message_history = agent_run.all_messages()
-        run.last_context_tokens = context_tokens
-
-        await _save_agent_history(
-            convo_id,
-            ModelMessagesTypeAdapter.dump_json(run.message_history),
-            agent_id=agent_id,
-        )
-
-        meta_msg = {
-            "type": "assistant-message",
-            "role": "assistant",
-            "content": "",
-            "timestamp": _iso_now(),
-            "turns": total_turns,
-            "context_tokens": context_tokens,
-            "context_limit": context_limit,
-            "run_id": run.run_id,
-        }
-        if agent_id:
-            meta_msg["agent_id"] = agent_id
-        await _append_message(convo_id, meta_msg)
-
-        done = Done(turns=total_turns, run_id=run.run_id, context_tokens=context_tokens, context_limit=context_limit, agent_id=agent_id)
-        run.done_event = done.model_dump()
-        run.status = "done"
-        await _emit(done.model_dump_json())
-        await _update_conversation_status(convo_id, ConvoStatus.done)
-
-
-    except asyncio.CancelledError:
-        run.status = "error"
-        await _update_conversation_status(convo_id, ConvoStatus.idle)
-        event = _system_event("Run stopped", event_type="run-error", run_id=run.run_id, recoverable=True)
-        await _append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
-        raise
-    except Exception as e:
-        run.error_msg = str(e)
-        run.status = "error"
-        await _update_conversation_status(convo_id, ConvoStatus.error)
-        event = _system_event(str(e), event_type="run-error", run_id=run.run_id, recoverable=True)
-        await _append_event(convo_id, event)
-        await _emit(json.dumps({**event, "type": "error"}))
-    finally:
-        agent_tools.clear_broadcast()
-        await asyncio.sleep(10)
-        session = sessions.get(convo_id)
-        if session and session.run is run:
-            session.run = None
-            if not session.subscribers and session.controller is None:
-                sessions.pop(convo_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -833,23 +442,6 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
             convo = storage.get_conversation(convo_id)
 
         project_agents = storage.load_project_agents(project.id)
-        _agent_cache: dict[str | None, "Agent"] = {}
-        _UNSET = object()
-        _cached_instructions: str | None | object = _UNSET
-        _cached_instructions_subsequent: str | None = None
-        agent_histories: dict[str | None, tuple[list, int]] = {}
-        _cached_messages: list[dict] | None = None
-
-        def _get_cached_messages() -> list[dict]:
-            nonlocal _cached_messages
-            if _cached_messages is None:
-                _cached_messages = storage.read_events(convo_id)
-            return _cached_messages
-
-        def _invalidate_message_cache():
-            nonlocal _cached_messages
-            _cached_messages = None
-
         def _load_history(aid: str | None) -> tuple[list, int]:
             if aid in agent_histories:
                 return agent_histories[aid]
@@ -870,6 +462,22 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     hist = []
             agent_histories[aid] = (hist, ctx_tokens)
             return hist, ctx_tokens
+        _agent_cache: dict[str | None, "Agent"] = {}
+        _UNSET = object()
+        _cached_instructions: str | None | object = _UNSET
+        _cached_instructions_subsequent: str | None = None
+        agent_histories: dict[str | None, tuple[list, int]] = {}
+        _cached_messages: list[dict] | None = None
+
+        def _get_cached_messages() -> list[dict]:
+            nonlocal _cached_messages
+            if _cached_messages is None:
+                _cached_messages = storage.read_events(convo_id)
+            return _cached_messages
+
+        def _invalidate_message_cache():
+            nonlocal _cached_messages
+            _cached_messages = None
 
         _load_history(None)
 
@@ -1189,7 +797,7 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                     file_context_parts.append("\n\n".join(f"[File: {path}]\n```\n{content}\n```" for path, content in file_refs))
                 cleaned_prompt = f"{'\n\n'.join(file_context_parts)}\n\n{cleaned_prompt}"
 
-            agent_prompt = _build_multimodal_prompt(cleaned_prompt, attachments, project_path)
+            agent_prompt = build_multimodal_prompt(cleaned_prompt, attachments, project_path)
 
             run = RunState(convo_id=convo_id, run_id=_new_run_id())
             run.subscribers.update(session.subscribers)
@@ -1198,7 +806,17 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
 
             agent_tools.set_workdir(project_path)
             if isinstance(locals().get("raw_text"), str) and raw_text.startswith("!"):
-                run.task = asyncio.create_task(_run_bash_command_task(run, bash_command.strip(), convo_id))
+                run.task = asyncio.create_task(run_bash_command_task(
+                    run,
+                    bash_command.strip(),
+                    convo_id,
+                    iso_now=_iso_now,
+                    append_event=_append_event,
+                    append_message=_append_message,
+                    update_conversation_status=_update_conversation_status,
+                    system_event=_system_event,
+                    get_workdir=get_workdir,
+                ))
                 continue
             if _cached_instructions is _UNSET:
                 _cached_instructions = await asyncio.to_thread(build_project_instructions, project_path, True)
@@ -1263,11 +881,21 @@ async def ws_convo_chat(ws: WebSocket, convo_id: str):
                         agent_run.subscribers.update(session.subscribers)
                         session.run = agent_run
                         agent_run.task = asyncio.create_task(
-                            _run_agent_task(
-                                agent_run, agent_prompt, hist, convo_id,
+                            run_agent_task(
+                                agent_run,
+                                agent_prompt,
+                                hist,
+                                convo_id,
                                 instructions=instructions,
                                 agent_instance=agent_instance,
                                 agent_id=aid,
+                                iso_now=_iso_now,
+                                append_event=_append_event,
+                                append_message=_append_message,
+                                update_conversation_status=_update_conversation_status,
+                                save_agent_history=_save_agent_history,
+                                system_event=_system_event,
+                                parse_tool_content=_parse_tool_content,
                             )
                         )
                         runs.append(agent_run)
