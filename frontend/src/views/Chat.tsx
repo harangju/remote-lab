@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { FileText, Pencil, FolderOpen, Sparkles, Archive, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Leaf, TreePine, Flower2, Apple, Cherry, Fish, Bird, Wheat, Sprout, Rabbit, Turtle, Squirrel, Grape, Citrus, Bug, Shell, Orbit, Mountain, Waves, CloudSun, Snowflake, Flame, Gem, Feather } from "lucide-react";
+import { FileText, Pencil, FolderOpen, Sparkles, Archive, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Leaf, TreePine, Flower2, Fish, Bird, Wheat, Sprout, Rabbit, Turtle, Squirrel, Grape, Citrus, Bug, Shell, Orbit, Mountain, Waves, CloudSun, Snowflake, Flame, Gem, Feather } from "lucide-react";
 import { listConvos, createConvo, updateConvo, type ConvoMeta } from "../api";
 import { btnIcon, colors, input as inputStyle } from "../styles";
 import { FilePanel } from "../components/FilePanel";
@@ -91,8 +91,6 @@ const railIdentityIcons = [
   Leaf,
   TreePine,
   Flower2,
-  Apple,
-  Cherry,
   Fish,
   Bird,
   Wheat,
