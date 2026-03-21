@@ -354,11 +354,13 @@ def get_conversation(convo_id: str, before: int | None = None, limit: int | None
             context_tokens = event["context_tokens"]
             context_limit = event["context_limit"]
             break
+    from backend.agent.agents import active_model
     return ConvoDetail(
         **meta.model_dump(),
         messages=window,
         context_tokens=context_tokens,
         context_limit=context_limit,
+        model=active_model,
         has_more=start > 0,
         next_before=start if start > 0 else None,
     )

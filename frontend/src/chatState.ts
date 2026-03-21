@@ -38,6 +38,7 @@ export interface MetaInfo {
   turns: number;
   context_tokens: number;
   context_limit: number;
+  model?: string | null;
 }
 
 export function blockIdentity(block: StreamBlock): string {
@@ -201,7 +202,8 @@ export function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig
       turns: 0,
       context_tokens: detail.context_tokens,
       context_limit: detail.context_limit,
-    } : null,
+      model: detail.model,
+    } : (detail.model ? { turns: 0, context_tokens: 0, context_limit: 0, model: detail.model } : null),
     title: detail.title || "Untitled",
     autonomousToolsEnabled: !!detail.autonomous_tools_enabled,
   };

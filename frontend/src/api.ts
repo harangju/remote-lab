@@ -27,6 +27,7 @@ export interface ConvoDetail extends ConvoMeta {
   messages: Message[];
   context_tokens: number;
   context_limit: number;
+  model?: string | null;
   has_more: boolean;
   next_before: number | null;
 }

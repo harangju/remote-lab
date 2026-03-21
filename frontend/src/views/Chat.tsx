@@ -399,6 +399,10 @@ export function Chat() {
   }, [currentArchivedConvo, projectConvos]);
   const railWidth = railCollapsed ? CONVO_RAIL_COLLAPSED_WIDTH : CONVO_RAIL_WIDTH;
 
+  const isDesktop = typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches;
+  const rawModel = meta?.model || activeAgent?.model || null;
+  const activeModelLabel = rawModel?.includes(":") ? rawModel.split(":").slice(1).join(":") : rawModel;
+
   return (
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       <ChatConvoRail
@@ -446,7 +450,14 @@ export function Chat() {
               </div>
               <span data-tooltip={connected ? "Connected" : "Disconnected"} style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? colors.success : colors.textMuted, display: "inline-block" }} />
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-                {meta && meta.context_limit > 0 && <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />}
+                {isDesktop && activeModelLabel && (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "2px 8px", borderRadius: 999, border: `1px solid ${colors.border}`, background: colors.bgSurface, color: colors.textMuted, fontSize: "0.75rem", fontWeight: 600 }} data-tooltip={activeModelLabel}>
+                    <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeModelLabel}</span>
+                  </div>
+                )}
+                {meta && meta.context_limit > 0 && (
+                  <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <button onClick={archiveConversation} data-tooltip="Archive conversation (⌘⇧A)" aria-label="Archive conversation" style={{ ...headerIconBtnStyle, color: colors.textMuted }} onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
                     <Archive size={15} />

@@ -86,6 +86,7 @@ class ConvoDetail(ConvoMeta):
     messages: list[dict] = Field(default_factory=list)
     context_tokens: int = 0
     context_limit: int = 0
+    model: str | None = None
     has_more: bool = False
     next_before: int | None = None
 

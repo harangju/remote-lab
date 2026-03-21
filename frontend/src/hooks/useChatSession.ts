@@ -246,7 +246,9 @@ export function useChatSession(projectId?: string, convId?: string) {
         case "agent-start": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color, model: data.agent_model };
-          activeAgentRef.current = ag; setActiveAgent(ag); break;
+          activeAgentRef.current = ag; setActiveAgent(ag);
+          if (data.agent_model) setMeta((prev) => prev ? { ...prev, model: data.agent_model } : { turns: 0, context_tokens: 0, context_limit: 0, model: data.agent_model });
+          break;
         }
         case "thinking-delta": if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break; break;
         case "text-delta": {
@@ -314,7 +316,7 @@ export function useChatSession(projectId?: string, convId?: string) {
             setMessages((msgs) => msgs.some((msg) => messageIdentity(msg) === messageIdentity(finalMessage)) ? msgs : [...msgs, finalMessage]);
           }
           blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null);
-          if (data.context_limit > 0) setMeta({ turns: data.turns, context_tokens: data.context_tokens, context_limit: data.context_limit });
+          if (data.context_limit > 0) setMeta((prev) => ({ turns: data.turns, context_tokens: data.context_tokens, context_limit: data.context_limit, model: prev?.model }));
           setBusy(false); setCurrentRunId(null); break;
         }
         case "compacted": setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev); setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }] }]); setWaitingForModel(false); setBusy(false); break;

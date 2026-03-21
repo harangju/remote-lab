@@ -13,7 +13,7 @@ interface ChatMessagesProps {
   projectId?: string;
   messages: DisplayMessage[];
   streamBlocks: StreamBlock[];
-  activeAgent: { id: string; name: string; color?: string } | null;
+  activeAgent: { id: string; name: string; color?: string; model?: string } | null;
   connected: boolean;
   waitingForModel: boolean;
   error: string | null;
