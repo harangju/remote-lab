@@ -14,7 +14,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from backend.agent.agents import agent, CONTEXT_BUDGET_FRACTION, get_context_limit
+from backend.agent.agents import PRICE_TIER_INPUT_LIMITS, agent, CONTEXT_BUDGET_FRACTION, get_context_limit, active_model
 
 # Number of recent request/response pairs to keep intact
 KEEP_RECENT_TURNS = 3
@@ -69,9 +69,10 @@ def _extract_text(messages: list[ModelMessage]) -> str:
 
 
 def needs_compaction(context_tokens: int) -> bool:
-    """Check if context usage exceeds the budget threshold."""
-    limit = get_context_limit()
-    return context_tokens > int(limit * CONTEXT_BUDGET_FRACTION)
+    """Check if context usage exceeds the model-specific budget threshold."""
+    limit = PRICE_TIER_INPUT_LIMITS.get(active_model, get_context_limit())
+    budget = min(limit, int(get_context_limit() * CONTEXT_BUDGET_FRACTION))
+    return context_tokens > budget
 
 
 async def compact(messages: list[ModelMessage]) -> tuple[list[ModelMessage], str]:

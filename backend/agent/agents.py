@@ -16,14 +16,20 @@ from backend.agent import tools
 MODEL_CONTEXT_LIMITS: dict[str, int] = {
     "anthropic:claude-opus-4-6": 200_000,
     "anthropic:claude-sonnet-4-6": 200_000,
-    "openai:gpt-5.4": 1_000_000,
-    "openai:gpt-5.4-mini": 1_000_000,
-    "openai:gpt-5.4-nano": 128_000,
+    "openai:gpt-5.4": 1_050_000,
+    "openai:gpt-5.4-pro": 1_050_000,
+    "openai:gpt-5.4-mini": 400_000,
+    "openai:gpt-5.4-nano": 400_000,
     "openai:gpt-5-nano": 128_000,
     "google-gla:gemini-2.5-flash": 1_000_000,
 }
-# Budget threshold — compact when usage exceeds this fraction
+# Budget threshold — compact when usage exceeds this fraction.
 CONTEXT_BUDGET_FRACTION = 0.8
+# Soft compaction thresholds for expensive models.
+PRICE_TIER_INPUT_LIMITS: dict[str, int] = {
+    "openai:gpt-5.4": 272_000,
+    "openai:gpt-5.4-pro": 272_000,
+}
 
 
 def get_context_limit() -> int:

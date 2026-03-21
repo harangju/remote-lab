@@ -23,7 +23,8 @@
 - `@file` autocomplete refreshes robustly and file-panel saves are conflict-aware.
 - Approval chips survive refresh and approved tool output persists correctly through reconnect/history reload.
 - Chat/file panel width persists across reloads.
-- OpenAI `gpt-5.4-mini` and `gpt-5.4-nano` are now available in `/model` and `/api/models`; auto-title prefers `gpt-5.4-nano` with fallback to legacy `gpt-5-nano`.
+- OpenAI `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, and `gpt-5.4-nano` are tracked in the model limit table; GPT-5.4/pro use a 272K soft compaction threshold for cost control, while keeping the 1.05M real context window.
+- Chat header model pill now reads from `agent-start.agent_model`; previously the frontend expected `activeAgent.model` but the websocket event never sent it, so the label fell back to `"model"`.
 
 ## Styling / frontend discipline
 - Frontend uses inline styles with semantic tokens and shared primitives from `frontend/src/styles.ts`.
