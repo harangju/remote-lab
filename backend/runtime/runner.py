@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
-from pydantic_ai.messages import BinaryImage, ModelResponse, ModelMessagesTypeAdapter, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ThinkingPartDelta, UserContent, FunctionToolCallEvent, FunctionToolResultEvent
+from pydantic_ai.messages import BinaryImage, ModelResponse, ModelMessagesTypeAdapter, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ThinkingPartDelta, ToolCallPart, UserContent, FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
 
 from backend.agent import tools as agent_tools
@@ -421,6 +421,16 @@ async def run_agent_task(
         agent_tools.clear_broadcast()
         # Save agent history even on cancel/error so the next run
         # doesn't lose tool results and re-read the same files.
+        # Strip trailing ModelResponses with unprocessed tool calls —
+        # PydanticAI rejects new user prompts if the history ends with
+        # tool calls that have no matching tool results.
+        if run.message_history:
+            while run.message_history and isinstance(run.message_history[-1], ModelResponse):
+                last = run.message_history[-1]
+                if any(isinstance(p, ToolCallPart) for p in last.parts):
+                    run.message_history.pop()
+                else:
+                    break
         if run.message_history:
             try:
                 await save_agent_history(
