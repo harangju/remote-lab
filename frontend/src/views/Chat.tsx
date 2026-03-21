@@ -129,6 +129,10 @@ export function Chat() {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) === "true";
   });
+  const [showExpandedNewChatLabel, setShowExpandedNewChatLabel] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) !== "true";
+  });
   const panel = usePanel(projectId);
 
   const {
@@ -282,12 +286,22 @@ export function Chat() {
   const toggleRailCollapsed = useCallback(() => {
     setRailCollapsed((prev) => {
       const next = !prev;
+      if (!next) setShowExpandedNewChatLabel(false);
       if (typeof window !== "undefined") {
         window.localStorage.setItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY, String(next));
       }
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (railCollapsed) {
+      setShowExpandedNewChatLabel(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setShowExpandedNewChatLabel(true), 140);
+    return () => window.clearTimeout(timeout);
+  }, [railCollapsed]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -444,7 +458,7 @@ export function Chat() {
             onMouseLeave={railCollapsed ? headerHoverOut : undefined}
           >
             <MessageSquarePlus size={15} />
-            {!railCollapsed && <span>New chat</span>}
+            {!railCollapsed && showExpandedNewChatLabel && <span style={{ whiteSpace: "nowrap" }}>New chat</span>}
           </button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: railCollapsed ? "8px 6px" : "8px" }}>
