@@ -405,6 +405,7 @@ export function Chat() {
         display: "none",
         flexDirection: "column",
         minWidth: 0,
+        transition: "width 140ms ease",
       }} className="chat-convo-rail">
         <div style={{ padding: railCollapsed ? "8px" : "8px 12px", height: "52px", borderBottom: `1px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: railCollapsed ? "center" : "space-between", gap: "8px", boxSizing: "border-box" }}>
           {!railCollapsed && <div style={{ fontSize: "0.78rem", fontWeight: 600, color: colors.textMuted }}>Chats</div>}
