@@ -93,6 +93,7 @@ export function Chat() {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
+  const [archivingConvoId, setArchivingConvoId] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) === "true";
@@ -234,6 +235,18 @@ export function Chat() {
       setError(e.message || "Failed to create conversation");
     }
   }, [navigate, projectId, setError]);
+
+  const archiveConvoFromRail = useCallback(async (targetConvoId: string) => {
+    try {
+      setArchivingConvoId(targetConvoId);
+      await updateConvo(targetConvoId, { archived_at: new Date().toISOString() });
+      setProjectConvos((prev) => prev.filter((convo) => convo.id !== targetConvoId));
+    } catch (e: any) {
+      setError(e.message || "Failed to archive conversation");
+    } finally {
+      setArchivingConvoId((current) => (current === targetConvoId ? null : current));
+    }
+  }, [setError]);
 
   const toggleRailCollapsed = useCallback(() => {
     setRailCollapsed((prev) => {
@@ -407,38 +420,67 @@ export function Chat() {
               ? "running"
               : timeAgo(convo.last_event_at || convo.updated_at);
             return (
-              <button
+              <div
                 key={convo.id}
-                onClick={() => navigate(`/${projectId}/${convo.id}${panel.file ? `?path=${encodeURIComponent(panel.file.path)}` : ""}`)}
-                aria-label={convo.title || "Untitled conversation"}
-                title={railCollapsed ? (convo.title || "Untitled") : undefined}
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: railCollapsed ? "center" : "flex-start",
-                  justifyContent: railCollapsed ? "center" : undefined,
-                  gap: railCollapsed ? 0 : "10px",
-                  padding: railCollapsed ? "10px 0" : "10px 10px",
-                  borderRadius: "10px",
-                  border: "none",
-                  background: isActive ? colors.bgSurface : "transparent",
-                  color: colors.text,
-                  textAlign: railCollapsed ? "center" : "left",
-                  marginBottom: "4px",
-                }}
+                style={{ position: "relative", marginBottom: "4px" }}
+                className={!railCollapsed && !isActive ? "chat-convo-rail-row" : undefined}
               >
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, flexShrink: 0, marginTop: railCollapsed ? 0 : 5 }} />
-                {!railCollapsed && (
-                  <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
-                    <span style={{ fontSize: "0.84rem", fontWeight: isActive ? 600 : 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {convo.title || "Untitled"}
+                <button
+                  onClick={() => navigate(`/${projectId}/${convo.id}${panel.file ? `?path=${encodeURIComponent(panel.file.path)}` : ""}`)}
+                  aria-label={convo.title || "Untitled conversation"}
+                  title={railCollapsed ? (convo.title || "Untitled") : undefined}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: railCollapsed ? "center" : "flex-start",
+                    justifyContent: railCollapsed ? "center" : undefined,
+                    gap: railCollapsed ? 0 : "10px",
+                    padding: railCollapsed ? "10px 0" : "10px 36px 10px 10px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: isActive ? colors.bgSurface : "transparent",
+                    color: colors.text,
+                    textAlign: railCollapsed ? "center" : "left",
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, flexShrink: 0, marginTop: railCollapsed ? 0 : 5 }} />
+                  {!railCollapsed && (
+                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "0.84rem", fontWeight: isActive ? 600 : 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {convo.title || "Untitled"}
+                      </span>
+                      <span style={{ fontSize: "0.72rem", color: statusColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: "lowercase" }}>
+                        {sublabel}
+                      </span>
                     </span>
-                    <span style={{ fontSize: "0.72rem", color: statusColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: "lowercase" }}>
-                      {sublabel}
-                    </span>
-                  </span>
+                  )}
+                </button>
+                {!railCollapsed && !isActive && (
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void archiveConvoFromRail(convo.id);
+                    }}
+                    disabled={archivingConvoId === convo.id}
+                    aria-label="Archive chat"
+                    style={{
+                      ...headerIconBtnStyle,
+                      position: "absolute",
+                      top: "50%",
+                      right: "8px",
+                      transform: "translateY(-50%)",
+                      opacity: archivingConvoId === convo.id ? 0.65 : 0,
+                      transition: "opacity 140ms ease",
+                    }}
+                    className="chat-convo-rail-archive"
+                    onMouseEnter={headerHoverIn}
+                    onMouseLeave={headerHoverOut}
+                  >
+                    <Archive size={14} />
+                  </button>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>

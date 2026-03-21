@@ -207,6 +207,15 @@ export function injectTheme() {
       .chat-convo-rail {
         display: flex !important;
       }
+      .chat-convo-rail-row:hover > button:first-child,
+      .chat-convo-rail-row:focus-within > button:first-child {
+        background: var(--bg-surface-hover) !important;
+      }
+      .chat-convo-rail-row:hover .chat-convo-rail-archive,
+      .chat-convo-rail-row:focus-within .chat-convo-rail-archive {
+        opacity: 1 !important;
+        pointer-events: auto !important;
+      }
     }
     .md-content p { margin: 0 0 0.4em; }
     .md-content p:last-child { margin-bottom: 0; }
