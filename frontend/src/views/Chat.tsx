@@ -50,6 +50,7 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
 const CHAT_HEADER_MAX_WIDTH = "72rem";
 const CONVO_RAIL_WIDTH = 240;
 const CONVO_RAIL_COLLAPSED_WIDTH = 52;
+const CONVO_RAIL_ROW_HEIGHT = 44;
 const CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY = "remote-lab:chat-convo-rail-collapsed";
 const PANEL_MIN_WIDTH = 320;
 const PANEL_MAX_WIDTH_RATIO = 0.75;
@@ -128,10 +129,6 @@ export function Chat() {
   const [railCollapsed, setRailCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) === "true";
-  });
-  const [showExpandedNewChatLabel, setShowExpandedNewChatLabel] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) !== "true";
   });
   const panel = usePanel(projectId);
 
@@ -286,22 +283,12 @@ export function Chat() {
   const toggleRailCollapsed = useCallback(() => {
     setRailCollapsed((prev) => {
       const next = !prev;
-      if (!next) setShowExpandedNewChatLabel(false);
       if (typeof window !== "undefined") {
         window.localStorage.setItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY, String(next));
       }
       return next;
     });
   }, []);
-
-  useEffect(() => {
-    if (railCollapsed) {
-      setShowExpandedNewChatLabel(false);
-      return;
-    }
-    const timeout = window.setTimeout(() => setShowExpandedNewChatLabel(true), 140);
-    return () => window.clearTimeout(timeout);
-  }, [railCollapsed]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -418,7 +405,6 @@ export function Chat() {
         display: "none",
         flexDirection: "column",
         minWidth: 0,
-        transition: "width 140ms ease",
       }} className="chat-convo-rail">
         <div style={{ padding: railCollapsed ? "8px" : "8px 12px", height: "52px", borderBottom: `1px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: railCollapsed ? "center" : "space-between", gap: "8px", boxSizing: "border-box" }}>
           {!railCollapsed && <div style={{ fontSize: "0.78rem", fontWeight: 600, color: colors.textMuted }}>Chats</div>}
@@ -437,28 +423,30 @@ export function Chat() {
             onClick={() => { void handleNewConversation(); }}
             aria-label="New chat"
             data-tooltip={railCollapsed ? "New chat" : undefined}
-            style={railCollapsed ? {
-              ...headerIconBtnStyle,
+            style={{
               width: "100%",
-            } : {
-              width: "100%",
+              height: `${CONVO_RAIL_ROW_HEIGHT}px`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               gap: "8px",
-              padding: "10px 12px",
+              padding: "0 12px",
               borderRadius: "10px",
               border: `1px solid ${colors.border}`,
               background: colors.bgSurface,
               color: colors.text,
               fontSize: "0.84rem",
               fontWeight: 500,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
             }}
-            onMouseEnter={railCollapsed ? headerHoverIn : undefined}
-            onMouseLeave={railCollapsed ? headerHoverOut : undefined}
+            onMouseEnter={headerHoverIn}
+            onMouseLeave={headerHoverOut}
           >
-            <MessageSquarePlus size={15} />
-            {!railCollapsed && showExpandedNewChatLabel && <span style={{ whiteSpace: "nowrap" }}>New chat</span>}
+            <span style={{ width: 18, minWidth: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <MessageSquarePlus size={16} strokeWidth={2} />
+            </span>
+            {!railCollapsed && <span style={{ whiteSpace: "nowrap" }}>New chat</span>}
           </button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: railCollapsed ? "8px 6px" : "8px" }}>
@@ -473,7 +461,7 @@ export function Chat() {
             return (
               <div
                 key={convo.id}
-                style={{ position: "relative", marginBottom: "4px" }}
+                style={{ position: "relative", marginBottom: "4px", height: `${CONVO_RAIL_ROW_HEIGHT}px` }}
                 className={!railCollapsed && !isActive ? "chat-convo-rail-row" : undefined}
               >
                 <button
@@ -482,26 +470,28 @@ export function Chat() {
                   title={railCollapsed ? (convo.title || "Untitled") : undefined}
                   style={{
                     width: "100%",
-                    minHeight: "44px",
+                    height: "100%",
+                    minHeight: `${CONVO_RAIL_ROW_HEIGHT}px`,
                     display: "flex",
-                    alignItems: railCollapsed ? "center" : "flex-start",
+                    alignItems: "center",
                     justifyContent: railCollapsed ? "center" : undefined,
                     gap: railCollapsed ? 0 : "10px",
-                    padding: railCollapsed ? "10px 0" : "10px 36px 10px 10px",
+                    padding: railCollapsed ? 0 : "0 36px 0 10px",
                     borderRadius: "10px",
                     border: "none",
                     background: isActive ? colors.bgSurface : "transparent",
                     color: colors.text,
-                    textAlign: railCollapsed ? "center" : "left",
+                    textAlign: "left",
                     position: "relative",
+                    overflow: "hidden",
                   }}
                 >
-                  <span style={{ position: "relative", width: 18, height: 18, flexShrink: 0, marginTop: railCollapsed ? 0 : 2, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ position: "relative", width: 18, height: 18, flexShrink: 0, marginTop: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                     <IdentityIcon size={16} style={{ color: isActive ? colors.text : colors.textMuted, flexShrink: 0 }} />
                     <span style={{ position: "absolute", top: railCollapsed ? 0 : -1, right: railCollapsed ? -1 : -2, width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 0 2px ${isActive ? colors.bgSurface : colors.bg}` }} />
                   </span>
                   {!railCollapsed && (
-                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", gap: "2px", overflow: "hidden" }}>
                       <span style={{ fontSize: "0.84rem", fontWeight: isActive ? 600 : 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {convo.title || "Untitled"}
                       </span>
