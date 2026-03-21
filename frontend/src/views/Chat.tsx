@@ -247,14 +247,21 @@ export function Chat() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "p") {
+      const key = e.key.toLowerCase();
+      const primaryMod = e.metaKey || e.ctrlKey;
+      if (primaryMod && !e.shiftKey && key === "p") {
         e.preventDefault();
         panel.toggleFileFinder();
+        return;
+      }
+      if (primaryMod && e.shiftKey && key === "m") {
+        e.preventDefault();
+        void handleNewConversation();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [panel.toggleFileFinder]);
+  }, [handleNewConversation, panel.toggleFileFinder]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -387,7 +394,7 @@ export function Chat() {
               }}
             >
               <MessageSquarePlus size={15} />
-              <span>New message</span>
+              <span>New chat</span>
             </button>
           </div>
         )}
