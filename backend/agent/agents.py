@@ -17,6 +17,8 @@ MODEL_CONTEXT_LIMITS: dict[str, int] = {
     "anthropic:claude-opus-4-6": 200_000,
     "anthropic:claude-sonnet-4-6": 200_000,
     "openai:gpt-5.4": 1_000_000,
+    "openai:gpt-5.4-mini": 1_000_000,
+    "openai:gpt-5.4-nano": 128_000,
     "openai:gpt-5-nano": 128_000,
     "google-gla:gemini-2.5-flash": 1_000_000,
 }
@@ -48,6 +50,8 @@ _PROVIDERS = [
     ("ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-6"),
     ("ANTHROPIC_API_KEY", "anthropic:claude-opus-4-6"),
     ("OPENAI_API_KEY", "openai:gpt-5.4"),
+    ("OPENAI_API_KEY", "openai:gpt-5.4-mini"),
+    ("OPENAI_API_KEY", "openai:gpt-5.4-nano"),
     ("OPENAI_API_KEY", "openai:gpt-5-nano"),
     ("GOOGLE_API_KEY", "google-gla:gemini-2.5-flash"),
 ]

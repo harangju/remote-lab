@@ -103,3 +103,4 @@
 - Selecting any chat now re-focuses/selects the composer (not just freshly created chats), so moving between conversations or doing `Cmd+Shift+A`, `Cmd+Shift+M` drops you straight back into typing.
 - Fixed file-panel manual refresh for preview-only files (`.html`, `.htm`, `.pdf`, `.docx`): `usePanel.reloadFile()` now treats preview files as reloadable panel state instead of incorrectly calling the text-file read endpoint.
 - Preview refresh for iframe-backed files now also busts the embed URL in `FilePanel.tsx` with a versioned query param on manual reload, so HTML/PDF previews like Marp-generated slides actually re-request the updated document instead of showing a cached iframe.
+- Added OpenAI `gpt-5.4-mini` and `gpt-5.4-nano` model IDs to backend model availability so they now appear in `/model`/`/api/models`; auto-titling now prefers `gpt-5.4-nano` but still falls back to legacy `gpt-5-nano` for compatibility.

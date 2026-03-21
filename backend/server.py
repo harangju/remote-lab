@@ -158,7 +158,7 @@ ws_convo_chat = create_ws_handler(
     system_event=system_event,
     parse_tool_content=parse_tool_content,
     build_shared_context=build_shared_context,
-    auto_title=lambda convo_id, user_message: auto_title(convo_id, user_message, ["openai:gpt-5-nano", "google-gla:gemini-2.5-flash"]),
+    auto_title=lambda convo_id, user_message: auto_title(convo_id, user_message, ["openai:gpt-5.4-nano", "openai:gpt-5-nano", "google-gla:gemini-2.5-flash"]),
     iso_now=iso_now,
     get_workdir=get_workdir,
 )

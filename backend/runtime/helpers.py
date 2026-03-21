@@ -147,7 +147,7 @@ async def broadcast_conversation_event(convo_id: str, msg_str: str) -> None:
 
 async def auto_title(convo_id: str, user_message: str, available_models: list[str]):
     title_model = None
-    for preferred in ("openai:gpt-5-nano", "google-gla:gemini-2.5-flash"):
+    for preferred in ("openai:gpt-5.4-nano", "openai:gpt-5-nano", "google-gla:gemini-2.5-flash"):
         if preferred in available_models:
             title_model = preferred
             break
