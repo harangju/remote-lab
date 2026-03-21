@@ -118,6 +118,7 @@ export function FilePanel({
   const [docxMessages, setDocxMessages] = useState<string[]>([]);
   const [docxLoading, setDocxLoading] = useState(false);
   const [docxError, setDocxError] = useState<string | null>(null);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const conversationMenuRef = useRef<HTMLDivElement | null>(null);
 
   const hasConversationChoices = !!onStartConversation || (conversationOptions.length > 0 && !!onOpenConversationOption);
@@ -127,7 +128,7 @@ export function FilePanel({
   const htmlFile = isHtml(file.path);
   const previewFile = docxFile || pdfFile || htmlFile;
   const embedToken = getToken();
-  const embedPreviewUrl = previewFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}` : null;
+  const embedPreviewUrl = previewFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}&v=${previewVersion}` : null;
 
   useEffect(() => {
     if (!showConversationMenu) return;
@@ -205,9 +206,13 @@ export function FilePanel({
   const handleReload = useCallback(async () => {
     const content = await onReload();
     if (content !== null) {
+      if (previewFile) {
+        setPreviewVersion((v) => v + 1);
+        return;
+      }
       editorRef.current?.replaceContent(content, { addToHistory: false });
     }
-  }, [onReload]);
+  }, [onReload, previewFile]);
 
   useEffect(() => {
     editorRef.current?.replaceContent(file.content, { addToHistory: false });

@@ -276,6 +276,21 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     const currentFile = fileRef.current;
     if (!projectId || !currentFile) return null;
     const requestId = ++openRequestIdRef.current;
+
+    if (isPreviewOnlyPath(currentFile.path)) {
+      if (openRequestIdRef.current !== requestId || fileRef.current?.path !== currentFile.path) return null;
+      setFile((prev) => prev && prev.path === currentFile.path
+        ? { ...prev, content: "", language: langFromPath(currentFile.path) }
+        : prev);
+      originalContentRef.current = "";
+      latestContentRef.current = "";
+      setEditModeRaw(false);
+      setDirty(false);
+      setSaveError(null);
+      setExternalChange(false);
+      return "";
+    }
+
     try {
       const res = await readFile(projectId, currentFile.path);
       if (openRequestIdRef.current !== requestId || fileRef.current?.path !== currentFile.path) return null;
