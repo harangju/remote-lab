@@ -2,12 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { connectWs, getConvo, listFiles, listProjectAgents, listSkills, updateConvo, uploadFiles, type AgentConfig, type Attachment, type Skill, type WsEvent } from "../api";
 import { buildDisplayMessages, mergeAssistantMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "../chatState";
 import type { ComposerAttachment } from "../chatComposer";
+import { getBottomSlackPx, getUserMessageTopOffsetPx } from "../chatSessionState";
 
-const MIN_USER_MESSAGE_TOP_OFFSET_PX = 24;
-const MAX_USER_MESSAGE_TOP_OFFSET_PX = 72;
-const USER_MESSAGE_TOP_OFFSET_VH = 0.08;
-const MIN_BOTTOM_SLACK_PX = 80;
-const BOTTOM_SLACK_VH = 0.12;
 const INITIAL_HISTORY_PAGE_SIZE = 100;
 const OLDER_HISTORY_PAGE_SIZE = 100;
 
@@ -60,22 +56,19 @@ export function useChatSession(projectId?: string, convId?: string) {
   const initialScrollDoneRef = useRef(false);
   const prependScrollRestoreRef = useRef<number | null>(null);
 
-  const getUserMessageTopOffsetPx = useCallback(() => {
-    const viewportOffset = window.innerHeight * USER_MESSAGE_TOP_OFFSET_VH;
-    return Math.max(MIN_USER_MESSAGE_TOP_OFFSET_PX, Math.min(MAX_USER_MESSAGE_TOP_OFFSET_PX, viewportOffset));
-  }, []);
+  const getUserMessageTopOffset = useCallback(() => getUserMessageTopOffsetPx(window.innerHeight), []);
 
   const bottomSlackPx = useMemo(() => {
     const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
-    return Math.max(MIN_BOTTOM_SLACK_PX, viewportHeight * BOTTOM_SLACK_VH);
+    return getBottomSlackPx(viewportHeight);
   }, []);
 
   const scrollUserMessageNearTop = useCallback((messageEl: HTMLDivElement | null, behavior: ScrollBehavior = "smooth") => {
     const container = messageListRef.current;
     if (!container || !messageEl) return;
-    const targetTop = messageEl.offsetTop - getUserMessageTopOffsetPx();
+    const targetTop = messageEl.offsetTop - getUserMessageTopOffset();
     container.scrollTo({ top: Math.max(0, targetTop), behavior });
-  }, [getUserMessageTopOffsetPx]);
+  }, [getUserMessageTopOffset]);
 
   const syncPendingMessages = useCallback((updater: { message_id: string; text: string; attachments?: Attachment[] }[] | ((prev: { message_id: string; text: string; attachments?: Attachment[] }[]) => { message_id: string; text: string; attachments?: Attachment[] }[])) => {
     setPendingMessages((prev) => {
