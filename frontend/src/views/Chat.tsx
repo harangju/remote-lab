@@ -387,30 +387,35 @@ export function Chat() {
             {railCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
         </div>
-        {!railCollapsed && (
-          <div style={{ padding: "8px", borderBottom: `1px solid ${colors.border}` }}>
-            <button
-              onClick={() => { void handleNewConversation(); }}
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                padding: "10px 12px",
-                borderRadius: "10px",
-                border: `1px solid ${colors.border}`,
-                background: colors.bgSurface,
-                color: colors.text,
-                fontSize: "0.84rem",
-                fontWeight: 500,
-              }}
-            >
-              <MessageSquarePlus size={15} />
-              <span>New chat</span>
-            </button>
-          </div>
-        )}
+        <div style={{ padding: railCollapsed ? "8px 6px" : "8px", borderBottom: `1px solid ${colors.border}` }}>
+          <button
+            onClick={() => { void handleNewConversation(); }}
+            aria-label="New chat"
+            data-tooltip={railCollapsed ? "New chat" : undefined}
+            style={railCollapsed ? {
+              ...headerIconBtnStyle,
+              width: "100%",
+            } : {
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              padding: "10px 12px",
+              borderRadius: "10px",
+              border: `1px solid ${colors.border}`,
+              background: colors.bgSurface,
+              color: colors.text,
+              fontSize: "0.84rem",
+              fontWeight: 500,
+            }}
+            onMouseEnter={railCollapsed ? headerHoverIn : undefined}
+            onMouseLeave={railCollapsed ? headerHoverOut : undefined}
+          >
+            <MessageSquarePlus size={15} />
+            {!railCollapsed && <span>New chat</span>}
+          </button>
+        </div>
         <div style={{ flex: 1, overflowY: "auto", padding: railCollapsed ? "8px 6px" : "8px" }}>
           {visibleConvos.map((convo) => {
             const tone = railStatusTone(convo);
