@@ -34,6 +34,7 @@ interface ChatComposerProps {
   projectFiles: string[];
   skills: Skill[];
   refreshMentionFiles: () => void | Promise<void>;
+  focusKey?: string | number;
 }
 
 const pickerPanelStyle: React.CSSProperties = {
@@ -98,6 +99,7 @@ export function ChatComposer({
   projectFiles,
   skills,
   refreshMentionFiles,
+  focusKey,
 }: ChatComposerProps) {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
@@ -116,6 +118,14 @@ export function ChatComposer({
     el.style.height = "0px";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
+
+  useEffect(() => {
+    if (focusKey === undefined || focusKey === null || busy || voiceUiActive) return;
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, [busy, focusKey, voiceUiActive]);
 
   const mentionMatches = useMemo((): MentionMatch[] => getMentionMatches(mentionQuery, agents, projectFiles), [mentionQuery, agents, projectFiles]);
   const slashMatches = useMemo((): Skill[] => getSlashMatches(slashQuery, skills), [slashQuery, skills]);

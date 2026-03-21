@@ -65,6 +65,7 @@ export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [composerFocusKey, setComposerFocusKey] = useState(0);
   const [editValue, setEditValue] = useState("");
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
   const [currentArchivedConvo, setCurrentArchivedConvo] = useState<ConvoMeta | null>(null);
@@ -212,6 +213,7 @@ export function Chat() {
     if (!projectId) return;
     try {
       const convo = await createConvo(projectId);
+      setComposerFocusKey(Date.now());
       navigate(`/${projectId}/${convo.id}`);
     } catch (e: any) {
       setError(e.message || "Failed to create conversation");
@@ -259,14 +261,27 @@ export function Chat() {
         panel.toggleFileFinder();
         return;
       }
+      if (e.metaKey && !e.ctrlKey && e.shiftKey && key === "a") {
+        const target = e.target as HTMLElement | null;
+        const tagName = target?.tagName?.toLowerCase();
+        const isEditable = !!target && (target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select");
+        if (isEditable) return;
+        e.preventDefault();
+        void archiveConversation();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "m") {
+        const target = e.target as HTMLElement | null;
+        const tagName = target?.tagName?.toLowerCase();
+        const isEditable = !!target && (target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select");
+        if (isEditable) return;
         e.preventDefault();
         void handleNewConversation();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleNewConversation, panel.toggleFileFinder]);
+  }, [archiveConversation, handleNewConversation, panel.toggleFileFinder]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -435,7 +450,7 @@ export function Chat() {
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
                 {meta && meta.context_limit > 0 && <ContextDonut tokens={meta.context_tokens} limit={meta.context_limit} />}
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <button onClick={archiveConversation} data-tooltip="Archive conversation" aria-label="Archive conversation" style={{ ...headerIconBtnStyle, color: colors.textMuted }} onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
+                  <button onClick={archiveConversation} data-tooltip="Archive conversation (⌘⇧A)" aria-label="Archive conversation" style={{ ...headerIconBtnStyle, color: colors.textMuted }} onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
                     <Archive size={15} />
                   </button>
                   <button
@@ -512,6 +527,7 @@ export function Chat() {
           projectFiles={projectFiles}
           skills={skills}
           refreshMentionFiles={refreshMentionFiles}
+          focusKey={composerFocusKey}
         />
       </div>
 
