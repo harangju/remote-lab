@@ -133,6 +133,30 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+const SCROLL_STORAGE_KEY = "remote-lab:file-scroll";
+
+function persistPositionCache(projectId: string, scrolls: Map<string, number>, hashes: Map<string, string>) {
+  try {
+    const obj: Record<string, number | string> = {};
+    scrolls.forEach((v, k) => { obj[k] = v; });
+    hashes.forEach((v, k) => { obj[k] = v; });
+    localStorage.setItem(`${SCROLL_STORAGE_KEY}:${projectId}`, JSON.stringify(obj));
+  } catch { /* quota */ }
+}
+
+function loadPositionCache(projectId: string): { scrolls: Map<string, number>; hashes: Map<string, string> } {
+  const scrolls = new Map<string, number>();
+  const hashes = new Map<string, string>();
+  try {
+    const obj = JSON.parse(localStorage.getItem(`${SCROLL_STORAGE_KEY}:${projectId}`) || "{}");
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "number") scrolls.set(k, v);
+      else if (typeof v === "string") hashes.set(k, v);
+    }
+  } catch { /* corrupted */ }
+  return { scrolls, hashes };
+}
+
 function isDocx(path: string): boolean {
   return path.toLowerCase().endsWith(".docx");
 }
@@ -155,6 +179,11 @@ export function FilePanel({
   conversationOptions = [], conversationOptionsLabel = "Recent conversations using this file", conversationModal = false, onOpenConversationOption,
 }: FilePanelProps) {
   const editorRef = useRef<CodeMirrorEditorHandle | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const editorCallbackRef = useCallback((handle: CodeMirrorEditorHandle | null) => {
+    editorRef.current = handle;
+    setEditorReady(!!handle);
+  }, []);
   const [copied, setCopied] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [docxHtml, setDocxHtml] = useState<string>("");
@@ -162,18 +191,18 @@ export function FilePanel({
   const [docxLoading, setDocxLoading] = useState(false);
   const [docxError, setDocxError] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
-  const previewHashRef = useRef("");
+  const [initialCache] = useState(() => loadPositionCache(file.projectId));
+  const previewHashRef = useRef(initialCache.hashes.get(file.path) || "");
   const conversationMenuRef = useRef<HTMLDivElement | null>(null);
   const prevPathRef = useRef(file.path);
-  const scrollCacheRef = useRef<Map<string, number>>(new Map());
-  const previewHashCacheRef = useRef<Map<string, string>>(new Map());
+  const scrollCacheRef = useRef(initialCache.scrolls);
+  const previewHashCacheRef = useRef(initialCache.hashes);
 
-  // Detect file switch during render so refs are correct before JSX evaluation
-  const switchedRef = useRef(false);
+  // Detect file switch during render — runs before DOM commit,
+  // so we can still read the old file's position from the live DOM
   if (file.path !== prevPathRef.current) {
-    // Save scroll/hash state of the file we're leaving
     if (editorRef.current) {
-      scrollCacheRef.current.set(prevPathRef.current, editorRef.current.getScrollTop());
+      scrollCacheRef.current.set(prevPathRef.current, editorRef.current.getScrollPosition());
     }
     try {
       const iframe = document.querySelector(`iframe[title="${CSS.escape(prevPathRef.current)}"]`) as HTMLIFrameElement | null;
@@ -181,13 +210,27 @@ export function FilePanel({
       if (hash) previewHashCacheRef.current.set(prevPathRef.current, hash);
     } catch { /* cross-origin */ }
 
-    // Restore cached preview hash for the incoming file
     previewHashRef.current = previewHashCacheRef.current.get(file.path) || "";
     prevPathRef.current = file.path;
-    switchedRef.current = true;
-  } else {
-    switchedRef.current = false;
   }
+
+  // Persist caches to localStorage on beforeunload (browser refresh / tab close)
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      // Flush current file's position into the cache before persisting
+      if (editorRef.current) {
+        scrollCacheRef.current.set(file.path, editorRef.current.getScrollPosition());
+      }
+      try {
+        const iframe = document.querySelector(`iframe[title="${CSS.escape(file.path)}"]`) as HTMLIFrameElement | null;
+        const hash = iframe?.contentWindow?.location?.hash;
+        if (hash) previewHashCacheRef.current.set(file.path, hash);
+      } catch { /* cross-origin */ }
+      persistPositionCache(file.projectId, scrollCacheRef.current, previewHashCacheRef.current);
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [file.projectId, file.path]);
 
   const hasConversationChoices = !!onStartConversation || (conversationOptions.length > 0 && !!onOpenConversationOption);
   const visibleConversationOptions = useMemo(() => conversationOptions.slice(0, 4), [conversationOptions]);
@@ -273,7 +316,7 @@ export function FilePanel({
 
   const handleReload = useCallback(async () => {
     // Capture scroll/hash state before reload
-    const scrollTop = editorRef.current?.getScrollTop() ?? 0;
+    const scrollPos = editorRef.current?.getScrollPosition() ?? 0;
     let iframeHash = "";
     if (previewFile) {
       try {
@@ -292,24 +335,23 @@ export function FilePanel({
         return;
       }
       editorRef.current?.replaceContent(content, { addToHistory: false });
-      requestAnimationFrame(() => {
-        editorRef.current?.setScrollTop(scrollTop);
-      });
+      editorRef.current?.scrollToPosition(scrollPos);
     }
   }, [onReload, previewFile, file.path]);
 
+  const restoredPathRef = useRef<string | null>(null);
   useEffect(() => {
     editorRef.current?.replaceContent(file.content, { addToHistory: false });
 
-    if (switchedRef.current) {
+    // Restore scroll once per file path — only mark as restored if editor is available
+    if (restoredPathRef.current !== file.path && file.content && editorRef.current) {
+      restoredPathRef.current = file.path;
       const saved = scrollCacheRef.current.get(file.path);
       if (saved !== undefined) {
-        requestAnimationFrame(() => {
-          editorRef.current?.setScrollTop(saved);
-        });
+        editorRef.current.scrollToPosition(saved);
       }
     }
-  }, [file.path, file.content]);
+  }, [file.path, file.content, editorReady]);
 
   const download = async () => {
     const token = getToken();
@@ -445,7 +487,7 @@ export function FilePanel({
           embedPreviewUrl ? <iframe title={file.path} src={embedPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: colors.bg }} /> : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "24px", color: colors.textMuted, fontSize: "0.85rem", textAlign: "center" }}><div style={{ maxWidth: 420 }}><div>Could not preview this HTML file. Try downloading it instead.</div><div style={{ marginTop: 8, fontSize: "0.75rem", opacity: 0.8, wordBreak: "break-word" }}>Missing auth token.</div></div></div>
         ) : (
           <Suspense fallback={<div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: colors.textMuted, fontSize: "0.8rem" }}>Loading editor...</div>}>
-            <CodeMirrorEditor ref={editorRef} code={file.content} language={file.language} readOnly={!editMode} onChange={onContentChange} onSave={handleSave} />
+            <CodeMirrorEditor ref={editorCallbackRef} code={file.content} language={file.language} readOnly={!editMode} onChange={onContentChange} onSave={handleSave} />
           </Suspense>
         )}
       </div>

@@ -24,8 +24,10 @@ interface CodeMirrorEditorProps {
 export interface CodeMirrorEditorHandle {
   getValue: () => string;
   replaceContent: (value: string, options?: { addToHistory?: boolean }) => void;
-  getScrollTop: () => number;
-  setScrollTop: (pos: number) => void;
+  /** Returns the document position (character offset) at the top of the viewport. */
+  getScrollPosition: () => number;
+  /** Scrolls so that the given document position is at the top of the viewport. */
+  scrollToPosition: (pos: number) => void;
 }
 
 const langExtensions: Record<string, () => ReturnType<typeof javascript>> = {
@@ -109,10 +111,15 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
         userEvent: options?.addToHistory === false ? "input.external" : "input",
       });
     },
-    getScrollTop: () => viewRef.current?.scrollDOM.scrollTop ?? 0,
-    setScrollTop: (pos: number) => {
+    getScrollPosition: () => {
       const view = viewRef.current;
-      if (view) view.scrollDOM.scrollTop = pos;
+      if (!view) return 0;
+      return view.lineBlockAtHeight(view.scrollDOM.scrollTop).from;
+    },
+    scrollToPosition: (pos: number) => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "start" }) });
     },
   }), []);
 
@@ -120,6 +127,7 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
   useEffect(() => {
     initialCodeRef.current = code;
   }, [code]);
+
 
   useEffect(() => {
     if (!containerRef.current) return;
