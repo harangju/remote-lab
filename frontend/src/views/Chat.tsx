@@ -319,16 +319,6 @@ export function Chat() {
         e.preventDefault();
         void handleNewConversation();
       }
-      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && key === "arrowleft") {
-        e.preventDefault();
-        const path = panel.goBack();
-        if (path) syncFileQuery(path, true);
-      }
-      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && key === "arrowright") {
-        e.preventDefault();
-        const path = panel.goForward();
-        if (path) syncFileQuery(path, true);
-      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);

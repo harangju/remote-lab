@@ -22,22 +22,6 @@ export function ProjectFile() {
     openFromQuery();
   }, [openFromQuery]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.key === "ArrowLeft") {
-        e.preventDefault();
-        const p = panel.goBack();
-        if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true });
-      }
-      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.key === "ArrowRight") {
-        e.preventDefault();
-        const p = panel.goForward();
-        if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true });
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [panel.goBack, panel.goForward, navigate, projectId]);
 
   const handleClose = useCallback(() => {
     if (panel.dirty) {

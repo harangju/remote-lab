@@ -342,8 +342,8 @@ export function FilePanel({
       <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderBottom: `1px solid ${colors.border}`, flexShrink: 0, minHeight: "40px", position: "relative", zIndex: 2, overflow: "visible" }}>
         {(onGoBack || onGoForward) && (
           <span style={{ display: "inline-flex", gap: "2px", flexShrink: 0 }}>
-            <button onClick={onGoBack} disabled={!canGoBack} style={{ ...iconBtnStyle, opacity: canGoBack ? 1 : 0.3, cursor: canGoBack ? "pointer" : "default", padding: "3px" }} data-tooltip="Back (Alt+←)" onMouseEnter={(e) => { if (canGoBack) hoverIn(e); }} onMouseLeave={hoverOut}><ArrowLeft size={14} /></button>
-            <button onClick={onGoForward} disabled={!canGoForward} style={{ ...iconBtnStyle, opacity: canGoForward ? 1 : 0.3, cursor: canGoForward ? "pointer" : "default", padding: "3px" }} data-tooltip="Forward (Alt+→)" onMouseEnter={(e) => { if (canGoForward) hoverIn(e); }} onMouseLeave={hoverOut}><ArrowRight size={14} /></button>
+            <button onClick={onGoBack} disabled={!canGoBack} style={{ ...iconBtnStyle, opacity: canGoBack ? 1 : 0.3, cursor: canGoBack ? "pointer" : "default", padding: "3px" }} data-tooltip="Back" onMouseEnter={(e) => { if (canGoBack) hoverIn(e); }} onMouseLeave={hoverOut}><ArrowLeft size={14} /></button>
+            <button onClick={onGoForward} disabled={!canGoForward} style={{ ...iconBtnStyle, opacity: canGoForward ? 1 : 0.3, cursor: canGoForward ? "pointer" : "default", padding: "3px" }} data-tooltip="Forward" onMouseEnter={(e) => { if (canGoForward) hoverIn(e); }} onMouseLeave={hoverOut}><ArrowRight size={14} /></button>
           </span>
         )}
         <span style={{ flex: 1, fontSize: "0.78rem", fontFamily: "monospace", color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
