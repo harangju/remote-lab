@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { FileText, Pencil, FolderOpen, Sparkles, Archive } from "lucide-react";
-import { listConvos, createConvo, getConvo, updateConvo, type ConvoMeta } from "../api";
-import { btnIcon, colors, input as inputStyle } from "../styles";
+import { listConvos, createConvo, getConvo, updateConvo, listModels, type ConvoMeta } from "../api";
+import { btnIcon, colors, input as inputStyle, transition } from "../styles";
 import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
 import { ChatConvoRail } from "../components/ChatConvoRail";
@@ -69,6 +69,9 @@ export function Chat() {
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
   const [currentArchivedConvo, setCurrentArchivedConvo] = useState<ConvoMeta | null>(null);
   const [archivingConvoId, setArchivingConvoId] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
   const [railCollapsed, setRailCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) === "true";
@@ -83,6 +86,7 @@ export function Chat() {
     setInput,
     busy,
     meta,
+    setMeta,
     autonomousToolsEnabled,
     savingAutonomy,
     error,
@@ -250,6 +254,32 @@ export function Chat() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    listModels().then((res) => setAvailableModels(res.models)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [modelDropdownOpen]);
+
+  const handleModelChange = useCallback(async (modelId: string) => {
+    if (!convId) return;
+    setModelDropdownOpen(false);
+    setMeta((prev) => prev ? { ...prev, model: modelId } : prev);
+    try {
+      await updateConvo(convId, { model: modelId });
+    } catch (e: any) {
+      setError(e.message || "Failed to update model");
+    }
+  }, [convId, setMeta, setError]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -451,8 +481,34 @@ export function Chat() {
               <span data-tooltip={connected ? "Connected" : "Disconnected"} style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? colors.success : colors.textMuted, display: "inline-block" }} />
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
                 {isDesktop && activeModelLabel && (
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "2px 8px", borderRadius: 999, border: `1px solid ${colors.border}`, background: colors.bgSurface, color: colors.textMuted, fontSize: "0.75rem", fontWeight: 600 }} data-tooltip={activeModelLabel}>
-                    <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeModelLabel}</span>
+                  <div ref={modelDropdownRef} style={{ position: "relative", display: "inline-flex" }}>
+                    <button
+                      onClick={() => setModelDropdownOpen((v) => !v)}
+                      onMouseEnter={headerHoverIn}
+                      onMouseLeave={headerHoverOut}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "2px 8px", borderRadius: 999, border: `1px solid ${colors.border}`, background: colors.bgSurface, color: colors.textMuted, fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", transition: `background ${transition.fast}` }}
+                    >
+                      <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeModelLabel}</span>
+                    </button>
+                    {modelDropdownOpen && availableModels.length > 0 && (
+                      <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "4px 0", zIndex: 100, minWidth: 200, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+                        {availableModels.map((m) => {
+                          const label = m.includes(":") ? m.split(":").slice(1).join(":") : m;
+                          const isActive = m === rawModel;
+                          return (
+                            <button
+                              key={m}
+                              onClick={() => handleModelChange(m)}
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 12px", background: isActive ? colors.bgSurfaceHover : "transparent", border: "none", color: isActive ? colors.text : colors.textMuted, fontSize: "0.8rem", cursor: "pointer", fontWeight: isActive ? 600 : 400 }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgSurfaceHover; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? colors.bgSurfaceHover : "transparent"; }}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
                 {meta && meta.context_limit > 0 && (

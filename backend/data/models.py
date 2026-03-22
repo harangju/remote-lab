@@ -67,6 +67,7 @@ class ConvoUpdate(BaseModel):
     title: Optional[str] = None
     archived_at: Optional[str] = None
     autonomous_tools_enabled: Optional[bool] = None
+    model: Optional[str] = None
 
 
 class ConvoMeta(BaseModel):
@@ -79,6 +80,7 @@ class ConvoMeta(BaseModel):
     last_event_at: Optional[str] = None
     archived_at: Optional[str] = None
     autonomous_tools_enabled: bool = False
+    model: Optional[str] = None
 
 
 class ConvoDetail(ConvoMeta):

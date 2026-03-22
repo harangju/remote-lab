@@ -355,12 +355,13 @@ def get_conversation(convo_id: str, before: int | None = None, limit: int | None
             context_limit = event["context_limit"]
             break
     from backend.agent.agents import active_model
+    meta_data = meta.model_dump()
+    meta_data["model"] = meta.model or active_model
     return ConvoDetail(
-        **meta.model_dump(),
+        **meta_data,
         messages=window,
         context_tokens=context_tokens,
         context_limit=context_limit,
-        model=active_model,
         has_more=start > 0,
         next_before=start if start > 0 else None,
     )
@@ -418,6 +419,17 @@ def update_conversation_autonomy(convo_id: str, enabled: bool) -> ConvoMeta | No
     if meta is None:
         return None
     meta.autonomous_tools_enabled = enabled
+    meta.updated_at = _now()
+    _write_meta(meta)
+    touch_project(meta.project_id)
+    return meta
+
+
+def update_conversation_model(convo_id: str, model_id: str | None) -> ConvoMeta | None:
+    meta = _read_meta(convo_id)
+    if meta is None:
+        return None
+    meta.model = model_id
     meta.updated_at = _now()
     _write_meta(meta)
     touch_project(meta.project_id)

@@ -126,7 +126,7 @@ def create_ws_handler(
                 agent_histories[aid] = (hist, ctx_tokens)
                 return hist, ctx_tokens
 
-            _agent_cache: dict[str | None, "Agent"] = {}
+            _agent_cache: dict[tuple[str | None, str | None], "Agent"] = {}
             _UNSET = object()
             _cached_instructions: str | None | object = _UNSET
             _cached_instructions_subsequent: str | None = None
@@ -348,17 +348,25 @@ def create_ws_handler(
                         elif skill.name == "model":
                             await append_message(convo_id, user_event(prompt, message_id=message_id, server_command=True))
                             _invalidate_message_cache()
-                            from backend.agent.agents import active_model, _available, set_model
+                            from backend.agent.agents import active_model, _available
+                            convo_meta = storage._read_meta(convo_id)
+                            current_model = (convo_meta.model if convo_meta and convo_meta.model else active_model)
                             if cmd_args.strip():
-                                try:
-                                    new_model = set_model(cmd_args.strip())
+                                requested = cmd_args.strip()
+                                resolved = None
+                                for mid in _available:
+                                    if mid == requested or requested in mid:
+                                        resolved = mid
+                                        break
+                                if resolved:
+                                    storage.update_conversation_model(convo_id, resolved)
                                     _agent_cache.clear()
-                                    output = f"Switched to {new_model}"
-                                except ValueError as e:
-                                    output = str(e)
+                                    output = f"Switched to {resolved}"
+                                else:
+                                    output = f"Unknown model: {requested}. Available: {', '.join(_available)}"
                             else:
-                                output = f"Model: {active_model}"
-                                others = [m for m in _available if m != active_model]
+                                output = f"Model: {current_model}"
+                                others = [m for m in _available if m != current_model]
                                 if others:
                                     output += "\nAvailable: " + ", ".join(others)
 
@@ -501,6 +509,9 @@ def create_ws_handler(
                     _cached_instructions = await asyncio.to_thread(build_project_instructions, project_path, True)
                     _cached_instructions_subsequent = await asyncio.to_thread(build_project_instructions, project_path, False)
 
+                convo_meta_for_model = storage._read_meta(convo_id)
+                convo_model = convo_meta_for_model.model if convo_meta_for_model else None
+
                 MAX_HANDOFFS = 10
                 handoff_count = 0
                 current_targets = target_agents
@@ -551,10 +562,11 @@ def create_ws_handler(
                                             agent_prompt_local = f"[Conversation context]\n{shared_ctx}\n\n[Handoff from another agent]\n{agent_prompt_local}"
                                         else:
                                             agent_prompt_local = f"[Conversation context]\n{shared_ctx}\n\n[New message from user]\n{agent_prompt_local}"
-                                await run_context.broadcast(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color, agent_model=ac.model).model_dump_json())
+                                await run_context.broadcast(AgentStart(run_id=run_context.run_id, agent_id=ac.id, agent_name=ac.name, agent_color=ac.color, agent_model=ac.model or convo_model).model_dump_json())
 
-                            agent_instance = _agent_cache.get(ac.id if ac else None) or create_agent(ac)
-                            _agent_cache[ac.id if ac else None] = agent_instance
+                            cache_key = (ac.id if ac else None, convo_model)
+                            agent_instance = _agent_cache.get(cache_key) or create_agent(ac, model_override=convo_model)
+                            _agent_cache[cache_key] = agent_instance
 
                             agent_run = RunState(convo_id=convo_id, run_id=run_context.run_id, message_history=list(hist))
                             agent_run.subscribers.update(session.subscribers)

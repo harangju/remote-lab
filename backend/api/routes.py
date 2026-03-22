@@ -121,6 +121,8 @@ def create_api_router(*, check_token, resolve_project_file):
             meta = storage.update_conversation_archive(convo_id, body.archived_at)
         if "autonomous_tools_enabled" in payload:
             meta = storage.update_conversation_autonomy(convo_id, bool(body.autonomous_tools_enabled))
+        if "model" in payload:
+            meta = storage.update_conversation_model(convo_id, body.model)
         if not meta:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return meta

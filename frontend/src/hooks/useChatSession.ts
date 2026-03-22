@@ -442,7 +442,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   }, [convId, autonomousToolsEnabled, savingAutonomy]);
 
   return {
-    messages, streamBlocks, waitingForModel, input, setInput, busy, meta,
+    messages, streamBlocks, waitingForModel, input, setInput, busy, meta, setMeta,
     autonomousToolsEnabled, savingAutonomy, error, connected, title, setTitle,
     agents, projectFiles, skills, activeAgent, hasMoreHistory, loadingOlder,
     composerAttachments, uploadingAttachments, voiceUiActive, voiceElapsedSec,

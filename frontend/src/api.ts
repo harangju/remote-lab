@@ -21,6 +21,7 @@ export interface ConvoMeta {
   archived_at?: string | null;
   autonomous_tools_enabled?: boolean;
   last_event_at?: string;
+  model?: string | null;
 }
 
 export interface ConvoDetail extends ConvoMeta {
@@ -152,7 +153,7 @@ export function getConvo(convoId: string, opts?: { before?: number; limit?: numb
   return request(`/convos/${convoId}${query ? `?${query}` : ""}`);
 }
 
-export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null; autonomous_tools_enabled?: boolean }): Promise<ConvoMeta> {
+export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null; autonomous_tools_enabled?: boolean; model?: string | null }): Promise<ConvoMeta> {
   return request(`/convos/${convoId}`, {
     method: "PATCH",
     body: JSON.stringify(body),

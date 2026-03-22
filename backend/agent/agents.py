@@ -56,9 +56,9 @@ _PROVIDERS = [
     ("ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-6"),
     ("ANTHROPIC_API_KEY", "anthropic:claude-opus-4-6"),
     ("OPENAI_API_KEY", "openai:gpt-5.4"),
+    ("OPENAI_API_KEY", "openai:gpt-5.4-pro"),
     ("OPENAI_API_KEY", "openai:gpt-5.4-mini"),
     ("OPENAI_API_KEY", "openai:gpt-5.4-nano"),
-    ("OPENAI_API_KEY", "openai:gpt-5-nano"),
     ("GOOGLE_API_KEY", "google-gla:gemini-2.5-flash"),
 ]
 _available = [model_id for env_var, model_id in _PROVIDERS if os.environ.get(env_var)]
@@ -97,17 +97,25 @@ def set_model(model_id: str) -> str:
     return resolved
 
 
-def create_agent(config: "AgentConfig | None" = None) -> Agent:
+def create_agent(config: "AgentConfig | None" = None, *, model_override: str | None = None) -> Agent:
     """Create a PydanticAI Agent from an AgentConfig.
 
-    If config is None, returns the default global agent.
+    If config is None, returns the default global agent (with model_override applied if given).
+    model_override takes effect when the agent config doesn't specify its own model.
     """
-    if config is None:
+    if config is None and not model_override:
         return agent
 
     from backend.agent.agent_config import AgentConfig  # noqa: F811
 
-    agent_model = config.model if config.model else model
+    if config is None:
+        # Default agent with conversation-level model override
+        new_agent = Agent(model=model_override, system_prompt=SYSTEM_PROMPT, output_type=[str, DeferredToolRequests])
+        tools.register(new_agent)
+        return new_agent
+
+    # Agent config model wins over conversation override, which wins over global
+    agent_model = config.model if config.model else (model_override or model)
     prompt = SYSTEM_PROMPT
     if config.system_prompt:
         prompt = prompt + "\n\n" + config.system_prompt
