@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from backend.agent.skills import get_skills, SkillType, GLOBAL_SKILLS_DIR
+from backend.agent.skills import get_skills, SkillType
 
 _EXCLUDED_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".env",
@@ -83,43 +83,23 @@ def build_project_instructions(project_path: Path, is_first_turn: bool) -> str |
 
     skill_lines: list[str] = []
     if prompt_skills:
-        prompt_list = ", ".join(f"`/{s.name}`" for s in prompt_skills)
-        skill_catalog = "\n".join(
-            f"- `{s.name}` — {s.description}" + (f" (`{s.location}`)" if s.location else "")
-            for s in prompt_skills
-        )
-        skill_lines.append(
-            f"Filesystem agent skills are available under `{GLOBAL_SKILLS_DIR.relative_to(Path(__file__).parent.parent).as_posix()}/` globally and `.agent/skills/` per project. "
-            f"Available packaged skills here include: {prompt_list}. These are normal on-disk agent skills with `SKILL.md` files and companion resources."
-        )
-        skill_lines.append(
-            "When a task matches a skill's description, use the `activate_skill` tool to load its full instructions before proceeding. "
-            "When a skill references relative paths, resolve them against the skill directory reported by that tool."
-        )
-        skill_lines.append(
-            "If the user types a slash form like `/docx`, `/pdf`, `/xlsx`, or `/pptx`, treat that as an explicit request to activate the corresponding skill. Those slash forms are user-facing activation syntax handled by the harness; they are not expected to appear in your callable tool list. Your job is to use `activate_skill` for the matching skill."
-        )
-        skill_lines.append(f"Available skills:\n{skill_catalog}")
+        # One-line list only — full instructions loaded via activate_skill
+        skill_lines.append(f"Available skills (use `activate_skill` to load): {', '.join(f'`/{s.name}`' for s in prompt_skills)}.")
     if server_skills:
         server_list = ", ".join(f"`/{name}`" for name in server_skills)
-        skill_lines.append(f"Actual server-side chat commands available here: {server_list}.")
+        skill_lines.append(f"Server commands: {server_list}.")
 
     context_intro = [f"# Project Context\n\nWorking directory: {project_path}"]
     if skill_lines:
         context_intro.append(" ".join(skill_lines))
-    context_intro.append(
-        "Use `/share <path> [token]` to publish a project markdown or HTML file into the app's public web directory and return a tokenized link. "
-        "Use `/shares` to list shared files and links. "
-        "Use `/unshare <path-or-slug>` to remove its access token requirement."
-    )
 
     sections.append("\n\n".join(context_intro))
 
-    instructions = read_instructions(project_path)
-    if instructions:
-        sections.append(f"## Project Instructions\n\n{instructions}")
-
     if is_first_turn:
+        instructions = read_instructions(project_path)
+        if instructions:
+            sections.append(f"## Project Instructions\n\n{instructions}")
+
         tree = get_directory_tree(project_path)
         if tree:
             sections.append(f"## Project Structure\n\n```\n{tree}\n```")
