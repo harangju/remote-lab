@@ -179,7 +179,7 @@ export function useChatSession(projectId?: string, convId?: string) {
     if (!projectId || mentionRefreshInFlightRef.current) return;
     mentionRefreshInFlightRef.current = true;
     try {
-      const res = await listFiles(projectId);
+      const res = await listFiles(projectId, { hidden: true });
       setProjectFiles(res.files);
     } catch {}
     finally {
@@ -236,7 +236,7 @@ export function useChatSession(projectId?: string, convId?: string) {
 
   useEffect(() => {
     if (!projectId) return;
-    listFiles(projectId).then((res) => setProjectFiles(res.files)).catch(() => setProjectFiles([]));
+    listFiles(projectId, { hidden: true }).then((res) => setProjectFiles(res.files)).catch(() => setProjectFiles([]));
     listSkills(projectId).then(setSkills).catch(() => setSkills([]));
   }, [projectId]);
 
