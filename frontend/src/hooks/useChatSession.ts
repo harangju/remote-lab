@@ -56,6 +56,8 @@ export function useChatSession(projectId?: string, convId?: string) {
   const initialScrollDoneRef = useRef(false);
   const prependScrollRestoreRef = useRef<number | null>(null);
 
+  const savedScrollKeyRef = useRef<string | null>(null);
+
   const getUserMessageTopOffset = useCallback(() => getUserMessageTopOffsetPx(window.innerHeight), []);
 
   const bottomSlackPx = useMemo(() => {
@@ -141,12 +143,30 @@ export function useChatSession(projectId?: string, convId?: string) {
     pendingScrollMessageIdRef.current = null;
   }, [messages, scrollUserMessageNearTop]);
 
+  // Persist scroll position to sessionStorage so browser refresh restores it
+  useEffect(() => {
+    if (!convId) return;
+    const key = `remote-lab:scroll:${convId}`;
+    savedScrollKeyRef.current = key;
+    const saveScroll = () => {
+      const container = messageListRef.current;
+      if (container) sessionStorage.setItem(key, String(container.scrollTop));
+    };
+    window.addEventListener("beforeunload", saveScroll);
+    return () => window.removeEventListener("beforeunload", saveScroll);
+  }, [convId]);
+
   useLayoutEffect(() => {
     if (initialScrollDoneRef.current || messages.length === 0 || messageListRef.current == null) return;
     requestAnimationFrame(() => {
       const container = messageListRef.current;
       if (!container) return;
-      if (latestUserMessageRef.current) {
+      const key = savedScrollKeyRef.current;
+      const saved = key ? sessionStorage.getItem(key) : null;
+      if (saved != null) {
+        container.scrollTop = Number(saved);
+        sessionStorage.removeItem(key);
+      } else if (latestUserMessageRef.current) {
         scrollUserMessageNearTop(latestUserMessageRef.current, "auto");
       } else {
         container.scrollTop = container.scrollHeight;
