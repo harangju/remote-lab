@@ -306,6 +306,16 @@ export function Chat() {
         e.preventDefault();
         void handleNewConversation();
       }
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && key === "arrowleft") {
+        e.preventDefault();
+        const path = panel.goBack();
+        if (path) syncFileQuery(path, true);
+      }
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && key === "arrowright") {
+        e.preventDefault();
+        const path = panel.goForward();
+        if (path) syncFileQuery(path, true);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -604,7 +614,7 @@ export function Chat() {
           >
             <div style={{ position: "absolute", top: 0, bottom: 0, left: `calc(50% - ${PANEL_RESIZE_VISIBLE_WIDTH / 2}px)`, width: `${PANEL_RESIZE_VISIBLE_WIDTH}px`, borderRadius: 999, background: panelResizeActive ? `color-mix(in srgb, ${colors.accent} 55%, ${colors.border})` : colors.border, opacity: panelResizeActive ? 1 : 0.45, boxShadow: panelResizeActive ? `0 0 0 1px color-mix(in srgb, ${colors.accent} 22%, transparent)` : "none" }} />
           </div>
-          <div className="artifact-panel-wrap" style={{ width: `${panelWidth}px`, flexShrink: 0, height: "calc(var(--vh, 1vh) * 100)", overflow: "hidden", pointerEvents: panelResizeActive ? "none" : undefined }}>
+          <div className="artifact-panel-wrap" style={{ width: `${panelWidth}px`, flexShrink: 0, height: "calc(var(--vh, 1vh) * 100)", overflow: "visible", pointerEvents: panelResizeActive ? "none" : undefined }}>
             <FilePanel
               file={panel.file}
               editMode={panel.editMode}
@@ -620,12 +630,16 @@ export function Chat() {
               onReload={panel.reloadFile}
               onDismissExternal={panel.dismissExternalChange}
               onOpenFileFinder={panel.toggleFileFinder}
+              canGoBack={panel.canGoBack}
+              canGoForward={panel.canGoForward}
+              onGoBack={() => { const p = panel.goBack(); if (p) syncFileQuery(p, true); }}
+              onGoForward={() => { const p = panel.goForward(); if (p) syncFileQuery(p, true); }}
             />
           </div>
         </>
       )}
 
-      {panel.showFileFinder && <FileFinder files={panel.fileList || []} loading={panel.fileListLoading} touchedFiles={touchedFiles} onSelect={handleOpenFile} onClose={panel.toggleFileFinder} />}
+      {panel.showFileFinder && <FileFinder files={panel.fileList || []} loading={panel.fileListLoading} touchedFiles={touchedFiles} recentlyViewed={panel.recentlyViewed} onSelect={handleOpenFile} onClose={panel.toggleFileFinder} />}
     </div>
   );
 }

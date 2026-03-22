@@ -22,6 +22,23 @@ export function ProjectFile() {
     openFromQuery();
   }, [openFromQuery]);
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        const p = panel.goBack();
+        if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true });
+      }
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        const p = panel.goForward();
+        if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [panel.goBack, panel.goForward, navigate, projectId]);
+
   const handleClose = useCallback(() => {
     if (panel.dirty) {
       if (!window.confirm("You have unsaved changes. Discard?")) return;
@@ -136,6 +153,10 @@ export function ProjectFile() {
             onReload={panel.reloadFile}
             onDismissExternal={panel.dismissExternalChange}
             onOpenFileFinder={panel.toggleFileFinder}
+            canGoBack={panel.canGoBack}
+            canGoForward={panel.canGoForward}
+            onGoBack={() => { const p = panel.goBack(); if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true }); }}
+            onGoForward={() => { const p = panel.goForward(); if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true }); }}
             onStartConversation={() => { void handleStartConversation(); }}
             conversationDisabled={!panel.file}
             conversationOptions={conversationOptions.map((convo) => ({ id: convo.id, title: convo.title, updated_at: convo.last_event_at || convo.updated_at }))}
@@ -155,6 +176,7 @@ export function ProjectFile() {
           files={panel.fileList || []}
           loading={panel.fileListLoading}
           touchedFiles={[]}
+          recentlyViewed={panel.recentlyViewed}
           onSelect={handleOpenFile}
           onClose={panel.toggleFileFinder}
         />

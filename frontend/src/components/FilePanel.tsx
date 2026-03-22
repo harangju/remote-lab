@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download, FileText } from "lucide-react";
+import { X, Pencil, Save, RotateCcw, Copy, Check, FolderOpen, MessageSquare, Clock3, Download, FileText, ArrowLeft, ArrowRight } from "lucide-react";
 import type { PanelFile } from "../hooks/usePanel";
 import { getToken } from "../api";
 import { btnIcon, colors, interactiveRow, overlayHeader, overlayPanel, radius, shadow } from "../styles";
@@ -31,6 +31,10 @@ interface FilePanelProps {
   onReload: () => Promise<string | null>;
   onDismissExternal: () => void;
   onOpenFileFinder?: () => void;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
   onStartConversation?: () => void;
   conversationDisabled?: boolean;
   conversationOptions?: FileConversationOption[];
@@ -145,7 +149,9 @@ function isHtml(path: string): boolean {
 export function FilePanel({
   file, editMode, dirty, saving, saveError, externalChange,
   onToggleEdit, onContentChange, onSave, onCancel, onClose,
-  onReload, onDismissExternal, onOpenFileFinder, onStartConversation, conversationDisabled,
+  onReload, onDismissExternal, onOpenFileFinder,
+  canGoBack, canGoForward, onGoBack, onGoForward,
+  onStartConversation, conversationDisabled,
   conversationOptions = [], conversationOptionsLabel = "Recent conversations using this file", conversationModal = false, onOpenConversationOption,
 }: FilePanelProps) {
   const editorRef = useRef<CodeMirrorEditorHandle | null>(null);
@@ -294,6 +300,12 @@ export function FilePanel({
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: colors.bg, borderLeft: `1px solid ${colors.border}` }}>
       <style>{filePanelScrollStyle}{docxPreviewStyle}</style>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderBottom: `1px solid ${colors.border}`, flexShrink: 0, minHeight: "40px", position: "relative", zIndex: 2, overflow: "visible" }}>
+        {(onGoBack || onGoForward) && (
+          <span style={{ display: "inline-flex", gap: "2px", flexShrink: 0 }}>
+            <button onClick={onGoBack} disabled={!canGoBack} style={{ ...iconBtnStyle, opacity: canGoBack ? 1 : 0.3, cursor: canGoBack ? "pointer" : "default", padding: "3px" }} data-tooltip="Back (Alt+←)" onMouseEnter={(e) => { if (canGoBack) hoverIn(e); }} onMouseLeave={hoverOut}><ArrowLeft size={14} /></button>
+            <button onClick={onGoForward} disabled={!canGoForward} style={{ ...iconBtnStyle, opacity: canGoForward ? 1 : 0.3, cursor: canGoForward ? "pointer" : "default", padding: "3px" }} data-tooltip="Forward (Alt+→)" onMouseEnter={(e) => { if (canGoForward) hoverIn(e); }} onMouseLeave={hoverOut}><ArrowRight size={14} /></button>
+          </span>
+        )}
         <span style={{ flex: 1, fontSize: "0.78rem", fontFamily: "monospace", color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
           <bdi>{file.path}</bdi>
         </span>

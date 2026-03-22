@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Search, X, FileText, Folder, ChevronRight, ChevronDown, CornerDownLeft } from "lucide-react";
+import { Search, X, FileText, Folder, ChevronRight, ChevronDown, CornerDownLeft, Clock3 } from "lucide-react";
 import { colors, overlayBackdrop, overlayHeader, overlayPanel, interactiveRow } from "../styles";
 
 interface FileFinderProps {
   files: string[];
   loading: boolean;
   touchedFiles: string[];
+  recentlyViewed?: string[];
   onSelect: (path: string) => void;
   onClose: () => void;
 }
@@ -94,7 +95,7 @@ function defaultExpandedDirs(): Set<string> {
   return new Set<string>();
 }
 
-export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: FileFinderProps) {
+export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], onSelect, onClose }: FileFinderProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => defaultExpandedDirs());
@@ -238,6 +239,31 @@ export function FileFinder({ files, loading, touchedFiles, onSelect, onClose }: 
 
         <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
           {loading && <div style={{ padding: "20px", textAlign: "center", color: colors.textMuted, fontSize: "0.8rem" }}>Loading files...</div>}
+          {!loading && !query && recentlyViewed.length > 0 && (
+            <>
+              <div style={{ padding: "6px 14px 4px", fontSize: "0.7rem", color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recently viewed</div>
+              {recentlyViewed.map((path) => {
+                const name = path.split("/").pop() || path;
+                const dir = path.split("/").slice(0, -1).join("/");
+                return (
+                  <button
+                    key={`recent:${path}`}
+                    onClick={() => { onSelect(path); onClose(); }}
+                    style={{ ...interactiveRow(false), padding: "7px 14px", fontFamily: "monospace" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgSurface; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <Clock3 size={14} style={{ flexShrink: 0, color: colors.textMuted }} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ fontWeight: 500 }}>{name}</span>
+                      {dir && <span style={{ color: colors.textMuted, marginLeft: "6px" }}>{dir}/</span>}
+                    </span>
+                  </button>
+                );
+              })}
+              <div style={{ borderBottom: `1px solid ${colors.border}`, margin: "4px 0" }} />
+            </>
+          )}
           {!loading && visibleRows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: colors.textMuted, fontSize: "0.8rem" }}>{query ? "No files match" : "No files found"}</div>}
           {!loading && visibleRows.map((row, i) => {
             const isSelected = i === selectedIndex;

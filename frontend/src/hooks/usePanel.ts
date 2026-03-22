@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { readFile, writeFile, listFiles } from "../api";
 
 class FileSaveConflictError extends Error {
@@ -26,6 +26,9 @@ export interface PanelState {
   fileList: string[] | null;
   fileListLoading: boolean;
   showHiddenFiles: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  recentlyViewed: string[];
 }
 
 export interface PanelActions {
@@ -42,6 +45,8 @@ export interface PanelActions {
   dismissExternalChange: () => void;
   upsertFileInList: (path: string) => void;
   forceClose: () => void;
+  goBack: () => string | null;
+  goForward: () => string | null;
 }
 
 export function langFromPath(path: string): string {
@@ -78,6 +83,10 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const fileRef = useRef<PanelFile | null>(null);
   const dirtyRef = useRef(false);
   const openRequestIdRef = useRef(0);
+  const historyRef = useRef<string[]>([]);
+  const historyIndexRef = useRef(-1);
+  const navigatingRef = useRef(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   useEffect(() => {
     fileRef.current = file;
@@ -118,6 +127,21 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const openFile = useCallback((path: string) => {
     if (!projectId) return;
     const requestId = ++openRequestIdRef.current;
+
+    // Push to history unless we're navigating via back/forward
+    if (!navigatingRef.current) {
+      const hist = historyRef.current;
+      const idx = historyIndexRef.current;
+      // Trim any forward history
+      historyRef.current = hist.slice(0, idx + 1);
+      // Don't push duplicates
+      if (historyRef.current[historyRef.current.length - 1] !== path) {
+        historyRef.current.push(path);
+      }
+      historyIndexRef.current = historyRef.current.length - 1;
+      setHistoryVersion((v) => v + 1);
+    }
+    navigatingRef.current = false;
 
     if (isPreviewOnlyPath(path)) {
       setFile({ projectId, path, content: "", language: langFromPath(path) });
@@ -314,12 +338,52 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     setExternalChange(false);
   }, []);
 
+  const canGoBack = historyIndexRef.current > 0;
+  const canGoForward = historyIndexRef.current < historyRef.current.length - 1;
+
+  // Deduplicated, most-recent-first (stable — only changes when history grows)
+  const recentlyViewed = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (let i = historyRef.current.length - 1; i >= 0; i--) {
+      const p = historyRef.current[i];
+      if (seen.has(p)) continue;
+      seen.add(p);
+      result.push(p);
+      if (result.length >= 10) break;
+    }
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyVersion]);
+
+  const goBack = useCallback((): string | null => {
+    if (historyIndexRef.current <= 0) return null;
+    navigatingRef.current = true;
+    historyIndexRef.current--;
+    setHistoryVersion((v) => v + 1);
+    const path = historyRef.current[historyIndexRef.current];
+    openFile(path);
+    return path;
+  }, [openFile]);
+
+  const goForward = useCallback((): string | null => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return null;
+    navigatingRef.current = true;
+    historyIndexRef.current++;
+    setHistoryVersion((v) => v + 1);
+    const path = historyRef.current[historyIndexRef.current];
+    openFile(path);
+    return path;
+  }, [openFile]);
+
   return {
     file, editMode, dirty, saving, saveError, externalChange,
     showFileFinder, fileList, fileListLoading, showHiddenFiles: false,
+    canGoBack, canGoForward, recentlyViewed,
     openFile, closePanel, setEditMode, updateContent,
     saveFile, cancelEdit, toggleFileFinder,
     setShowHiddenFiles: () => {},
     applyExternalChange, reloadFile, dismissExternalChange, upsertFileInList, forceClose,
+    goBack, goForward,
   };
 }
