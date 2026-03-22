@@ -24,6 +24,8 @@ interface CodeMirrorEditorProps {
 export interface CodeMirrorEditorHandle {
   getValue: () => string;
   replaceContent: (value: string, options?: { addToHistory?: boolean }) => void;
+  getScrollTop: () => number;
+  setScrollTop: (pos: number) => void;
 }
 
 const langExtensions: Record<string, () => ReturnType<typeof javascript>> = {
@@ -106,6 +108,11 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
         annotations,
         userEvent: options?.addToHistory === false ? "input.external" : "input",
       });
+    },
+    getScrollTop: () => viewRef.current?.scrollDOM.scrollTop ?? 0,
+    setScrollTop: (pos: number) => {
+      const view = viewRef.current;
+      if (view) view.scrollDOM.scrollTop = pos;
     },
   }), []);
 

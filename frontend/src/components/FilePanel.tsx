@@ -164,6 +164,30 @@ export function FilePanel({
   const [previewVersion, setPreviewVersion] = useState(0);
   const previewHashRef = useRef("");
   const conversationMenuRef = useRef<HTMLDivElement | null>(null);
+  const prevPathRef = useRef(file.path);
+  const scrollCacheRef = useRef<Map<string, number>>(new Map());
+  const previewHashCacheRef = useRef<Map<string, string>>(new Map());
+
+  // Detect file switch during render so refs are correct before JSX evaluation
+  const switchedRef = useRef(false);
+  if (file.path !== prevPathRef.current) {
+    // Save scroll/hash state of the file we're leaving
+    if (editorRef.current) {
+      scrollCacheRef.current.set(prevPathRef.current, editorRef.current.getScrollTop());
+    }
+    try {
+      const iframe = document.querySelector(`iframe[title="${CSS.escape(prevPathRef.current)}"]`) as HTMLIFrameElement | null;
+      const hash = iframe?.contentWindow?.location?.hash;
+      if (hash) previewHashCacheRef.current.set(prevPathRef.current, hash);
+    } catch { /* cross-origin */ }
+
+    // Restore cached preview hash for the incoming file
+    previewHashRef.current = previewHashCacheRef.current.get(file.path) || "";
+    prevPathRef.current = file.path;
+    switchedRef.current = true;
+  } else {
+    switchedRef.current = false;
+  }
 
   const hasConversationChoices = !!onStartConversation || (conversationOptions.length > 0 && !!onOpenConversationOption);
   const visibleConversationOptions = useMemo(() => conversationOptions.slice(0, 4), [conversationOptions]);
@@ -266,6 +290,15 @@ export function FilePanel({
 
   useEffect(() => {
     editorRef.current?.replaceContent(file.content, { addToHistory: false });
+
+    if (switchedRef.current) {
+      const saved = scrollCacheRef.current.get(file.path);
+      if (saved !== undefined) {
+        requestAnimationFrame(() => {
+          editorRef.current?.setScrollTop(saved);
+        });
+      }
+    }
   }, [file.path, file.content]);
 
   const download = async () => {
