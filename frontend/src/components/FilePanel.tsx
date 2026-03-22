@@ -353,6 +353,22 @@ export function FilePanel({
     }
   }, [file.path, file.content, editorReady]);
 
+  // Global keyboard shortcut: Cmd+. to start editing
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "g" && !editMode && !previewFile) {
+        e.preventDefault();
+        onToggleEdit();
+      }
+      if (e.key === "Escape" && editMode) {
+        e.preventDefault();
+        onToggleEdit();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editMode, previewFile, onToggleEdit]);
+
   const download = async () => {
     const token = getToken();
     if (!token) {
@@ -412,10 +428,10 @@ export function FilePanel({
         ) : editMode ? (
           <>
             <button onClick={handleSave} disabled={saving || !dirty} style={{ ...iconBtnActiveStyle, opacity: (saving || !dirty) ? 0.5 : 1, cursor: (saving || !dirty) ? "default" : "pointer" }} data-tooltip={saving ? "Saving..." : "Save (⌘S)"}><Save size={15} /></button>
-            <button onClick={handleCancel} style={iconBtnDangerStyle} data-tooltip="Cancel edit"><X size={16} /></button>
+            <button onClick={handleCancel} style={iconBtnDangerStyle} data-tooltip="Cancel edit (Esc)"><X size={16} /></button>
           </>
         ) : (
-          <button onClick={onToggleEdit} style={iconBtnStyle} data-tooltip="Edit file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><Pencil size={15} /></button>
+          <button onClick={onToggleEdit} style={iconBtnStyle} data-tooltip="Edit file (⌘G)" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><Pencil size={15} /></button>
         )}
 
         {onOpenFileFinder && <button onClick={onOpenFileFinder} style={iconBtnStyle} data-tooltip="Open file (⌘P)" onMouseEnter={hoverIn} onMouseLeave={hoverOut}><FolderOpen size={15} /></button>}
