@@ -162,6 +162,7 @@ export function FilePanel({
   const [docxLoading, setDocxLoading] = useState(false);
   const [docxError, setDocxError] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
+  const previewHashRef = useRef("");
   const conversationMenuRef = useRef<HTMLDivElement | null>(null);
 
   const hasConversationChoices = !!onStartConversation || (conversationOptions.length > 0 && !!onOpenConversationOption);
@@ -171,7 +172,7 @@ export function FilePanel({
   const htmlFile = isHtml(file.path);
   const previewFile = docxFile || pdfFile || htmlFile;
   const embedToken = getToken();
-  const embedPreviewUrl = previewFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}&v=${previewVersion}` : null;
+  const embedPreviewUrl = previewFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}&v=${previewVersion}${previewHashRef.current}` : null;
 
   useEffect(() => {
     if (!showConversationMenu) return;
@@ -250,12 +251,18 @@ export function FilePanel({
     const content = await onReload();
     if (content !== null) {
       if (previewFile) {
+        try {
+          const iframe = document.querySelector(`iframe[title="${CSS.escape(file.path)}"]`) as HTMLIFrameElement | null;
+          previewHashRef.current = iframe?.contentWindow?.location?.hash || "";
+        } catch {
+          previewHashRef.current = "";
+        }
         setPreviewVersion((v) => v + 1);
         return;
       }
       editorRef.current?.replaceContent(content, { addToHistory: false });
     }
-  }, [onReload, previewFile]);
+  }, [onReload, previewFile, file.path]);
 
   useEffect(() => {
     editorRef.current?.replaceContent(file.content, { addToHistory: false });
