@@ -45,6 +45,43 @@ const iconBtnActiveStyle: React.CSSProperties = { ...btnIcon, background: colors
 const iconBtnDangerStyle: React.CSSProperties = { ...btnIcon, background: "transparent", border: `1px solid color-mix(in srgb, ${colors.textMuted} 55%, ${colors.border})`, color: colors.textMuted, cursor: "pointer" };
 const conversationPopoverStyle: React.CSSProperties = { ...overlayPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(360px, 82vw)", maxHeight: "min(420px, 60vh)", boxShadow: shadow.overlay, zIndex: 20 };
 
+const filePanelScrollStyle = `
+  .file-panel-scroll,
+  .file-panel-scroll .cm-scroller {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.3s;
+  }
+  .file-panel-scroll:hover,
+  .file-panel-scroll .cm-scroller:hover,
+  .file-panel-scroll:active,
+  .file-panel-scroll .cm-scroller:active {
+    scrollbar-color: rgba(128,128,128,0.45) transparent;
+  }
+  .file-panel-scroll::-webkit-scrollbar,
+  .file-panel-scroll .cm-scroller::-webkit-scrollbar {
+    display: block;
+    width: 6px;
+    height: 6px;
+  }
+  .file-panel-scroll::-webkit-scrollbar-track,
+  .file-panel-scroll .cm-scroller::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .file-panel-scroll::-webkit-scrollbar-thumb,
+  .file-panel-scroll .cm-scroller::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.3s;
+  }
+  .file-panel-scroll:hover::-webkit-scrollbar-thumb,
+  .file-panel-scroll .cm-scroller:hover::-webkit-scrollbar-thumb,
+  .file-panel-scroll:active::-webkit-scrollbar-thumb,
+  .file-panel-scroll .cm-scroller:active::-webkit-scrollbar-thumb {
+    background: rgba(128,128,128,0.45);
+  }
+`;
+
 const docxPreviewStyle = `
   .docx-preview {
     max-width: 860px;
@@ -255,7 +292,7 @@ export function FilePanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: colors.bg, borderLeft: `1px solid ${colors.border}` }}>
-      <style>{docxPreviewStyle}</style>
+      <style>{filePanelScrollStyle}{docxPreviewStyle}</style>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderBottom: `1px solid ${colors.border}`, flexShrink: 0, minHeight: "40px", position: "relative", zIndex: 2, overflow: "visible" }}>
         <span style={{ flex: 1, fontSize: "0.78rem", fontFamily: "monospace", color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
           <bdi>{file.path}</bdi>
@@ -326,7 +363,7 @@ export function FilePanel({
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: "hidden" }}>
+      <div className="file-panel-scroll" style={{ flex: 1, overflow: "hidden" }}>
         {docxFile ? (
           <div style={{ height: "100%", overflowY: "auto", background: colors.bg }}>
             {docxLoading ? (
