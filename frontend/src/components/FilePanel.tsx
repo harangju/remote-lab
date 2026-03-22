@@ -272,19 +272,29 @@ export function FilePanel({
   }, [onCancel]);
 
   const handleReload = useCallback(async () => {
+    // Capture scroll/hash state before reload
+    const scrollTop = editorRef.current?.getScrollTop() ?? 0;
+    let iframeHash = "";
+    if (previewFile) {
+      try {
+        const iframe = document.querySelector(`iframe[title="${CSS.escape(file.path)}"]`) as HTMLIFrameElement | null;
+        iframeHash = iframe?.contentWindow?.location?.hash || "";
+      } catch {
+        iframeHash = "";
+      }
+    }
+
     const content = await onReload();
     if (content !== null) {
       if (previewFile) {
-        try {
-          const iframe = document.querySelector(`iframe[title="${CSS.escape(file.path)}"]`) as HTMLIFrameElement | null;
-          previewHashRef.current = iframe?.contentWindow?.location?.hash || "";
-        } catch {
-          previewHashRef.current = "";
-        }
+        previewHashRef.current = iframeHash;
         setPreviewVersion((v) => v + 1);
         return;
       }
       editorRef.current?.replaceContent(content, { addToHistory: false });
+      requestAnimationFrame(() => {
+        editorRef.current?.setScrollTop(scrollTop);
+      });
     }
   }, [onReload, previewFile, file.path]);
 
