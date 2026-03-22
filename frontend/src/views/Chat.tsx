@@ -125,6 +125,8 @@ export function Chat() {
     setError,
   } = useChatSession(projectId, convId);
 
+  const stableLoadOlderHistory = useCallback(() => { void loadOlderHistory(); }, [loadOlderHistory]);
+
   const syncFileQuery = useCallback((path: string | null, replace = false) => {
     if (!projectId || !convId) return;
     navigate(path ? `/${projectId}/${convId}?path=${encodeURIComponent(path)}` : `/${projectId}/${convId}`, { replace });
@@ -345,7 +347,7 @@ export function Chat() {
         }));
         if (cancelled) return;
         const activeConvos = normalized.filter((convo) => !convo.archived_at);
-        setProjectConvos(activeConvos);
+        setProjectConvos((prev) => JSON.stringify(prev) === JSON.stringify(activeConvos) ? prev : activeConvos);
 
         if (convId) {
           const activeCurrent = activeConvos.find((convo) => convo.id === convId) || null;
@@ -587,7 +589,7 @@ export function Chat() {
           pendingScrollMessageIdRef={pendingScrollMessageIdRef}
           lastSentMessageRef={lastSentMessageRef}
           latestUserMessageRef={latestUserMessageRef}
-          onLoadOlderHistory={() => { void loadOlderHistory(); }}
+          onLoadOlderHistory={stableLoadOlderHistory}
           onOpenFile={handleOpenFile}
           onToolApproval={handleToolApproval}
           resend={resend}

@@ -32,7 +32,7 @@ interface ChatMessagesProps {
   resend: (text: string) => void;
 }
 
-export function ChatMessages({
+export const ChatMessages = React.memo(function ChatMessages({
   projectId,
   messages,
   streamBlocks,
@@ -250,4 +250,4 @@ export function ChatMessages({
       </div>
     </div>
   );
-}
+});
