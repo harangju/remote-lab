@@ -472,7 +472,9 @@ def create_ws_handler(
                     if not str(target).startswith(str(project_path.resolve())) or not target.is_file():
                         continue
                     kind = attachment.get("kind", "file")
-                    if kind != "image":
+                    if kind == "image":
+                        non_image_attachment_lines.append(f"[Attached image: {rel_path}]")
+                    else:
                         non_image_attachment_lines.append(f"[Attached {kind}: {rel_path}]")
                 if file_refs or non_image_attachment_lines:
                     file_context_parts: list[str] = []

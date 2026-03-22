@@ -3,6 +3,7 @@ import { FileText, Pencil, RotateCw, Copy, Check } from "lucide-react";
 import { input as inputStyle, btnPrimary } from "./styles";
 import { MdContent, ToolChip } from "./chatUi";
 import type { Attachment } from "./api";
+import { getToken } from "./api";
 import type { ApprovalScope, DisplayMessage, StreamBlock } from "./chatState";
 import { buildLiveMessageRows } from "./chatMessagesState";
 
@@ -159,7 +160,7 @@ export const ChatMessages = React.memo(function ChatMessages({
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: b.content ? "8px" : 0 }}>
                         {m.attachments.map((attachment: Attachment) => attachment.kind === "image" ? (
                           <button key={attachment.path} onClick={() => onOpenFile(attachment.path)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
-                            <img src={`/api/projects/${projectId}/file/raw?path=${encodeURIComponent(attachment.path)}`} alt={attachment.name} style={{ maxWidth: 180, maxHeight: 140, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover", display: "block" }} />
+                            <img src={`/api/projects/${projectId}/file/raw?path=${encodeURIComponent(attachment.path)}&token=${encodeURIComponent(getToken() ?? "")}`} alt={attachment.name} style={{ maxWidth: 180, maxHeight: 140, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover", display: "block" }} />
                           </button>
                         ) : (
                           <button key={attachment.path} onClick={() => onOpenFile(attachment.path)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 8px", cursor: "pointer", color: "var(--text)", fontSize: "0.78rem" }}>

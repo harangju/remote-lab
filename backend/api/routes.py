@@ -182,11 +182,8 @@ def create_api_router(*, check_token, resolve_project_file):
         skills = get_skills(project_path if project_path.is_dir() else None)
         return [s.model_dump() for s in skills]
 
-    @api.get("/projects/{project_id}/file/raw")
-    async def api_read_file_raw(project_id: str, path: str):
-        _, target = resolve_project_file(project_id, path)
-        media_type, _ = mimetypes.guess_type(str(target))
-        return Response(target.read_bytes(), media_type=media_type or "application/octet-stream")
+    # NOTE: /file/raw lives on the embed router (no global Bearer dep)
+    # so that <img> tags can authenticate via query-string token.
 
     @api.get("/projects/{project_id}/file")
     async def api_read_file(project_id: str, path: str):
@@ -292,8 +289,24 @@ def create_api_router(*, check_token, resolve_project_file):
                 break
         return {"root": proj.path, "files": sorted(files)}
 
-    # Embed route on a separate router (no Bearer auth — uses query-string token for iframe access)
+    # Separate router with no global Bearer dep — authenticates via query-string or Bearer token
     embed = APIRouter(prefix="/api")
+
+    async def _check_any_auth(request: Request, token: str | None = None) -> None:
+        """Accept either a query-string token or a Bearer header."""
+        if token and check_token(token):
+            return
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer ") and check_token(auth[7:]):
+            return
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    @embed.get("/projects/{project_id}/file/raw")
+    async def api_read_file_raw(request: Request, project_id: str, path: str, token: str | None = None):
+        await _check_any_auth(request, token)
+        _, target = resolve_project_file(project_id, path)
+        media_type, _ = mimetypes.guess_type(str(target))
+        return Response(target.read_bytes(), media_type=media_type or "application/octet-stream")
 
     @embed.get("/projects/{project_id}/file/embed")
     async def api_read_file_embed(project_id: str, path: str, token: str):
