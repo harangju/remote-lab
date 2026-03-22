@@ -197,6 +197,7 @@ export function FilePanel({
   const prevPathRef = useRef(file.path);
   const scrollCacheRef = useRef(initialCache.scrolls);
   const previewHashCacheRef = useRef(initialCache.hashes);
+  const restoredPathRef = useRef<string | null>(null);
 
   // Detect file switch during render — runs before DOM commit,
   // so we can still read the old file's position from the live DOM
@@ -212,6 +213,7 @@ export function FilePanel({
 
     previewHashRef.current = previewHashCacheRef.current.get(file.path) || "";
     prevPathRef.current = file.path;
+    restoredPathRef.current = null;
   }
 
   // Persist caches to localStorage on beforeunload (browser refresh / tab close)
@@ -339,7 +341,6 @@ export function FilePanel({
     }
   }, [onReload, previewFile, file.path]);
 
-  const restoredPathRef = useRef<string | null>(null);
   useEffect(() => {
     editorRef.current?.replaceContent(file.content, { addToHistory: false });
 
