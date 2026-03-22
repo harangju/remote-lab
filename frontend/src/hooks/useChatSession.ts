@@ -246,6 +246,8 @@ export function useChatSession(projectId?: string, convId?: string) {
       setWaitingForModel(false);
       setCurrentRunId(null);
       setBusy(false);
+      blocksRef.current = [];
+      setStreamBlocks([]);
     };
     const ws = connectWs(convId);
     wsRef.current = ws;
