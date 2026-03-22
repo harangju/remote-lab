@@ -83,10 +83,40 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const fileRef = useRef<PanelFile | null>(null);
   const dirtyRef = useRef(false);
   const openRequestIdRef = useRef(0);
-  const historyRef = useRef<string[]>([]);
-  const historyIndexRef = useRef(-1);
+  const storageKey = projectId ? `recentFiles:${projectId}` : null;
+  const historyRef = useRef<string[]>(null!);
+  if (historyRef.current === null) {
+    if (storageKey) {
+      try {
+        const stored = localStorage.getItem(storageKey);
+        historyRef.current = stored ? JSON.parse(stored) : [];
+      } catch { historyRef.current = []; }
+    } else {
+      historyRef.current = [];
+    }
+  }
+  const historyIndexRef = useRef(historyRef.current.length - 1);
   const navigatingRef = useRef(false);
   const [historyVersion, setHistoryVersion] = useState(0);
+
+  // Persist file history to localStorage
+  useEffect(() => {
+    if (!storageKey || !historyRef.current) return;
+    try {
+      // Store deduplicated recent list (max 20 entries) rather than full history
+      const seen = new Set<string>();
+      const recent: string[] = [];
+      for (let i = historyRef.current.length - 1; i >= 0; i--) {
+        const p = historyRef.current[i];
+        if (seen.has(p)) continue;
+        seen.add(p);
+        recent.push(p);
+        if (recent.length >= 20) break;
+      }
+      localStorage.setItem(storageKey, JSON.stringify(recent));
+    } catch { /* localStorage full or unavailable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyVersion, storageKey]);
 
   useEffect(() => {
     fileRef.current = file;
