@@ -195,14 +195,36 @@ async def _edit_file(ctx: RunContext, path: str, old_string: str, new_string: st
         return result
 
 
+def _expand_braces(pattern: str) -> list[str]:
+    """Expand top-level brace groups like '{a,b,c}' into individual patterns."""
+    import re
+    m = re.fullmatch(r"\{([^}]+)\}", pattern)
+    if m:
+        return [p.strip() for p in m.group(1).split(",")]
+    # Check for brace group embedded in a larger pattern (e.g. 'src/{a,b}/*.py')
+    m = re.search(r"\{([^}]+)\}", pattern)
+    if m:
+        prefix = pattern[:m.start()]
+        suffix = pattern[m.end():]
+        return [prefix + p.strip() + suffix for p in m.group(1).split(",")]
+    return [pattern]
+
+
 async def _glob(ctx: RunContext, pattern: str) -> str:
     """Find files matching a glob pattern (e.g. '**/*.py'). Returns newline-separated paths."""
     workdir = get_workdir()
-    matches = sorted(workdir.glob(pattern))
-    results = []
-    for m in matches[:200]:
-        if str(m.resolve()).startswith(str(workdir)):
-            results.append(str(m.relative_to(workdir)))
+    patterns = _expand_braces(pattern)
+    seen: set[str] = set()
+    results: list[str] = []
+    for pat in patterns:
+        for m in sorted(workdir.glob(pat)):
+            if str(m.resolve()).startswith(str(workdir)):
+                rel = str(m.relative_to(workdir))
+                if rel not in seen:
+                    seen.add(rel)
+                    results.append(rel)
+            if len(results) >= 200:
+                break
     result = "\n".join(results) if results else "No matches"
     return result
 
