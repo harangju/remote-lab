@@ -70,6 +70,7 @@ export function Chat() {
   const [currentArchivedConvo, setCurrentArchivedConvo] = useState<ConvoMeta | null>(null);
   const [archivingConvoId, setArchivingConvoId] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelContextLimits, setModelContextLimits] = useState<Record<string, number>>({});
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const [railCollapsed, setRailCollapsed] = useState(() => {
@@ -256,7 +257,7 @@ export function Chat() {
   }, []);
 
   useEffect(() => {
-    listModels().then((res) => setAvailableModels(res.models)).catch(() => {});
+    listModels().then((res) => { setAvailableModels(res.models); setModelContextLimits(res.context_limits || {}); }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -273,13 +274,14 @@ export function Chat() {
   const handleModelChange = useCallback(async (modelId: string) => {
     if (!convId) return;
     setModelDropdownOpen(false);
-    setMeta((prev) => prev ? { ...prev, model: modelId } : prev);
+    const newLimit = modelContextLimits[modelId] || 128_000;
+    setMeta((prev) => prev ? { ...prev, model: modelId, context_limit: newLimit } : prev);
     try {
       await updateConvo(convId, { model: modelId });
     } catch (e: any) {
       setError(e.message || "Failed to update model");
     }
-  }, [convId, setMeta, setError]);
+  }, [convId, setMeta, setError, modelContextLimits]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

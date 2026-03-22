@@ -262,6 +262,7 @@ async def run_agent_task(
     parse_tool_content,
 ):
     active_agent = agent_instance or agent
+    _model_id = active_agent.model if isinstance(active_agent.model, str) else None
 
     async def _emit(msg_str: str):
         try:
@@ -423,7 +424,7 @@ async def run_agent_task(
                 break
 
         context_tokens = usage.request_tokens or 0
-        context_limit = get_context_limit()
+        context_limit = get_context_limit(_model_id)
         run.last_context_tokens = context_tokens
 
         await save_agent_history(
@@ -459,7 +460,7 @@ async def run_agent_task(
         # cleanly flush stream blocks without needing reloadConversation.
         done = Done(
             turns=total_turns, run_id=run.run_id,
-            context_tokens=run.last_context_tokens, context_limit=get_context_limit(),
+            context_tokens=run.last_context_tokens, context_limit=get_context_limit(_model_id),
             agent_id=agent_id, status="cancelled",
         )
         run.done_event = done.model_dump()
@@ -472,7 +473,7 @@ async def run_agent_task(
         await update_conversation_status(convo_id, ConvoStatus.error)
         done = Done(
             turns=total_turns, run_id=run.run_id,
-            context_tokens=run.last_context_tokens, context_limit=get_context_limit(),
+            context_tokens=run.last_context_tokens, context_limit=get_context_limit(_model_id),
             agent_id=agent_id, status="error", error_message=str(e),
         )
         run.done_event = done.model_dump()

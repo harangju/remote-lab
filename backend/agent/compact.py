@@ -68,10 +68,11 @@ def _extract_text(messages: list[ModelMessage]) -> str:
     return "\n".join(lines)
 
 
-def needs_compaction(context_tokens: int) -> bool:
+def needs_compaction(context_tokens: int, model_id: str | None = None) -> bool:
     """Check if context usage exceeds the model-specific budget threshold."""
-    limit = PRICE_TIER_INPUT_LIMITS.get(active_model, get_context_limit())
-    budget = min(limit, int(get_context_limit() * CONTEXT_BUDGET_FRACTION))
+    mid = model_id or active_model
+    limit = PRICE_TIER_INPUT_LIMITS.get(mid, get_context_limit(mid))
+    budget = min(limit, int(get_context_limit(mid) * CONTEXT_BUDGET_FRACTION))
     return context_tokens > budget
 
 

@@ -134,7 +134,8 @@ def create_api_router(*, check_token, resolve_project_file):
 
     @api.get("/models")
     async def api_list_models():
-        return {"models": _available, "active": active_model}
+        from backend.agent.agents import MODEL_CONTEXT_LIMITS
+        return {"models": _available, "active": active_model, "context_limits": MODEL_CONTEXT_LIMITS}
 
     @api.get("/agents")
     async def api_list_global_agents():

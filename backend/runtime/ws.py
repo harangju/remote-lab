@@ -533,7 +533,7 @@ def create_ws_handler(
                             aid = ac.id if ac else None
                             hist, ctx_tokens = _load_history(aid)
 
-                            if hist and needs_compaction(ctx_tokens):
+                            if hist and needs_compaction(ctx_tokens, convo_model):
                                 old_tokens = ctx_tokens
                                 hist, summary = await compact(hist)
                                 if summary:

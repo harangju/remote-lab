@@ -32,10 +32,11 @@ PRICE_TIER_INPUT_LIMITS: dict[str, int] = {
 }
 
 
-def get_context_limit() -> int:
-    """Return the context window size for the active model."""
-    if isinstance(model, str):
-        return MODEL_CONTEXT_LIMITS.get(model, 128_000)
+def get_context_limit(model_id: str | None = None) -> int:
+    """Return the context window size for the given or active model."""
+    mid = model_id or (model if isinstance(model, str) else None)
+    if mid:
+        return MODEL_CONTEXT_LIMITS.get(mid, 128_000)
     # FallbackModel — use the first (preferred) model's limit
     for m in _available:
         if m in MODEL_CONTEXT_LIMITS:

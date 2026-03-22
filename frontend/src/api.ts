@@ -203,7 +203,7 @@ export async function uploadFiles(projectId: string, files: File[]): Promise<Att
   return res.json();
 }
 
-export function listModels(): Promise<{ models: string[]; active: string }> {
+export function listModels(): Promise<{ models: string[]; active: string; context_limits: Record<string, number> }> {
   return request("/models");
 }
 
