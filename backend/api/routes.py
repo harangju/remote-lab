@@ -301,13 +301,31 @@ def create_api_router(*, check_token, resolve_project_file):
             raise HTTPException(status_code=401, detail="Invalid token")
         _, target = resolve_project_file(project_id, path)
         media_type, _ = mimetypes.guess_type(str(target))
-        response = FileResponse(target, media_type=media_type or "application/octet-stream")
-        response.headers["Content-Disposition"] = f'inline; filename="{target.name}"'
-        response.headers["X-Frame-Options"] = "SAMEORIGIN"
         if target.suffix.lower() in {".html", ".htm"}:
+            html = target.read_text(encoding="utf-8", errors="replace")
+            # Inject a snippet that hides the body until scripts have finished
+            # rendering (e.g. Marp scroll-to-paginated transition), then fades in.
+            hide_snippet = (
+                '<style>body{opacity:0!important;transition:opacity .12s ease-in}</style>'
+                '<script>addEventListener("load",()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{document.body.style.setProperty("opacity","1","important")})))</script>'
+            )
+            # Insert right before </head> if possible, otherwise prepend
+            if "</head>" in html:
+                html = html.replace("</head>", hide_snippet + "</head>", 1)
+            elif "<head>" in html:
+                html = html.replace("<head>", "<head>" + hide_snippet, 1)
+            else:
+                html = hide_snippet + html
+            response = Response(content=html, media_type="text/html")
+            response.headers["Content-Disposition"] = f'inline; filename="{target.name}"'
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
             response.headers["Content-Security-Policy"] = "default-src 'self' 'unsafe-inline' data: blob:; connect-src 'none'; frame-ancestors 'self'; form-action 'none'"
             response.headers["Referrer-Policy"] = "no-referrer"
             response.headers["Cache-Control"] = "no-cache"
+            return response
+        response = FileResponse(target, media_type=media_type or "application/octet-stream")
+        response.headers["Content-Disposition"] = f'inline; filename="{target.name}"'
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
         return response
 
     return api, embed
