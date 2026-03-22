@@ -260,6 +260,15 @@ export function Chat() {
     listModels().then((res) => { setAvailableModels(res.models); setModelContextLimits(res.context_limits || {}); }).catch(() => {});
   }, []);
 
+  // Correct context_limit when model or limits map becomes available
+  useEffect(() => {
+    if (!meta?.model || !Object.keys(modelContextLimits).length) return;
+    const correct = modelContextLimits[meta.model];
+    if (correct && correct !== meta.context_limit) {
+      setMeta((prev) => prev ? { ...prev, context_limit: correct } : prev);
+    }
+  }, [meta?.model, modelContextLimits]);
+
   useEffect(() => {
     if (!modelDropdownOpen) return;
     const handleClick = (e: MouseEvent) => {
