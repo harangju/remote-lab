@@ -642,7 +642,7 @@ export function Chat() {
         </>
       )}
 
-      {panel.showFileFinder && <FileFinder files={panel.fileList || []} loading={panel.fileListLoading} touchedFiles={touchedFiles} recentlyViewed={panel.recentlyViewed} onSelect={handleOpenFile} onClose={panel.toggleFileFinder} />}
+      {panel.showFileFinder && <FileFinder files={panel.fileList || []} loading={panel.fileListLoading} touchedFiles={touchedFiles} recentlyViewed={panel.recentlyViewed} onSelect={handleOpenFile} onClose={panel.toggleFileFinder} onRemoveRecent={panel.removeFromRecent} />}
     </div>
   );
 }

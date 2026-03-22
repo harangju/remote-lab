@@ -47,6 +47,7 @@ export interface PanelActions {
   forceClose: () => void;
   goBack: () => string | null;
   goForward: () => string | null;
+  removeFromRecent: (path: string) => void;
 }
 
 export function langFromPath(path: string): string {
@@ -406,6 +407,15 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     return path;
   }, [openFile]);
 
+  const removeFromRecent = useCallback((path: string) => {
+    historyRef.current = historyRef.current.filter((p) => p !== path);
+    // Clamp history index
+    if (historyIndexRef.current >= historyRef.current.length) {
+      historyIndexRef.current = Math.max(0, historyRef.current.length - 1);
+    }
+    setHistoryVersion((v) => v + 1);
+  }, []);
+
   return {
     file, editMode, dirty, saving, saveError, externalChange,
     showFileFinder, fileList, fileListLoading, showHiddenFiles: false,
@@ -414,6 +424,6 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     saveFile, cancelEdit, toggleFileFinder,
     setShowHiddenFiles: () => {},
     applyExternalChange, reloadFile, dismissExternalChange, upsertFileInList, forceClose,
-    goBack, goForward,
+    goBack, goForward, removeFromRecent,
   };
 }

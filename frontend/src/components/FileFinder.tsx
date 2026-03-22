@@ -9,6 +9,7 @@ interface FileFinderProps {
   recentlyViewed?: string[];
   onSelect: (path: string) => void;
   onClose: () => void;
+  onRemoveRecent?: (path: string) => void;
 }
 
 interface TreeNode {
@@ -95,7 +96,7 @@ function defaultExpandedDirs(): Set<string> {
   return new Set<string>();
 }
 
-export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], onSelect, onClose }: FileFinderProps) {
+export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], onSelect, onClose, onRemoveRecent }: FileFinderProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => defaultExpandedDirs());
@@ -241,7 +242,7 @@ export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], 
           {loading && <div style={{ padding: "20px", textAlign: "center", color: colors.textMuted, fontSize: "0.8rem" }}>Loading files...</div>}
           {!loading && !query && recentlyViewed.length > 0 && (
             <>
-              <div style={{ padding: "6px 14px 4px", fontSize: "0.7rem", color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recently viewed</div>
+              <div style={{ padding: "6px 14px 4px", fontSize: "0.7rem", color: colors.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: "5px" }}><Clock3 size={12} /> Recently viewed</div>
               {recentlyViewed.map((path) => {
                 const name = path.split("/").pop() || path;
                 const dir = path.split("/").slice(0, -1).join("/");
@@ -253,11 +254,22 @@ export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], 
                     onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgSurface; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                   >
-                    <Clock3 size={14} style={{ flexShrink: 0, color: colors.textMuted }} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <FileText size={14} style={{ flexShrink: 0, color: colors.textMuted }} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                       <span style={{ fontWeight: 500 }}>{name}</span>
                       {dir && <span style={{ color: colors.textMuted, marginLeft: "6px" }}>{dir}/</span>}
                     </span>
+                    {onRemoveRecent && (
+                      <span
+                        role="button"
+                        onClick={(e) => { e.stopPropagation(); onRemoveRecent(path); }}
+                        style={{ flexShrink: 0, padding: "2px", color: colors.textMuted, display: "inline-flex", opacity: 0.5, cursor: "pointer" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
+                      >
+                        <X size={13} />
+                      </span>
+                    )}
                   </button>
                 );
               })}

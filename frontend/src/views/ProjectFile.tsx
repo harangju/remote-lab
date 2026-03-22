@@ -163,6 +163,7 @@ export function ProjectFile() {
           recentlyViewed={panel.recentlyViewed}
           onSelect={handleOpenFile}
           onClose={panel.toggleFileFinder}
+          onRemoveRecent={panel.removeFromRecent}
         />
       )}
     </div>
