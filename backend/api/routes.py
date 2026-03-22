@@ -292,12 +292,17 @@ def create_api_router(*, check_token, resolve_project_file):
     # Separate router with no global Bearer dep — authenticates via query-string or Bearer token
     embed = APIRouter(prefix="/api")
 
+    _FILES_COOKIE = "rl_files_token"
+
     async def _check_any_auth(request: Request, token: str | None = None) -> None:
-        """Accept either a query-string token or a Bearer header."""
+        """Accept query-string token, Bearer header, or session cookie."""
         if token and check_token(token):
             return
         auth = request.headers.get("authorization", "")
         if auth.startswith("Bearer ") and check_token(auth[7:]):
+            return
+        cookie = request.cookies.get(_FILES_COOKIE)
+        if cookie and check_token(cookie):
             return
         raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -307,6 +312,28 @@ def create_api_router(*, check_token, resolve_project_file):
         _, target = resolve_project_file(project_id, path)
         media_type, _ = mimetypes.guess_type(str(target))
         return Response(target.read_bytes(), media_type=media_type or "application/octet-stream")
+
+    @embed.get("/projects/{project_id}/files/{path:path}")
+    async def api_serve_file(request: Request, project_id: str, path: str, token: str | None = None):
+        """Serve project files with path-based URLs so relative references resolve naturally."""
+        await _check_any_auth(request, token)
+        _, target = resolve_project_file(project_id, path)
+        media_type, _ = mimetypes.guess_type(str(target))
+        if target.suffix.lower() in {".html", ".htm"}:
+            html = target.read_text(encoding="utf-8", errors="replace")
+            response = Response(content=html, media_type="text/html")
+            # Set a session cookie so sub-resources (images, CSS, JS) loaded by
+            # the browser authenticate without needing ?token= on every URL.
+            # This is essential for JS-heavy pages (e.g. Marp) that rebuild the DOM.
+            effective_token = token or request.cookies.get(_FILES_COOKIE)
+            if effective_token:
+                response.set_cookie(
+                    _FILES_COOKIE, effective_token,
+                    path=f"/api/projects/{project_id}/files/",
+                    httponly=True, samesite="strict", secure=request.url.scheme == "https",
+                )
+            return response
+        return FileResponse(target, media_type=media_type or "application/octet-stream")
 
     @embed.get("/projects/{project_id}/file/embed")
     async def api_read_file_embed(project_id: str, path: str, token: str):

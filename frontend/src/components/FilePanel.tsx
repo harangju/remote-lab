@@ -241,7 +241,11 @@ export function FilePanel({
   const htmlFile = isHtml(file.path);
   const previewFile = docxFile || pdfFile || htmlFile;
   const embedToken = getToken();
-  const embedPreviewUrl = previewFile && embedToken ? `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}&v=${previewVersion}${previewHashRef.current}` : null;
+  const embedPreviewUrl = previewFile && embedToken
+    ? htmlFile
+      ? `/api/projects/${file.projectId}/files/${file.path}?token=${encodeURIComponent(embedToken)}&v=${previewVersion}${previewHashRef.current}`
+      : `/api/projects/${file.projectId}/file/embed?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(embedToken)}&v=${previewVersion}${previewHashRef.current}`
+    : null;
 
   useEffect(() => {
     if (!showConversationMenu) return;
