@@ -246,6 +246,7 @@ export function listSkills(projectId: string): Promise<Skill[]> {
 
 export type WsEvent =
   | { type: "auth-ok" }
+  | { type: "sync"; running: boolean }
   | { type: "message-ack"; message_id: string }
   | { type: "voice-state"; state: "starting" | "listening" | "stopped" }
   | { type: "voice-transcript"; text: string; is_final: boolean }

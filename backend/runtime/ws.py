@@ -21,7 +21,7 @@ from backend.runtime.commands import handle_share, handle_shares, handle_unshare
 from pydantic_ai.messages import UserContent
 from backend.data import storage
 from backend.data.models import ConvoStatus
-from backend.data.protocol import AgentStart, AuthOk, Compacted, Error, MessageAck, Running, SkillResult, VoiceState, VoiceTranscript
+from backend.data.protocol import AgentStart, AuthOk, Compacted, Error, MessageAck, Running, SkillResult, Sync, VoiceState, VoiceTranscript
 from backend.runtime.runner import build_multimodal_prompt, run_agent_task, run_bash_command_task
 from backend.runtime.state import RunState, get_session, processed_message_ids, seen_tool_call_ids, sessions
 from backend.voice.stt import DeepgramSTTSession
@@ -156,7 +156,8 @@ def create_ws_handler(
                             existing_tc_ids.add(tc_id)
 
             existing_run = session.run
-            if existing_run and existing_run.status == "running":
+            has_active_run = bool(existing_run and existing_run.status == "running")
+            if has_active_run:
                 existing_run.subscribers.add(ws)
                 if session.controller is None or session.controller not in session.subscribers:
                     session.controller = ws
@@ -165,6 +166,8 @@ def create_ws_handler(
                 for event_str in existing_run.events:
                     await ws.send_text(event_str)
                 print(f"ws[{convo_id[:8]}]: subscribed to active run {existing_run.run_id} ({len(existing_run.events)} events buffered)")
+
+            await ws.send_text(Sync(running=has_active_run).model_dump_json())
 
             while True:
                 raw_message = await ws.receive_text()

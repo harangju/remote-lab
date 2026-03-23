@@ -52,6 +52,8 @@ export function useChatSession(projectId?: string, convId?: string) {
   const voiceTimerRef = useRef<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const voiceBaseTextRef = useRef("");
+  const hasConnectedRef = useRef(false);
   const pendingScrollMessageIdRef = useRef<string | null>(null);
   const initialScrollDoneRef = useRef(false);
   const prependScrollRestoreRef = useRef<number | null>(null);
@@ -242,13 +244,6 @@ export function useChatSession(projectId?: string, convId?: string) {
 
   useEffect(() => {
     if (!convId) return;
-    const clearConnectionOnlyState = () => {
-      setWaitingForModel(false);
-      setCurrentRunId(null);
-      setBusy(false);
-      blocksRef.current = [];
-      setStreamBlocks([]);
-    };
     const ws = connectWs(convId);
     wsRef.current = ws;
 
@@ -256,15 +251,27 @@ export function useChatSession(projectId?: string, convId?: string) {
       let data: WsEvent;
       try { data = JSON.parse(event.data); } catch { return; }
       switch (data.type) {
-        case "auth-ok": setConnected(true); flushPendingQueue(); break;
+        case "auth-ok":
+          setConnected(true);
+          flushPendingQueue();
+          break;
+        case "sync":
+          // Server sends sync after auth-ok + any active-run replay.
+          // On reconnect with no active run, reload to pick up any
+          // state changes (e.g. run finished while disconnected).
+          if (hasConnectedRef.current && !data.running) {
+            reloadConversation().catch(() => {});
+          }
+          hasConnectedRef.current = true;
+          break;
         case "message-ack": syncPendingMessages((prev) => prev.filter((msg) => msg.message_id !== data.message_id)); markMessagePending(data.message_id, false); setError(null); break;
         case "voice-state":
           if (data.state === "starting") { setVoiceError(null); setVoiceStatusText("Starting microphone…"); setVoiceUiActive(true); }
           else if (data.state === "listening") { setVoiceStatusText("Listening…"); setVoiceUiActive(true); }
           else if (data.state === "stopped") { setVoiceStatusText("Listening…"); setVoiceUiActive(false); }
           break;
-        case "voice-transcript": setVoiceTranscriptText(data.text); setInput(`${voiceBaseText}${voiceBaseText && data.text ? " " : ""}${data.text}`); break;
-        case "running": setCurrentRunId(data.run_id); setBusy(true); setWaitingForModel(true); break;
+        case "voice-transcript": { const base = voiceBaseTextRef.current; setVoiceTranscriptText(data.text); setInput(`${base}${base && data.text ? " " : ""}${data.text}`); break; }
+        case "running": setCurrentRunId(data.run_id); setBusy(true); setWaitingForModel(true); blocksRef.current = []; setStreamBlocks([]); break;
         case "agent-start": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color, model: data.agent_model };
@@ -358,10 +365,10 @@ export function useChatSession(projectId?: string, convId?: string) {
     });
 
     ws.addEventListener("close", (event) => {
-      setConnected(false); clearConnectionOnlyState();
+      setConnected(false);
       if (event.code !== 1000 && event.code !== 4409) reconnectTimer.current = window.setTimeout(() => setWsAttempt((a) => a + 1), 2000);
     });
-    ws.addEventListener("error", () => { setConnected(false); clearConnectionOnlyState(); });
+    ws.addEventListener("error", () => { setConnected(false); });
 
     return () => {
       clearTimeout(reconnectTimer.current);
@@ -369,7 +376,8 @@ export function useChatSession(projectId?: string, convId?: string) {
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop()); mediaStreamRef.current = null;
       ws.close();
     };
-  }, [convId, wsAttempt, flushPendingQueue, reloadConversation, setCurrentRunId, voiceBaseText]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- voiceBaseText read via ref to avoid WS reconnect
+  }, [convId, wsAttempt, flushPendingQueue, reloadConversation, setCurrentRunId]);
 
   useEffect(() => {
     if (!voiceUiActive) {
@@ -435,7 +443,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   const startVoiceCapture = useCallback(async () => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || busy || voiceUiActive) return;
-    setVoiceError(null); setVoiceBaseText(input.trim()); setVoiceTranscriptText("");
+    setVoiceError(null); setVoiceBaseText(input.trim()); voiceBaseTextRef.current = input.trim(); setVoiceTranscriptText("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
