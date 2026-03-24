@@ -312,10 +312,6 @@ export function Chat() {
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "m") {
-        const target = e.target as HTMLElement | null;
-        const tagName = target?.tagName?.toLowerCase();
-        const isEditable = !!target && (target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select");
-        if (isEditable) return;
         e.preventDefault();
         void handleNewConversation();
       }

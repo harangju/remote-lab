@@ -87,10 +87,6 @@ export function ConvoList() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey && e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === "m") {
-        const target = e.target as HTMLElement | null;
-        const tagName = target?.tagName?.toLowerCase();
-        const isEditable = !!target && (target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select");
-        if (isEditable) return;
         e.preventDefault();
         if (!projectId) return;
         createConvo(projectId)
