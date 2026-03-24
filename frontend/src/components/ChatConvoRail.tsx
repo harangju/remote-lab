@@ -212,7 +212,7 @@ export function ChatConvoRail({
                   </span>
                 )}
               </button>
-              {!railCollapsed && !isActive && (
+              {!railCollapsed && (
                 <button
                   onClick={(e) => {
                     e.preventDefault();
