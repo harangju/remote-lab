@@ -63,6 +63,17 @@ def create_ws_handler(
         session.subscribers.add(ws)
         print(f"ws[{convo_id[:8]}]: connected (subscribers: {len(session.subscribers)})")
 
+        # Keep the connection alive through reverse proxies (Cloudflare, nginx)
+        async def _ping_loop():
+            try:
+                while True:
+                    await asyncio.sleep(30)
+                    await ws.send_bytes(b"")
+            except Exception:
+                pass
+
+        ping_task = asyncio.create_task(_ping_loop())
+
         try:
             raw = await ws.receive_text()
             try:
@@ -642,6 +653,7 @@ def create_ws_handler(
                 run.subscribers.discard(ws)
                 print(f"ws[{convo_id[:8]}]: disconnected, run continues in background")
         finally:
+            ping_task.cancel()
             if session.stt_session is not None:
                 try:
                     await session.stt_session.stop()

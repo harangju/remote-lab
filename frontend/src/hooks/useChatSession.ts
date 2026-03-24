@@ -54,6 +54,7 @@ export function useChatSession(projectId?: string, convId?: string) {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const voiceBaseTextRef = useRef("");
   const hasConnectedRef = useRef(false);
+  const replayingRef = useRef(false);
   const pendingScrollMessageIdRef = useRef<string | null>(null);
   const initialScrollDoneRef = useRef(false);
   const prependScrollRestoreRef = useRef<number | null>(null);
@@ -257,6 +258,11 @@ export function useChatSession(projectId?: string, convId?: string) {
           break;
         case "sync":
           // Server sends sync after auth-ok + any active-run replay.
+          // Flush suppressed renders from reconnect replay.
+          if (replayingRef.current) {
+            replayingRef.current = false;
+            setStreamBlocks([...blocksRef.current]);
+          }
           // On reconnect with no active run, reload to pick up any
           // state changes (e.g. run finished while disconnected).
           if (hasConnectedRef.current && !data.running) {
@@ -271,7 +277,19 @@ export function useChatSession(projectId?: string, convId?: string) {
           else if (data.state === "stopped") { setVoiceStatusText("Listening…"); setVoiceUiActive(false); }
           break;
         case "voice-transcript": { const base = voiceBaseTextRef.current; setVoiceTranscriptText(data.text); setInput(`${base}${base && data.text ? " " : ""}${data.text}`); break; }
-        case "running": setCurrentRunId(data.run_id); setBusy(true); setWaitingForModel(true); blocksRef.current = []; setStreamBlocks([]); break;
+        case "running": {
+          const isReconnect = data.run_id === activeRunIdRef.current;
+          setCurrentRunId(data.run_id); setBusy(true); setWaitingForModel(true);
+          blocksRef.current = [];
+          if (isReconnect) {
+            // Reconnect replay: suppress renders until sync arrives
+            replayingRef.current = true;
+          } else {
+            replayingRef.current = false;
+            setStreamBlocks([]);
+          }
+          break;
+        }
         case "agent-start": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           const ag = { id: data.agent_id, name: data.agent_name, color: data.agent_color, model: data.agent_model };
@@ -285,11 +303,11 @@ export function useChatSession(projectId?: string, convId?: string) {
           setWaitingForModel(false);
           const blocks = blocksRef.current; const last = blocks[blocks.length - 1];
           if (last && last.type === "text") last.content += data.delta; else blocks.push({ type: "text", content: data.delta });
-          blocksRef.current = [...blocks]; setStreamBlocks(blocksRef.current); break;
+          blocksRef.current = [...blocks]; if (!replayingRef.current) setStreamBlocks(blocksRef.current); break;
         }
         case "tool-use": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
-          setWaitingForModel(false);
+          if (!replayingRef.current) setWaitingForModel(false);
           const blocks = [...blocksRef.current]; let matched = false;
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
@@ -299,7 +317,7 @@ export function useChatSession(projectId?: string, convId?: string) {
             }
           }
           if (!matched) blocks.push({ type: "tool", name: data.name, input: data.input, tool_call_id: data.tool_call_id, run_id: data.run_id });
-          blocksRef.current = blocks; setStreamBlocks(blocksRef.current); break;
+          blocksRef.current = blocks; if (!replayingRef.current) setStreamBlocks(blocksRef.current); break;
         }
         case "tool-output": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
@@ -308,33 +326,34 @@ export function useChatSession(projectId?: string, convId?: string) {
             const b = oBlocks[i];
             if (b.type === "tool" && (data.tool_call_id ? b.tool_call_id === data.tool_call_id : b.name === data.name) && !b.output) { oBlocks[i] = { ...b, liveOutput: (b.liveOutput || "") + data.output }; break; }
           }
-          blocksRef.current = oBlocks; setStreamBlocks(blocksRef.current); break;
+          blocksRef.current = oBlocks; if (!replayingRef.current) setStreamBlocks(blocksRef.current); break;
         }
         case "tool-result": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
-          setWaitingForModel(true);
+          if (!replayingRef.current) setWaitingForModel(true);
           const blocks = [...blocksRef.current]; let matched = false;
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (b.type === "tool" && (data.tool_call_id ? b.tool_call_id === data.tool_call_id : b.name === data.name) && !b.output) { blocks[i] = { ...b, output: b.liveOutput || data.output, diff: data.diff ?? b.diff, liveOutput: undefined }; matched = true; break; }
           }
           if (!matched) blocks.push({ type: "tool", name: data.name, output: data.output, diff: data.diff, tool_call_id: data.tool_call_id, run_id: data.run_id });
-          blocksRef.current = blocks; setStreamBlocks(blocksRef.current); break;
+          blocksRef.current = blocks; if (!replayingRef.current) setStreamBlocks(blocksRef.current); break;
         }
         case "file-changed": setProjectFiles((prev) => prev.includes(data.path) ? prev : [...prev, data.path].sort()); break;
         case "tool-confirm": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
-          setWaitingForModel(false);
+          if (!replayingRef.current) setWaitingForModel(false);
           const blocks = [...blocksRef.current]; let matched = false;
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (b.type === "tool" && b.tool_call_id === data.tool_call_id) { blocks[i] = { ...b, name: data.name, input: data.args ?? b.input, awaitingApproval: true, approvalStatus: "pending", canAllowProject: data.can_allow_project !== false, canTurnOnAuto: data.can_turn_on_auto !== false }; matched = true; break; }
           }
           if (!matched) blocks.push({ type: "tool", tool_call_id: data.tool_call_id, run_id: data.run_id, name: data.name, input: data.args, awaitingApproval: true, approvalStatus: "pending", canAllowProject: data.can_allow_project !== false, canTurnOnAuto: data.can_turn_on_auto !== false });
-          blocksRef.current = blocks; setStreamBlocks(blocksRef.current); break;
+          blocksRef.current = blocks; if (!replayingRef.current) setStreamBlocks(blocksRef.current); break;
         }
         case "done": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
+          replayingRef.current = false;
           const status = data.status || "ok";
           if (status === "error" && data.error_message) setError(data.error_message);
           const finalBlocks = blocksRef.current;
