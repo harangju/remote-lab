@@ -98,13 +98,19 @@ def set_model(model_id: str) -> str:
     return resolved
 
 
-def create_agent(config: "AgentConfig | None" = None, *, model_override: str | None = None) -> Agent:
+def create_agent(
+    config: "AgentConfig | None" = None,
+    *,
+    model_override: str | None = None,
+    skip_approval: bool = False,
+) -> Agent:
     """Create a PydanticAI Agent from an AgentConfig.
 
     If config is None, returns the default global agent (with model_override applied if given).
     model_override takes effect when the agent config doesn't specify its own model.
+    skip_approval disables tool approval for all tools (used for sub-agents).
     """
-    if config is None and not model_override:
+    if config is None and not model_override and not skip_approval:
         return agent
 
     from backend.agent.agent_config import AgentConfig  # noqa: F811
@@ -112,7 +118,7 @@ def create_agent(config: "AgentConfig | None" = None, *, model_override: str | N
     if config is None:
         # Default agent with conversation-level model override
         new_agent = Agent(model=model_override, system_prompt=SYSTEM_PROMPT, output_type=[str, DeferredToolRequests])
-        tools.register(new_agent)
+        tools.register(new_agent, skip_approval=skip_approval)
         return new_agent
 
     # Agent config model wins over conversation override, which wins over global
@@ -121,6 +127,8 @@ def create_agent(config: "AgentConfig | None" = None, *, model_override: str | N
     if config.system_prompt:
         prompt = prompt + "\n\n" + config.system_prompt
 
-    new_agent = Agent(model=agent_model, system_prompt=prompt, output_type=[str, DeferredToolRequests])
-    tools.register(new_agent, allowed=config.tools)
+    # Sub-agents don't use DeferredToolRequests since they run without interactive approval
+    output_type = [str] if skip_approval else [str, DeferredToolRequests]
+    new_agent = Agent(model=agent_model, system_prompt=prompt, output_type=output_type)
+    tools.register(new_agent, allowed=config.tools, skip_approval=skip_approval)
     return new_agent

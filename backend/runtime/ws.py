@@ -522,11 +522,17 @@ def create_ws_handler(
                     )
                     continue
                 if _cached_instructions is _UNSET:
-                    _cached_instructions = await asyncio.to_thread(build_project_instructions, project_path, True)
-                    _cached_instructions_subsequent = await asyncio.to_thread(build_project_instructions, project_path, False)
+                    _cached_instructions = await asyncio.to_thread(build_project_instructions, project_path, True, project_agents)
+                    _cached_instructions_subsequent = await asyncio.to_thread(build_project_instructions, project_path, False, project_agents)
 
                 convo_meta_for_model = storage._read_meta(convo_id)
                 convo_model = convo_meta_for_model.model if convo_meta_for_model else None
+
+                agent_tools.set_delegate_context(
+                    agent_configs=project_agents,
+                    model_override=convo_model,
+                    run_id=run.run_id,
+                )
 
                 MAX_HANDOFFS = 10
                 handoff_count = 0

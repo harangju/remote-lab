@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from backend.agent.skills import get_skills, SkillType
+
+if TYPE_CHECKING:
+    from backend.agent.agent_config import AgentConfig
 
 _EXCLUDED_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".env",
@@ -70,7 +74,11 @@ def get_directory_tree(project_path: Path, max_depth: int = 2, max_entries: int 
     return "\n".join(lines)
 
 
-def build_project_instructions(project_path: Path, is_first_turn: bool) -> str | None:
+def build_project_instructions(
+    project_path: Path,
+    is_first_turn: bool,
+    agents: list[AgentConfig] | None = None,
+) -> str | None:
     """Build dynamic per-call instructions with project context.
 
     Returns None if there's nothing project-specific to inject.
@@ -94,6 +102,20 @@ def build_project_instructions(project_path: Path, is_first_turn: bool) -> str |
         context_intro.append(" ".join(skill_lines))
 
     sections.append("\n\n".join(context_intro))
+
+    # List agents available for delegation
+    if agents:
+        agent_lines = []
+        for a in agents:
+            desc = a.system_prompt[:120].replace("\n", " ") if a.system_prompt else ""
+            tools_note = f" (tools: {', '.join(a.tools)})" if a.tools else ""
+            agent_lines.append(f"- **{a.id}** — {a.name}{tools_note}: {desc}")
+        sections.append(
+            "## Available Agents\n\n"
+            "Use `delegate(agent_id, task)` to run sub-agents. "
+            "Multiple delegate calls in one response run in parallel.\n\n"
+            + "\n".join(agent_lines)
+        )
 
     if is_first_turn:
         instructions = read_instructions(project_path)
