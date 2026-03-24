@@ -175,6 +175,12 @@ export function writeFile(projectId: string, path: string, content: string): Pro
   });
 }
 
+export function bashComplete(projectId: string, input: string, pos?: number): Promise<{ completions: string[]; prefix: string; from: number }> {
+  const params = new URLSearchParams({ input });
+  if (pos !== undefined) params.set("pos", String(pos));
+  return request(`/projects/${projectId}/bash-complete?${params.toString()}`);
+}
+
 export function listFiles(projectId: string, opts?: { hidden?: boolean }): Promise<{ root: string; files: string[] }> {
   const params = new URLSearchParams();
   if (opts?.hidden) params.set("hidden", "true");

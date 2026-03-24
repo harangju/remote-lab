@@ -602,6 +602,7 @@ export function Chat() {
           skills={skills}
           refreshMentionFiles={refreshMentionFiles}
           focusKey={convId}
+          projectId={projectId}
         />
       </div>
 

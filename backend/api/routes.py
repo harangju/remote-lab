@@ -264,6 +264,77 @@ def create_api_router(*, check_token, resolve_project_file):
             ))
         return results
 
+    @api.get("/projects/{project_id}/bash-complete")
+    async def api_bash_complete(project_id: str, input: str = "", pos: int | None = None):
+        """Return bash completion candidates for the word at cursor position."""
+        proj = storage.get_project(project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found")
+        project_path = Path(proj.path).resolve()
+        if not project_path.exists() or not project_path.is_dir():
+            return {"completions": [], "prefix": "", "from": 0}
+
+        # Determine cursor position and extract the word being completed
+        if pos is None:
+            pos = len(input)
+        text = input[:pos]
+        # Walk back to find the start of the current word
+        word_start = pos
+        while word_start > 0 and text[word_start - 1] not in " \t|&;(){}><$`\n":
+            word_start -= 1
+        prefix = text[word_start:pos]
+
+        if not prefix:
+            return {"completions": [], "prefix": "", "from": word_start}
+
+        # Determine if this is the first word (command position) or an argument
+        stripped = text[:word_start].lstrip()
+        is_command_pos = not stripped or stripped[-1:] in "|&;("
+
+        completions: list[str] = []
+        try:
+            if "/" in prefix or prefix.startswith("."):
+                # Path completion — use compgen -f
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", "-c", f"compgen -f -- {prefix!r}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    cwd=str(project_path),
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+                raw = stdout.decode(errors="replace").strip().splitlines()
+                # Append / for directories
+                for r in raw[:50]:
+                    p = project_path / r
+                    completions.append(r + "/" if p.is_dir() else r)
+            elif is_command_pos:
+                # Command completion — compgen -c (commands + builtins + aliases)
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", "-c", f"compgen -c -- {prefix!r}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    cwd=str(project_path),
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+                completions = list(dict.fromkeys(stdout.decode(errors="replace").strip().splitlines()))[:50]
+            else:
+                # Argument position — complete files + directories
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", "-c", f"compgen -f -- {prefix!r}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    cwd=str(project_path),
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+                raw = stdout.decode(errors="replace").strip().splitlines()
+                for r in raw[:50]:
+                    p = project_path / r
+                    completions.append(r + "/" if p.is_dir() else r)
+        except (asyncio.TimeoutError, OSError):
+            pass
+
+        return {"completions": completions, "prefix": prefix, "from": word_start}
+
     @api.get("/projects/{project_id}/files")
     async def api_list_files(project_id: str, hidden: bool = False):
         proj = storage.get_project(project_id)

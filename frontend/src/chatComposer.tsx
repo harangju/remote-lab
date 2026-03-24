@@ -1,8 +1,9 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Terminal, FileText, Square, Paperclip, X, Mic, ArrowUp } from "lucide-react";
 import { btnPrimary, colors, controlSize, input as inputStyle, overlayPanel, overlayHeader, radius, shadow } from "./styles";
 import { compactSkillDescription } from "./chatUi";
 import type { AgentConfig, Skill } from "./api";
+import { bashComplete } from "./api";
 import { getMentionMatches, getSlashMatches } from "./chatComposerState";
 
 export interface ComposerAttachment {
@@ -35,6 +36,7 @@ interface ChatComposerProps {
   skills: Skill[];
   refreshMentionFiles: () => void | Promise<void>;
   focusKey?: string | number;
+  projectId?: string;
 }
 
 const pickerPanelStyle: React.CSSProperties = {
@@ -100,17 +102,51 @@ export function ChatComposer({
   skills,
   refreshMentionFiles,
   focusKey,
+  projectId,
 }: ChatComposerProps) {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [slashIdx, setSlashIdx] = useState(0);
+  const [bashCompletions, setBashCompletions] = useState<string[]>([]);
+  const [bashCompFrom, setBashCompFrom] = useState(0);
+  const [bashCompPrefix, setBashCompPrefix] = useState("");
+  const [bashCompIdx, setBashCompIdx] = useState(0);
+  const bashCompTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bashListRef = useRef<HTMLDivElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [dragDepth, setDragDepth] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const slashListRef = useRef<HTMLDivElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
+
+  const fetchBashCompletions = useCallback((text: string, cursorPos: number) => {
+    if (bashCompTimer.current) clearTimeout(bashCompTimer.current);
+    if (!projectId || !text.startsWith("!")) {
+      setBashCompletions([]);
+      return;
+    }
+    // Strip the leading "!" for the completion query
+    const bashInput = text.slice(1);
+    const bashPos = cursorPos - 1;
+    if (bashPos < 0) { setBashCompletions([]); return; }
+    bashCompTimer.current = setTimeout(async () => {
+      try {
+        const res = await bashComplete(projectId, bashInput, bashPos);
+        if (res.completions.length > 0) {
+          setBashCompletions(res.completions);
+          setBashCompFrom(res.from + 1); // +1 to account for leading "!"
+          setBashCompPrefix(res.prefix);
+          setBashCompIdx(0);
+        } else {
+          setBashCompletions([]);
+        }
+      } catch {
+        setBashCompletions([]);
+      }
+    }, 150);
+  }, [projectId]);
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -135,6 +171,12 @@ export function ChatComposer({
     setInput(val);
     const pos = e.target.selectionStart ?? val.length;
     const before = val.slice(0, pos);
+    // Bash completions in bash mode
+    if (val.startsWith("!")) {
+      fetchBashCompletions(val, pos);
+    } else {
+      setBashCompletions([]);
+    }
     const atMatch = before.match(/@([\w./\-]*)$/);
     if (atMatch) {
       if (mentionQuery === null) void refreshMentionFiles();
@@ -183,10 +225,56 @@ export function ChatComposer({
     });
   };
 
+  const insertBashCompletion = (completion: string) => {
+    const after = input.slice((inputRef.current?.selectionStart ?? input.length));
+    const newVal = input.slice(0, bashCompFrom) + completion + (completion.endsWith("/") ? "" : " ") + after;
+    setInput(newVal);
+    setBashCompletions([]);
+    requestAnimationFrame(() => {
+      const cursor = bashCompFrom + completion.length + (completion.endsWith("/") ? 0 : 1);
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(cursor, cursor);
+      // If completed to a directory, trigger new completions
+      if (completion.endsWith("/")) {
+        fetchBashCompletions(newVal, cursor);
+      }
+    });
+  };
+
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const ctrlOrCmd = e.ctrlKey || e.metaKey;
     const isNextPickerItem = e.key === "ArrowDown" || (ctrlOrCmd && e.key.toLowerCase() === "n");
     const isPrevPickerItem = e.key === "ArrowUp" || (ctrlOrCmd && e.key.toLowerCase() === "p");
+
+    // Bash completions
+    if (bashCompletions.length > 0) {
+      if (isNextPickerItem) {
+        e.preventDefault();
+        setBashCompIdx((i) => Math.min(i + 1, bashCompletions.length - 1));
+        return;
+      }
+      if (isPrevPickerItem) {
+        e.preventDefault();
+        setBashCompIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        insertBashCompletion(bashCompletions[bashCompIdx]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setBashCompletions([]);
+        return;
+      }
+    } else if (e.key === "Tab" && input.startsWith("!") && input.length > 1) {
+      // Tab with no completions showing — trigger fetch immediately
+      e.preventDefault();
+      const pos = inputRef.current?.selectionStart ?? input.length;
+      fetchBashCompletions(input, pos);
+      return;
+    }
 
     if (e.key === "Enter" && !e.shiftKey && slashQuery === null && mentionQuery === null) {
       e.preventDefault();
@@ -194,6 +282,7 @@ export function ChatComposer({
       if (text || composerAttachments.length > 0) {
         setMentionQuery(null);
         setSlashQuery(null);
+        setBashCompletions([]);
         sendText(text).then((ok) => { if (ok) setInput(""); });
       }
       return;
@@ -248,6 +337,7 @@ export function ChatComposer({
     e.preventDefault();
     setMentionQuery(null);
     setSlashQuery(null);
+    setBashCompletions([]);
     const text = input.trim();
     sendText(text).then((ok) => { if (ok) setInput(""); });
   };
@@ -261,6 +351,11 @@ export function ChatComposer({
     const rows = mentionListRef.current?.querySelectorAll<HTMLElement>("[data-selectable-row='true']");
     rows?.[mentionIdx]?.scrollIntoView({ block: "nearest" });
   }, [mentionIdx, mentionMatches.length]);
+
+  useEffect(() => {
+    const rows = bashListRef.current?.querySelectorAll<HTMLElement>("[data-selectable-row='true']");
+    rows?.[bashCompIdx]?.scrollIntoView({ block: "nearest" });
+  }, [bashCompIdx, bashCompletions.length]);
 
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   const isBashMode = input.startsWith("!");
@@ -283,6 +378,19 @@ export function ChatComposer({
               <div data-selectable-row="true" key={s.name} onMouseDown={(e) => { e.preventDefault(); insertSlashCommand(s); }} style={pickerRow(i === slashIdx)}>
                 <span style={{ fontWeight: 600, fontFamily: "monospace" }}>/{s.name}</span>
                 <span style={{ color: colors.textMuted, fontSize: "0.8rem", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: "1 1 auto" }}>{compactSkillDescription(s.description)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {bashCompletions.length > 0 && (
+          <div ref={bashListRef} style={{ ...pickerPanelStyle, minWidth: 220, maxHeight: 300, overflow: "auto" }}>
+            <div style={pickerSectionLabel}>
+              <Terminal size={10} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+              Completions
+            </div>
+            {bashCompletions.map((c, i) => (
+              <div data-selectable-row="true" key={c} onMouseDown={(e) => { e.preventDefault(); insertBashCompletion(c); }} style={pickerRow(i === bashCompIdx)}>
+                <span style={{ fontFamily: "monospace", fontSize: "0.83rem" }}>{c}</span>
               </div>
             ))}
           </div>
