@@ -136,6 +136,22 @@ export function Chat() {
     return Array.from(paths);
   }, [messages, streamBlocks]);
 
+  // Persist viewed file path per conversation so switching chats and back restores it
+  const viewedFileKey = convId ? `remote-lab:viewedFile:${convId}` : null;
+
+  // Save viewed file to sessionStorage — only when a file is actively open.
+  // Skip when viewedFileKey just changed (chat switch) to avoid saving under wrong chat.
+  const prevViewedFileKeyRef = useRef(viewedFileKey);
+  useEffect(() => {
+    if (viewedFileKey !== prevViewedFileKeyRef.current) {
+      prevViewedFileKeyRef.current = viewedFileKey;
+      return;
+    }
+    if (viewedFileKey && panel.file) {
+      sessionStorage.setItem(viewedFileKey, panel.file.path);
+    }
+  }, [panel.file?.path, viewedFileKey]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const path = params.get("path");
@@ -144,6 +160,13 @@ export function Chat() {
       if (!panel.file || panel.file.path !== path) panel.openFile(path);
     } else if (panel.file && !panel.dirty) {
       panel.forceClose();
+    } else if (!path && !panel.file && viewedFileKey) {
+      // Restore previously viewed file when returning to this chat
+      const saved = sessionStorage.getItem(viewedFileKey);
+      if (saved) {
+        syncFileQuery(saved, true);
+        panel.openFile(saved);
+      }
     }
     if (prefill) {
       setInput(prefill);
@@ -151,7 +174,7 @@ export function Chat() {
       const nextUrl = params.toString() ? `/${projectId}/${convId}?${params.toString()}` : `/${projectId}/${convId}`;
       navigate(nextUrl, { replace: true });
     }
-  }, [panel.file?.path, panel.dirty, panel.openFile, panel.forceClose, projectId, convId, navigate, setInput]);
+  }, [panel.file?.path, panel.dirty, panel.openFile, panel.forceClose, projectId, convId, navigate, setInput, viewedFileKey, syncFileQuery]);
 
   const handleOpenFile = useCallback((path: string) => {
     if (panel.dirty && !window.confirm("You have unsaved changes. Discard and open another file?")) return;
@@ -161,9 +184,10 @@ export function Chat() {
 
   const handleClosePanel = useCallback(() => {
     if (panel.dirty && !window.confirm("You have unsaved changes. Discard?")) return;
+    if (viewedFileKey) sessionStorage.removeItem(viewedFileKey);
     syncFileQuery(null);
     panel.forceClose();
-  }, [panel.dirty, panel.forceClose, syncFileQuery]);
+  }, [panel.dirty, panel.forceClose, syncFileQuery, viewedFileKey]);
 
   const handleToggleEdit = useCallback(() => {
     if (panel.editMode && panel.dirty) {
