@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import WebSocket
+from starlette.requests import HTTPConnection
 
 
 def sanitize_public_name(name: str) -> str:
@@ -14,16 +14,20 @@ def sanitize_public_name(name: str) -> str:
     return safe or "shared-file"
 
 
-def public_url_base(ws: WebSocket, public_base_url: str) -> str:
+def resolve_base_url(conn: HTTPConnection | None, public_base_url: str) -> str:
+    """Derive the public base URL from config or request headers."""
     if public_base_url:
         return public_base_url
-    origin = ws.headers.get("origin", "").strip().rstrip("/")
+    if conn is None:
+        return ""
+    origin = conn.headers.get("origin", "").strip().rstrip("/")
     if origin:
         return origin
-    host = ws.headers.get("host", "").strip()
+    host = conn.headers.get("host", "").strip()
     if not host:
         return ""
-    proto = "https" if ws.url.scheme == "wss" else "http"
+    scheme = conn.scope.get("scheme", "http")
+    proto = "https" if scheme in ("https", "wss") else "http"
     return f"{proto}://{host}"
 
 
@@ -58,24 +62,22 @@ def save_public_access(public_dir: Path, rules: dict[str, list[str]]) -> None:
     access_file.write_text(json.dumps(rules, indent=2, sort_keys=True) + "\n")
 
 
-def share_output(output_name: str, ws: WebSocket, public_base_url: str, token: str | None = None) -> str:
+def share_output(output_name: str, base_url: str, token: str | None = None) -> str:
     public_name = share_output_name(output_name)
     path = f"/{public_name}"
     if token:
         path = f"{path}?t={token}"
-    base = public_url_base(ws, public_base_url)
-    if base:
-        return f"Shared to {base}{path}"
+    if base_url:
+        return f"Shared to {base_url}{path}"
     return f"Shared to {path}"
 
 
-def share_url_for_slug(slug: str, ws: WebSocket, public_base_url: str, token: str | None = None) -> str:
+def share_url_for_slug(slug: str, base_url: str, token: str | None = None) -> str:
     path = f"/{slug}"
     if token:
         path = f"{path}?t={token}"
-    base = public_url_base(ws, public_base_url)
-    if base:
-        return f"{base}{path}"
+    if base_url:
+        return f"{base_url}{path}"
     return path
 
 
@@ -145,7 +147,7 @@ def parse_share_args(cmd_args: str) -> tuple[str, str | None]:
     return raw, None
 
 
-async def handle_share(cmd_args: str, project_path: Path, ws: WebSocket, public_dir: Path, public_base_url: str) -> str:
+async def handle_share(cmd_args: str, project_path: Path, public_dir: Path, base_url: str) -> str:
     project_root = project_path.resolve()
     source_arg, token_arg = parse_share_args(cmd_args)
     source, error = resolve_share_source(project_root, source_arg)
@@ -192,7 +194,7 @@ async def handle_share(cmd_args: str, project_path: Path, ws: WebSocket, public_
     token = token_arg or (existing_tokens[0] if existing_tokens else uuid4().hex[:12])
     rules[access_key] = [token]
     save_public_access(public_dir, rules)
-    return share_output(output_name, ws, public_base_url, token=token)
+    return share_output(output_name, base_url, token=token)
 
 
 def resolve_unshare_target(public_root: Path, raw_path: str) -> str | None:
@@ -208,7 +210,7 @@ def resolve_unshare_target(public_root: Path, raw_path: str) -> str | None:
     return shared_access_key(rel_path)
 
 
-async def handle_shares(ws: WebSocket, public_dir: Path, public_base_url: str) -> str:
+async def handle_shares(public_dir: Path, base_url: str) -> str:
     rules = load_public_access(public_dir)
     public_root = public_dir.resolve()
     shared_files: dict[str, str] = {}
@@ -226,7 +228,7 @@ async def handle_shares(ws: WebSocket, public_dir: Path, public_base_url: str) -
     lines: list[str] = []
     for slug, filename in shared_files.items():
         tokens = [t for t in rules.get(slug, []) if t]
-        url = share_url_for_slug(slug, ws, public_base_url, tokens[0] if tokens else None)
+        url = share_url_for_slug(slug, base_url, tokens[0] if tokens else None)
         lines.append(f"{filename}: {url}")
     return "\n".join(lines)
 

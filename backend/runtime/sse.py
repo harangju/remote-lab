@@ -243,7 +243,7 @@ def create_sse_router(
     # -----------------------------------------------------------------------
 
     @router.post("/{convo_id}/messages")
-    async def send_message(convo_id: str, body: SendMessage):
+    async def send_message(convo_id: str, body: SendMessage, request: Request = None):
         convo = storage.get_conversation(convo_id)
         if convo is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -296,6 +296,7 @@ def create_sse_router(
                 save_agent_history=save_agent_history,
                 user_event=user_event, tool_event=tool_event,
                 system_event=system_event, iso_now=iso_now,
+                request=request,
             )
 
         # Check for bash mode (! prefix)
@@ -558,6 +559,7 @@ def create_sse_router(
         prompt, message_id, attachments,
         *, append_event, append_message, update_conversation_status,
         save_agent_history, user_event, tool_event, system_event, iso_now,
+        request: Request = None,
     ):
         parts = prompt.strip().split(None, 1)
         cmd_name = parts[0][1:]
@@ -648,8 +650,22 @@ def create_sse_router(
                 return {"status": "ok", "output": output}
 
             elif skill.name in ("share", "shares", "unshare"):
-                # These commands need ws/public_dir — for now return not supported
-                raise HTTPException(status_code=400, detail=f"/{skill.name} is not yet supported via REST")
+                from backend.server import PUBLIC_DIR, PUBLIC_BASE_URL
+                from backend.runtime.commands import handle_share, handle_shares, handle_unshare, resolve_base_url
+                base_url = resolve_base_url(request, PUBLIC_BASE_URL)
+                await append_message(convo_id, user_event(prompt, message_id=message_id, server_command=True))
+                _invalidate_message_cache(convo_id)
+                if skill.name == "share":
+                    output = await handle_share(cmd_args, project_path, PUBLIC_DIR, base_url)
+                elif skill.name == "shares":
+                    output = await handle_shares(PUBLIC_DIR, base_url)
+                else:
+                    output = await handle_unshare(cmd_args, PUBLIC_DIR)
+                await append_message(convo_id, tool_event(skill.name, event_type="skill-result", output=output))
+                if message_id:
+                    processed_message_ids.setdefault(convo_id, set()).add(message_id)
+                session.broadcast(SkillResult(skill=skill.name, output=output).model_dump_json())
+                return {"status": "ok", "output": output}
 
             return {"status": "ok"}
 
