@@ -4,8 +4,8 @@ import {
   Archive, ArchiveRestore, Atom, Beaker, ChevronDown, ChevronRight, Compass,
   Cpu, Diamond, Flame, FlaskConical, FolderPlus, Gem, Globe, Hexagon, Leaf,
   Lightbulb, MessageSquarePlus, Microscope, Mountain, Orbit, PanelLeftClose,
-  PanelLeftOpen, Plus, Rocket, Shell, Sparkles, Star, Target, Telescope,
-  Terminal, TreePine, Waves, X, Zap,
+  PanelLeftOpen, Rocket, Shell, Sparkles, Star, Target, Telescope, Terminal,
+  TreePine, Waves, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createConvo, createProject, listConvos, listProjects, listRecentConvos, updateProject, type ConvoMeta, type Project } from "../api";
@@ -188,7 +188,7 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && localStorage.getItem("remote-lab:nav-collapsed") === "true");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= MOBILE_BREAKPOINT);
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectInput, setProjectInput] = useState("");
@@ -297,12 +297,12 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
   }, [loadProjects]);
 
   const rail = (
-    <div style={{ width: isMobile ? "100%" : `${collapsed ? 56 : RAIL_WIDTH}px`, background: colors.bg, borderRight: isMobile ? "none" : `1px solid ${colors.border}`, display: "flex", flexDirection: "column", minWidth: 0, height: "100%", transition: "width 140ms ease" }}>
+    <div style={{ width: isMobile ? "100%" : `${collapsed ? 52 : RAIL_WIDTH}px`, background: colors.bg, borderRight: isMobile ? "none" : `1px solid ${colors.border}`, display: "flex", flexDirection: "column", minWidth: 0, height: "100%", transition: "width 140ms ease" }}>
       <div style={{ height: 52, borderBottom: `1px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: collapsed && !isMobile ? "center" : "space-between", gap: 8, padding: collapsed && !isMobile ? "8px" : "8px 12px" }}>
         {(!collapsed || isMobile) && <div style={{ fontSize: "0.82rem", fontWeight: 600, color: colors.textMuted }}>Navigator</div>}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {!isMobile && (
-            <IconButton onClick={() => setCollapsed((prev) => !prev)} label={collapsed ? "Expand navigator" : "Collapse navigator"}>
+            <IconButton onClick={() => setCollapsed((prev) => { const next = !prev; localStorage.setItem("remote-lab:nav-collapsed", String(next)); return next; })} label={collapsed ? "Expand navigator" : "Collapse navigator"}>
               {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
             </IconButton>
           )}
@@ -314,7 +314,7 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
         </div>
       </div>
 
-      <div style={{ padding: collapsed && !isMobile ? "8px 6px" : "12px", borderBottom: `1px solid ${colors.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ padding: collapsed && !isMobile ? "12px 6px" : "12px", borderBottom: `1px solid ${colors.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
         <button onClick={() => setShowProjectForm((prev) => !prev)} style={{ ...btnPrimary, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: colors.bgSurface, color: colors.text, border: `1px solid ${colors.border}`, padding: collapsed && !isMobile ? "0" : "8px 12px", height: 40, width: "100%" }}>
           <FolderPlus size={16} />
           {(!collapsed || isMobile) && <span>New project</span>}
@@ -329,7 +329,7 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
         )}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: collapsed && !isMobile ? "8px 6px" : "12px", display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: collapsed && !isMobile ? "12px 6px" : "12px", display: "flex", flexDirection: "column", gap: 18 }}>
         {error && (!collapsed || isMobile) && <div style={{ color: colors.textMuted, fontSize: "0.8rem" }}>{error}</div>}
         {!collapsed || isMobile ? (
           <>
@@ -415,16 +415,23 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
             )}
           </>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
-            <IconButton onClick={() => setShowProjectForm((prev) => !prev)} label="New project">
-              <Plus size={16} />
-            </IconButton>
-            {projects.map((project) => {
-              const Icon = getProjectIcon(project.id);
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+            {recentConvos.map((convo) => {
+              const active = convId === convo.id;
+              const project = projectMap.get(convo.project_id);
+              const Icon = project ? getProjectIcon(project.id) : Sparkles;
               return (
-                <IconButton key={project.id} onClick={() => { navigate(`/${project.id}`); }} label={project.name} style={{ color: project.id === projectId ? colors.text : colors.textMuted }}>
+                <Link
+                  key={`c-${convo.id}`}
+                  to={`/${convo.project_id}/${convo.id}`}
+                  onClick={onCloseMobile}
+                  title={convo.title || "Untitled"}
+                  className="nav-icon-btn"
+                  style={{ width: 40, height: 44, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, background: active ? colors.bgSurface : "transparent", color: active ? colors.text : colors.textMuted, textDecoration: "none", position: "relative" }}
+                >
                   <Icon size={16} />
-                </IconButton>
+                  <span style={{ position: "absolute", top: 5, right: 3, width: 7, height: 7, borderRadius: 999, background: statusColor(convo.status), boxShadow: `0 0 0 2px ${active ? colors.bgSurface : colors.bg}` }} />
+                </Link>
               );
             })}
           </div>

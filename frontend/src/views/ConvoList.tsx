@@ -10,13 +10,6 @@ const iconBtnStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-function hoverIn(e: React.MouseEvent<HTMLElement>) {
-  e.currentTarget.style.background = colors.bgSurfaceHover;
-}
-
-function hoverOut(e: React.MouseEvent<HTMLElement>) {
-  e.currentTarget.style.background = colors.bgSurface;
-}
 
 const statusColors: Record<string, string> = {
   running: "#d4a030",
@@ -194,10 +187,10 @@ export function ConvoList() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={toggleFileFinder} style={iconBtnStyle} data-tooltip="Open file" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+          <button onClick={toggleFileFinder} style={iconBtnStyle} data-tooltip="Open file" className="nav-icon-btn">
             <FolderOpen size={16} />
           </button>
-          <button onClick={() => { void handleNewConversation(); }} style={iconBtnStyle} data-tooltip="New conversation" onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+          <button onClick={() => { void handleNewConversation(); }} style={iconBtnStyle} data-tooltip="New conversation" className="nav-icon-btn">
             <MessageSquare size={16} />
           </button>
         </div>
