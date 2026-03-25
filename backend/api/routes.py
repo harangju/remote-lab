@@ -86,6 +86,10 @@ def create_api_router(*, check_token, resolve_project_file):
         if not storage.delete_project(project_id):
             raise HTTPException(status_code=404, detail="Project not found")
 
+    @api.get("/convos/recent", response_model=list[ConvoMeta])
+    async def api_recent_convos(limit: int = 10):
+        return storage.list_recent_conversations(limit)
+
     @api.get("/projects/{project_id}/convos", response_model=list[ConvoMeta])
     async def api_list_convos(project_id: str):
         proj = storage.get_project(project_id)

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AppShell } from "./components/AppShell";
 import { ProjectList } from "./views/ProjectList";
 import { ConvoList } from "./views/ConvoList";
 import { Chat } from "./views/Chat";
@@ -52,10 +53,12 @@ function App() {
     <LoginGate>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<ProjectList />} />
-          <Route path="/:projectId" element={<ConvoList />} />
-          <Route path="/:projectId/file" element={<ProjectFile />} />
-          <Route path="/:projectId/:convId" element={<Chat />} />
+          <Route element={<AppShell />}>
+            <Route path="/" element={<ProjectList />} />
+            <Route path="/:projectId" element={<ConvoList />} />
+            <Route path="/:projectId/file" element={<ProjectFile />} />
+            <Route path="/:projectId/:convId" element={<Chat />} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </LoginGate>

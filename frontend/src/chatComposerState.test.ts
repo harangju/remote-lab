@@ -8,9 +8,9 @@ const agents: AgentConfig[] = [
 ];
 
 const skills: Skill[] = [
-  { name: "docx", description: "Word documents" },
-  { name: "pdf", description: "PDF tools" },
-  { name: "pptx", description: "Slide decks" },
+  { name: "docx", type: "server", description: "Word documents" },
+  { name: "pdf", type: "server", description: "PDF tools" },
+  { name: "pptx", type: "server", description: "Slide decks" },
 ];
 
 test("getMentionMatches returns matching agents before files", () => {

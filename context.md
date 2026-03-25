@@ -7,10 +7,15 @@
   - Project mode
   - File-only mode
   - Conversation mode
-- Important interaction consequences already established:
-  - Project mode opens files explicitly (`Cmd+P`, file button, open-file flow).
-  - File-only mode is a real standalone surface.
-  - Conversation mode can move cleanly to/from file-only mode while preserving the active file via `?path=`.
+- Navigation direction is now shifting from separate project-list / convo-list pages toward a shared app shell with one universal navigator.
+- The intended navigator model is:
+  - Recent chats across projects
+  - Projects as expandable groups
+  - Chats nested within projects
+- The same navigator should power both desktop and mobile:
+  - desktop as a persistent rail
+  - mobile as a full-screen drawer/sheet
+- Navigator identity is now trending toward project-level identity rather than per-chat identity.
 
 ## Key implemented behavior
 - Conversation history is paginated: `GET /api/convos/{id}` supports `limit` and `before`; chat loads recent history first and can prepend older messages.
@@ -26,14 +31,21 @@
 - OpenAI `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, and `gpt-5.4-nano` are tracked in the model limit table; GPT-5.4/pro use a 272K soft compaction threshold for cost control, while keeping the 1.05M real context window.
 - Chat header model pill now reads from `agent-start.agent_model`; previously the frontend expected `activeAgent.model` but the websocket event never sent it, so the label fell back to `"model"`.
 
+## Current implementation state
+- Added `AppShell` and `AppNavigator` as the first pass at the unified shell.
+- Existing routes are now nested under the shell so current URLs still work while navigation is being refactored.
+- The first-pass navigator loads projects + per-project convos, shows recent chats, expands projects inline, and renders as a desktop rail or mobile full-screen overlay.
+- `ProjectList` is now reduced to a simple shell landing/empty state instead of owning the main projects UI.
+- `ConvoList` is now reduced to a lightweight project home / no-chat-selected screen, with quick actions for new chat and open file.
+- `Chat` no longer renders the legacy `ChatConvoRail`; chat navigation now relies on the shared app navigator instead of a second desktop-only chat rail.
+- Navigator now uses project-level identity chips/colors, recent chats are trimmed down, and archived projects are visible in a collapsible archived section.
+- Typecheck passes with `bun x tsc --noEmit --skipLibCheck`, and frontend build succeeds with `bun run build`.
+- The shell migration is now structurally in place, though visual polish and cleanup remain.
+
 ## Styling / frontend discipline
 - Frontend uses inline styles with semantic tokens and shared primitives from `frontend/src/styles.ts`.
 - `docs/style-guide.md` documents the intended styling discipline.
 - CodeMirror now owns editor state properly, with undo/redo history enabled.
-
-## Docs / ops notes
-- Docs now clarify Caddy setup, explicit `uv` install path, restart commands, and `www-data` ownership needs under `/var/www`.
-- Marp is installed globally and HTML slide outputs in `public/` are served at the site root.
 
 ## Current diagnosis relevant to looping/runs
 - `context.md` had grown into a changelog-like prompt artifact and was pruned down for relevance.

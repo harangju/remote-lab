@@ -297,6 +297,18 @@ def list_conversations(project_id: str) -> list[ConvoMeta]:
     return results
 
 
+def list_recent_conversations(limit: int = 10) -> list[ConvoMeta]:
+    """Return the most recent non-archived conversations across all projects."""
+    _ensure_dirs()
+    results: list[ConvoMeta] = []
+    for f in CONVOS_DIR.glob("*.meta.json"):
+        meta = _hydrate_convo_meta(ConvoMeta(**json.loads(f.read_text())))
+        if not meta.archived_at:
+            results.append(meta)
+    results.sort(key=lambda m: m.last_event_at or m.updated_at, reverse=True)
+    return results[:limit]
+
+
 def touch_project(project_id: str) -> Project | None:
     projects = _read_projects()
     now = _now()

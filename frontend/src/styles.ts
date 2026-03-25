@@ -216,6 +216,10 @@ export function injectTheme() {
         opacity: 1 !important;
         pointer-events: auto !important;
       }
+      .app-shell-mobile-menu,
+      .app-shell-mobile-menu-inline {
+        display: none !important;
+      }
     }
     .md-content p { margin: 0 0 0.4em; }
     .md-content p:last-child { margin-bottom: 0; }
@@ -277,6 +281,7 @@ export const btnIcon: React.CSSProperties = {
   boxShadow: "none",
   appearance: "none",
   WebkitAppearance: "none",
+  position: "relative",
 };
 
 export const btnSubtle: React.CSSProperties = {

@@ -138,6 +138,10 @@ export function listConvos(projectId: string): Promise<ConvoMeta[]> {
   return request(`/projects/${projectId}/convos`);
 }
 
+export function listRecentConvos(limit = 10): Promise<ConvoMeta[]> {
+  return request(`/convos/recent?limit=${limit}`);
+}
+
 export function createConvo(projectId: string, title?: string): Promise<ConvoMeta> {
   return request(`/projects/${projectId}/convos`, {
     method: "POST",
@@ -264,7 +268,7 @@ export type WsEvent =
   | { type: "tool-result"; run_id: string; name: string; output: string; diff?: string; tool_call_id?: string; agent_id?: string }
   | { type: "tool-output"; run_id: string; name: string; output: string; tool_call_id?: string; agent_id?: string }
   | { type: "file-changed"; run_id: string; path: string; change: "created" | "updated"; agent_id?: string }
-  | { type: "tool-confirm"; run_id: string; tool_call_id: string; name: string; args?: string; agent_id?: string; can_allow_project?: boolean }
+  | { type: "tool-confirm"; run_id: string; tool_call_id: string; name: string; args?: string; agent_id?: string; can_allow_project?: boolean; can_turn_on_auto?: boolean }
   | { type: "done"; run_id: string; turns: number; context_tokens: number; context_limit: number; agent_id?: string; status?: "ok" | "cancelled" | "error"; error_message?: string }
   | { type: "compacted"; old_tokens: number; new_tokens: number }
   | { type: "skill-result"; skill: string; output: string }

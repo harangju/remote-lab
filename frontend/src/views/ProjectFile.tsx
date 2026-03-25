@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
 import { usePanel } from "../hooks/usePanel";
@@ -8,6 +8,7 @@ import { createConvo, listConvos, getConvo, type ConvoMeta } from "../api";
 export function ProjectFile() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { closeMobileNavigator } = useOutletContext<{ closeMobileNavigator: () => void }>();
   const panel = usePanel(projectId);
 
   const openFromQuery = useCallback(() => {
@@ -22,11 +23,8 @@ export function ProjectFile() {
     openFromQuery();
   }, [openFromQuery]);
 
-
   const handleClose = useCallback(() => {
-    if (panel.dirty) {
-      if (!window.confirm("You have unsaved changes. Discard?")) return;
-    }
+    if (panel.dirty && !window.confirm("You have unsaved changes. Discard?")) return;
     navigate(`/${projectId}`);
   }, [navigate, panel.dirty, projectId]);
 
@@ -40,9 +38,7 @@ export function ProjectFile() {
   }, [panel.dirty, panel.editMode, panel.cancelEdit, panel.setEditMode]);
 
   const handleOpenFile = useCallback((path: string) => {
-    if (panel.dirty) {
-      if (!window.confirm("You have unsaved changes. Discard and open another file?")) return;
-    }
+    if (panel.dirty && !window.confirm("You have unsaved changes. Discard and open another file?")) return;
     navigate(`/${projectId}/file?path=${encodeURIComponent(path)}`);
     panel.openFile(path);
   }, [navigate, panel.dirty, panel.openFile, projectId]);
@@ -104,7 +100,9 @@ export function ProjectFile() {
       }
     };
     void loadConversationOptions();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [panel.file, projectId]);
 
   const handleStartConversation = useCallback(async () => {
@@ -122,32 +120,47 @@ export function ProjectFile() {
     <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
       <div style={{ flex: 1, minHeight: 0 }}>
         {panel.file ? (
-          <FilePanel
-            file={panel.file}
-            editMode={panel.editMode}
-            dirty={panel.dirty}
-            saving={panel.saving}
-            saveError={panel.saveError}
-            externalChange={panel.externalChange}
-            onToggleEdit={handleToggleEdit}
-            onContentChange={panel.updateContent}
-            onSave={panel.saveFile}
-            onCancel={panel.cancelEdit}
-            onClose={handleClose}
-            onReload={panel.reloadFile}
-            onDismissExternal={panel.dismissExternalChange}
-            onOpenFileFinder={panel.toggleFileFinder}
-            canGoBack={panel.canGoBack}
-            canGoForward={panel.canGoForward}
-            onGoBack={() => { const p = panel.goBack(); if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true }); }}
-            onGoForward={() => { const p = panel.goForward(); if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true }); }}
-            onStartConversation={() => { void handleStartConversation(); }}
-            conversationDisabled={!panel.file}
-            conversationOptions={conversationOptions.map((convo) => ({ id: convo.id, title: convo.title, updated_at: convo.last_event_at || convo.updated_at }))}
-            conversationOptionsLabel={conversationOptionLabel}
-            conversationModal
-            onOpenConversationOption={handleOpenConversationOption}
-          />
+          <>
+            <div className="app-shell-mobile-menu-inline" style={{ position: "fixed", top: 12, left: 12, zIndex: 90 }}>
+              <button onClick={() => closeMobileNavigator()} style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 9, width: 34, height: 34, color: "var(--text-muted)" }}>
+                ☰
+              </button>
+            </div>
+            <FilePanel
+              file={panel.file}
+              editMode={panel.editMode}
+              dirty={panel.dirty}
+              saving={panel.saving}
+              saveError={panel.saveError}
+              externalChange={panel.externalChange}
+              onToggleEdit={handleToggleEdit}
+              onContentChange={panel.updateContent}
+              onSave={panel.saveFile}
+              onCancel={panel.cancelEdit}
+              onClose={handleClose}
+              onReload={panel.reloadFile}
+              onDismissExternal={panel.dismissExternalChange}
+              onOpenFileFinder={panel.toggleFileFinder}
+              canGoBack={panel.canGoBack}
+              canGoForward={panel.canGoForward}
+              onGoBack={() => {
+                const p = panel.goBack();
+                if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true });
+              }}
+              onGoForward={() => {
+                const p = panel.goForward();
+                if (p) navigate(`/${projectId}/file?path=${encodeURIComponent(p)}`, { replace: true });
+              }}
+              onStartConversation={() => {
+                void handleStartConversation();
+              }}
+              conversationDisabled={!panel.file}
+              conversationOptions={conversationOptions.map((convo) => ({ id: convo.id, title: convo.title, updated_at: convo.last_event_at || convo.updated_at }))}
+              conversationOptionsLabel={conversationOptionLabel}
+              conversationModal
+              onOpenConversationOption={handleOpenConversationOption}
+            />
+          </>
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "0.9rem" }}>
             Open a file to begin.

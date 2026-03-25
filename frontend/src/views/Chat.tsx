@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
-import { FileText, Pencil, FolderOpen, Sparkles, Archive } from "lucide-react";
+import { useParams, Link, useNavigate, useOutletContext } from "react-router-dom";
+import { FileText, Pencil, FolderOpen, Sparkles, Archive, Menu } from "lucide-react";
 import { listConvos, createConvo, getConvo, updateConvo, listModels, type ConvoMeta } from "../api";
 import { btnIcon, colors, input as inputStyle, transition } from "../styles";
 import { FilePanel } from "../components/FilePanel";
 import { FileFinder } from "../components/FileFinder";
-import { ChatConvoRail } from "../components/ChatConvoRail";
 import { usePanel } from "../hooks/usePanel";
 import { extractFilePath } from "../chatUi";
 import { ChatComposer } from "../chatComposer";
@@ -49,10 +48,6 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
 }
 
 const CHAT_HEADER_MAX_WIDTH = "72rem";
-const CONVO_RAIL_WIDTH = 240;
-const CONVO_RAIL_COLLAPSED_WIDTH = 52;
-const CONVO_RAIL_ROW_HEIGHT = 44;
-const CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY = "remote-lab:chat-convo-rail-collapsed";
 const PANEL_MIN_WIDTH = 320;
 const PANEL_MAX_WIDTH_RATIO = 0.75;
 const PANEL_DEFAULT_WIDTH_RATIO = 0.36;
@@ -64,19 +59,14 @@ const CHAT_PANEL_RATIO_STORAGE_KEY = "remote-lab:chat-panel-width-ratio";
 export function Chat() {
   const { projectId, convId } = useParams<{ projectId: string; convId: string }>();
   const navigate = useNavigate();
+  const { closeMobileNavigator } = useOutletContext<{ closeMobileNavigator: () => void }>();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
-  const [currentArchivedConvo, setCurrentArchivedConvo] = useState<ConvoMeta | null>(null);
-  const [archivingConvoId, setArchivingConvoId] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelContextLimits, setModelContextLimits] = useState<Record<string, number>>({});
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
-  const [railCollapsed, setRailCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY) === "true";
-  });
   const panel = usePanel(projectId);
 
   const {
@@ -125,7 +115,9 @@ export function Chat() {
     setError,
   } = useChatSession(projectId, convId);
 
-  const stableLoadOlderHistory = useCallback(() => { void loadOlderHistory(); }, [loadOlderHistory]);
+  const stableLoadOlderHistory = useCallback(() => {
+    void loadOlderHistory();
+  }, [loadOlderHistory]);
 
   const syncFileQuery = useCallback((path: string | null, replace = false) => {
     if (!projectId || !convId) return;
@@ -225,51 +217,20 @@ export function Chat() {
     }
   }, [navigate, projectId, setError]);
 
-  const archiveConvoFromRail = useCallback(async (targetConvoId: string) => {
-    if (!projectId) return;
-    const remainingConvos = projectConvos.filter((convo) => convo.id !== targetConvoId);
-    const targetWasActive = targetConvoId === convId;
-    const nextConvo = targetWasActive ? remainingConvos[0] : null;
-    try {
-      setArchivingConvoId(targetConvoId);
-      await updateConvo(targetConvoId, { archived_at: new Date().toISOString() });
-      setProjectConvos(remainingConvos);
-      if (targetWasActive) {
-        if (nextConvo) {
-          navigate(`/${projectId}/${nextConvo.id}${panel.file ? `?path=${encodeURIComponent(panel.file.path)}` : ""}`);
-        } else {
-          navigate(`/${projectId}`);
-        }
-      }
-    } catch (e: any) {
-      setError(e.message || "Failed to archive conversation");
-    } finally {
-      setArchivingConvoId((current) => (current === targetConvoId ? null : current));
-    }
-  }, [convId, navigate, panel.file, projectConvos, projectId, setError]);
-
-  const toggleRailCollapsed = useCallback(() => {
-    setRailCollapsed((prev) => {
-      const next = !prev;
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(CHAT_CONVO_RAIL_COLLAPSED_STORAGE_KEY, String(next));
-      }
-      return next;
-    });
-  }, []);
-
   useEffect(() => {
-    listModels().then((res) => { setAvailableModels(res.models); setModelContextLimits(res.context_limits || {}); }).catch(() => {});
+    listModels().then((res) => {
+      setAvailableModels(res.models);
+      setModelContextLimits(res.context_limits || {});
+    }).catch(() => {});
   }, []);
 
-  // Correct context_limit when model or limits map becomes available
   useEffect(() => {
     if (!meta?.model || !Object.keys(modelContextLimits).length) return;
     const correct = modelContextLimits[meta.model];
     if (correct && correct !== meta.context_limit) {
       setMeta((prev) => prev ? { ...prev, context_limit: correct } : prev);
     }
-  }, [meta?.model, modelContextLimits]);
+  }, [meta?.model, modelContextLimits, setMeta]);
 
   useEffect(() => {
     if (!modelDropdownOpen) return;
@@ -327,36 +288,10 @@ export function Chat() {
     const loadConvos = async () => {
       try {
         const next = await listConvos(projectId);
-        const normalized = next.map((convo) => ({
-          ...convo,
-          last_event_at: convo.last_event_at || convo.updated_at,
-        }));
-        if (cancelled) return;
-        const activeConvos = normalized.filter((convo) => !convo.archived_at);
-        setProjectConvos((prev) => JSON.stringify(prev) === JSON.stringify(activeConvos) ? prev : activeConvos);
-
-        if (convId) {
-          const activeCurrent = activeConvos.find((convo) => convo.id === convId) || null;
-          if (activeCurrent) {
-            setCurrentArchivedConvo(null);
-          } else {
-            try {
-              const current = await getConvo(convId);
-              if (!cancelled && current.archived_at) {
-                setCurrentArchivedConvo({
-                  ...current,
-                  last_event_at: current.last_event_at || current.updated_at,
-                });
-              } else if (!cancelled) {
-                setCurrentArchivedConvo(null);
-              }
-            } catch {
-              if (!cancelled) setCurrentArchivedConvo(null);
-            }
-          }
-        } else {
-          setCurrentArchivedConvo(null);
-        }
+        const normalized = next
+          .map((convo) => ({ ...convo, last_event_at: convo.last_event_at || convo.updated_at }))
+          .filter((convo) => !convo.archived_at);
+        if (!cancelled) setProjectConvos(normalized);
       } catch {}
     };
 
@@ -368,7 +303,7 @@ export function Chat() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [convId, projectId]);
+  }, [projectId]);
 
   const [panelWidth, setPanelWidth] = useState(() => {
     if (typeof window === "undefined") return 500;
@@ -429,39 +364,20 @@ export function Chat() {
     return () => window.removeEventListener("resize", onResize);
   }, [panel.file]);
 
-  const visibleConvos = useMemo(() => {
-    const baseConvos = projectConvos.slice(0, 12);
-    if (currentArchivedConvo && !baseConvos.some((convo) => convo.id === currentArchivedConvo.id)) {
-      return [currentArchivedConvo, ...baseConvos];
-    }
-    return baseConvos;
-  }, [currentArchivedConvo, projectConvos]);
-  const railWidth = railCollapsed ? CONVO_RAIL_COLLAPSED_WIDTH : CONVO_RAIL_WIDTH;
-
   const isDesktop = typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches;
   const rawModel = meta?.model || activeAgent?.model || null;
   const activeModelLabel = rawModel?.includes(":") ? rawModel.split(":").slice(1).join(":") : rawModel;
+  const filePath = panel.file?.path;
 
   return (
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
-      <ChatConvoRail
-        railWidth={railWidth}
-        railCollapsed={railCollapsed}
-        rowHeight={CONVO_RAIL_ROW_HEIGHT}
-        projectId={projectId}
-        convId={convId}
-        visibleConvos={visibleConvos}
-        panelFilePath={panel.file?.path ?? null}
-        archivingConvoId={archivingConvoId}
-        onToggleCollapsed={toggleRailCollapsed}
-        onNewConversation={() => { void handleNewConversation(); }}
-        onNavigateConvo={(targetConvoId) => navigate(`/${projectId}/${targetConvoId}${panel.file ? `?path=${encodeURIComponent(panel.file.path)}` : ""}`)}
-        onArchiveConvo={(targetConvoId) => { void archiveConvoFromRail(targetConvoId); }}
-      />
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
         <div style={{ borderBottom: `1px solid ${colors.border}`, flexShrink: 0, position: "relative", zIndex: 2 }}>
           <div style={{ padding: "8px 1.5rem", minHeight: "51px", maxWidth: CHAT_HEADER_MAX_WIDTH, margin: "0 auto" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+              <button onClick={() => closeMobileNavigator()} style={{ ...headerIconBtnStyle, color: colors.textMuted }} aria-label="Open navigator" className="app-shell-mobile-menu-inline" onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
+                <Menu size={15} />
+              </button>
               <Link to={`/${projectId}`} style={{ ...headerIconBtnStyle, color: colors.textMuted, textDecoration: "none" }} aria-label="Conversations" onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
                 <span style={{ fontSize: "1rem", lineHeight: 1 }}>&larr;</span>
               </Link>
@@ -509,8 +425,12 @@ export function Chat() {
                               key={m}
                               onClick={() => handleModelChange(m)}
                               style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 12px", background: isActive ? colors.bgSurfaceHover : "transparent", border: "none", color: isActive ? colors.text : colors.textMuted, fontSize: "0.8rem", cursor: "pointer", fontWeight: isActive ? 600 : 400 }}
-                              onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgSurfaceHover; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? colors.bgSurfaceHover : "transparent"; }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = colors.bgSurfaceHover;
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = isActive ? colors.bgSurfaceHover : "transparent";
+                              }}
                             >
                               {label}
                             </button>
@@ -539,16 +459,20 @@ export function Chat() {
                       cursor: savingAutonomy ? "default" : "pointer",
                       opacity: savingAutonomy ? 0.6 : 1,
                     }}
-                    onMouseEnter={(e) => { if (!savingAutonomy && !autonomousToolsEnabled) headerHoverIn(e); }}
-                    onMouseLeave={(e) => { if (!autonomousToolsEnabled) headerHoverOut(e); }}
+                    onMouseEnter={(e) => {
+                      if (!savingAutonomy && !autonomousToolsEnabled) headerHoverIn(e);
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!autonomousToolsEnabled) headerHoverOut(e);
+                    }}
                   >
                     <Sparkles size={15} />
                   </button>
                   <button onClick={panel.toggleFileFinder} data-tooltip="Find file (⌘P)" style={{ ...headerIconBtnStyle, color: colors.textMuted }} onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
                     <FolderOpen size={15} />
                   </button>
-                  {panel.file && (
-                    <button onClick={() => navigate(`/${projectId}/file?path=${encodeURIComponent(panel.file.path)}`)} data-tooltip="File only" style={{ ...headerIconBtnStyle, color: colors.textMuted }} onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
+                  {filePath && (
+                    <button onClick={() => navigate(`/${projectId}/file?path=${encodeURIComponent(filePath)}`)} data-tooltip="File only" style={{ ...headerIconBtnStyle, color: colors.textMuted }} onMouseEnter={headerHoverIn} onMouseLeave={headerHoverOut}>
                       <FileText size={15} />
                     </button>
                   )}
@@ -632,14 +556,30 @@ export function Chat() {
               onOpenFileFinder={panel.toggleFileFinder}
               canGoBack={panel.canGoBack}
               canGoForward={panel.canGoForward}
-              onGoBack={() => { const p = panel.goBack(); if (p) syncFileQuery(p, true); }}
-              onGoForward={() => { const p = panel.goForward(); if (p) syncFileQuery(p, true); }}
+              onGoBack={() => {
+                const p = panel.goBack();
+                if (p) syncFileQuery(p, true);
+              }}
+              onGoForward={() => {
+                const p = panel.goForward();
+                if (p) syncFileQuery(p, true);
+              }}
             />
           </div>
         </>
       )}
 
-      {panel.showFileFinder && <FileFinder files={panel.fileList || []} loading={panel.fileListLoading} touchedFiles={touchedFiles} recentlyViewed={panel.recentlyViewed} onSelect={handleOpenFile} onClose={panel.toggleFileFinder} onRemoveRecent={panel.removeFromRecent} />}
+      {panel.showFileFinder && (
+        <FileFinder
+          files={panel.fileList || []}
+          loading={panel.fileListLoading}
+          touchedFiles={touchedFiles}
+          recentlyViewed={panel.recentlyViewed}
+          onSelect={handleOpenFile}
+          onClose={panel.toggleFileFinder}
+          onRemoveRecent={panel.removeFromRecent}
+        />
+      )}
     </div>
   );
 }

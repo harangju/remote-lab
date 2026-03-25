@@ -165,14 +165,17 @@ export function useChatSession(projectId?: string, convId?: string) {
       const container = messageListRef.current;
       if (!container) return;
       const key = savedScrollKeyRef.current;
-      const saved = key ? sessionStorage.getItem(key) : null;
+      const saved = typeof key === "string" ? sessionStorage.getItem(key) : null;
       if (saved != null) {
         container.scrollTop = Number(saved);
-        sessionStorage.removeItem(key);
-      } else if (latestUserMessageRef.current) {
-        scrollUserMessageNearTop(latestUserMessageRef.current, "auto");
+        if (typeof key === "string") sessionStorage.removeItem(key);
       } else {
-        container.scrollTop = container.scrollHeight;
+        const latestUserMessage = latestUserMessageRef.current;
+        if (latestUserMessage) {
+          scrollUserMessageNearTop(latestUserMessage, "auto");
+        } else {
+          container.scrollTop = container.scrollHeight;
+        }
       }
       initialScrollDoneRef.current = true;
     });
@@ -234,17 +237,18 @@ export function useChatSession(projectId?: string, convId?: string) {
   }, [convId, loadingOlder, hasMoreHistory, historyCursor, agents]);
 
   useEffect(() => {
-    reloadConversation().catch((e) => setError(e.message));
-  }, [reloadConversation]);
-
-  useEffect(() => {
     if (!projectId) return;
     listFiles(projectId, { hidden: true }).then((res) => setProjectFiles(res.files)).catch(() => setProjectFiles([]));
     listSkills(projectId).then(setSkills).catch(() => setSkills([]));
   }, [projectId]);
 
   useEffect(() => {
-    if (!convId) return;
+    if (!projectId || !convId) return;
+    reloadConversation().catch((e) => setError(e.message));
+  }, [projectId, convId, reloadConversation]);
+
+  useEffect(() => {
+    if (!convId || !projectId) return;
     // Reset run state so a previous chat's "running" doesn't bleed into the new one.
     // If this conversation IS running, the server will send a `running` event to restore it.
     setBusy(false);

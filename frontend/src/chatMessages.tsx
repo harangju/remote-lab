@@ -59,7 +59,7 @@ export const ChatMessages = React.memo(function ChatMessages({
   const [editingMsgValue, setEditingMsgValue] = useState("");
   const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
 
-  const msgBubble = useCallback((role: "user" | "assistant", agentColor?: string, bashMode?: boolean): React.CSSProperties => ({
+  const msgBubble = useCallback((role: "user" | "assistant" | "system", agentColor?: string, bashMode?: boolean): React.CSSProperties => ({
     maxWidth: MESSAGE_MAX_WIDTH,
     padding: "10px 14px",
     borderRadius: "12px",
