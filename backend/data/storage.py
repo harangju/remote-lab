@@ -67,13 +67,18 @@ def _write_projects(projects: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _project_sort_key(project: Project) -> tuple[str, str]:
-    return (project.updated_at, project.created_at)
-
-
 def list_projects() -> list[Project]:
     projects = [Project(**{**p, "updated_at": p.get("updated_at", p.get("created_at"))}) for p in _read_projects()]
-    projects.sort(key=_project_sort_key, reverse=True)
+    latest: dict[str, str] = {}
+    for f in CONVOS_DIR.glob("*.meta.json"):
+        m = _hydrate_convo_meta(ConvoMeta(**json.loads(f.read_text())))
+        ts = m.last_event_at or m.updated_at
+        if not m.archived_at and ts > latest.get(m.project_id, ""):
+            latest[m.project_id] = ts
+    for p in projects:
+        if p.id in latest:
+            p.updated_at = latest[p.id]
+    projects.sort(key=lambda p: p.updated_at, reverse=True)
     return projects
 
 
