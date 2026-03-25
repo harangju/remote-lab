@@ -85,20 +85,30 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const dirtyRef = useRef(false);
   const openRequestIdRef = useRef(0);
   const storageKey = projectId ? `recentFiles:${projectId}` : null;
+
+  const loadHistory = (key: string | null): string[] => {
+    if (!key) return [];
+    try {
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : [];
+    } catch { return []; }
+  };
+
   const historyRef = useRef<string[]>(null!);
-  if (historyRef.current === null) {
-    if (storageKey) {
-      try {
-        const stored = localStorage.getItem(storageKey);
-        historyRef.current = stored ? JSON.parse(stored) : [];
-      } catch { historyRef.current = []; }
-    } else {
-      historyRef.current = [];
-    }
-  }
+  if (historyRef.current === null) historyRef.current = loadHistory(storageKey);
   const historyIndexRef = useRef(historyRef.current.length - 1);
   const navigatingRef = useRef(false);
   const [historyVersion, setHistoryVersion] = useState(0);
+
+  // Reload history from localStorage when project changes
+  const prevStorageKeyRef = useRef(storageKey);
+  useEffect(() => {
+    if (storageKey === prevStorageKeyRef.current) return;
+    prevStorageKeyRef.current = storageKey;
+    historyRef.current = loadHistory(storageKey);
+    historyIndexRef.current = historyRef.current.length - 1;
+    setHistoryVersion((v) => v + 1);
+  }, [storageKey]);
 
   // Persist file history to localStorage
   useEffect(() => {
