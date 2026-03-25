@@ -174,6 +174,16 @@ function ProjectCard({ project, expanded, active, activeConvId, dimmed, actions,
     return () => window.removeEventListener("convo-status-changed", handler);
   }, []);
 
+  // Remove archived convos from the list
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { convoId } = (e as CustomEvent).detail;
+      setConvos((prev) => prev && prev.filter((c) => c.id !== convoId));
+    };
+    window.addEventListener("convo-archived", handler);
+    return () => window.removeEventListener("convo-archived", handler);
+  }, []);
+
   return (
     <div style={{ border: `1px solid ${colors.border}`, borderRadius: 12, overflow: "hidden", background: active ? colors.bgSurface : colors.bg, opacity: dimmed ? 0.7 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px" }}>
@@ -339,6 +349,7 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     try {
       await updateConvo(convoId, { archived_at: new Date().toISOString() });
       setRecentConvos((prev) => prev.filter((c) => c.id !== convoId));
+      window.dispatchEvent(new CustomEvent("convo-archived", { detail: { convoId } }));
       // If we just archived the active chat, navigate away
       if (convId === convoId) {
         const remaining = recentConvos.filter((c) => c.id !== convoId);
@@ -402,6 +413,7 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
         {!collapsed || isMobile ? (
           <>
             <section style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, color: colors.textMuted }}>Recents</div>
               {initialLoading ? (
                 <div style={{ color: colors.textMuted, fontSize: "0.8rem" }}>Loading...</div>
               ) : recentConvos.length === 0 ? (
