@@ -245,6 +245,17 @@ export function useChatSession(projectId?: string, convId?: string) {
 
   useEffect(() => {
     if (!convId) return;
+    // Reset run state so a previous chat's "running" doesn't bleed into the new one.
+    // If this conversation IS running, the server will send a `running` event to restore it.
+    setBusy(false);
+    setWaitingForModel(false);
+    setCurrentRunId(null);
+    blocksRef.current = [];
+    setStreamBlocks([]);
+    activeAgentRef.current = null;
+    setActiveAgent(null);
+    replayingRef.current = false;
+    hasConnectedRef.current = false;
     const ws = connectWs(convId);
     wsRef.current = ws;
 
