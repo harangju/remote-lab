@@ -300,10 +300,11 @@ def list_conversations(project_id: str) -> list[ConvoMeta]:
 def list_recent_conversations(limit: int = 10) -> list[ConvoMeta]:
     """Return the most recent non-archived conversations across all projects."""
     _ensure_dirs()
+    archived_projects: set[str] = {p["id"] for p in _read_projects() if p.get("archived_at")}
     results: list[ConvoMeta] = []
     for f in CONVOS_DIR.glob("*.meta.json"):
         meta = _hydrate_convo_meta(ConvoMeta(**json.loads(f.read_text())))
-        if not meta.archived_at:
+        if not meta.archived_at and meta.project_id not in archived_projects:
             results.append(meta)
     results.sort(key=lambda m: m.last_event_at or m.updated_at, reverse=True)
     return results[:limit]

@@ -8,7 +8,7 @@ import {
   TreePine, Waves, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { createConvo, createProject, listConvos, listProjects, listRecentConvos, updateProject, type ConvoMeta, type Project } from "../api";
+import { createConvo, createProject, listConvos, listProjects, listRecentConvos, updateConvo, updateProject, type ConvoMeta, type Project } from "../api";
 import { btnIcon, btnPrimary, colors, input as inputStyle } from "../styles";
 
 const MOBILE_BREAKPOINT = 768;
@@ -184,7 +184,7 @@ function injectNavStyles() {
   if (stylesInjected) return;
   stylesInjected = true;
   const style = document.createElement("style");
-  style.textContent = `.nav-icon-btn:hover { background: ${colors.bgSurfaceHover} !important; }`;
+  style.textContent = `.nav-icon-btn:hover { background: ${colors.bgSurfaceHover} !important; } .recent-row .recent-archive { opacity: 0; } .recent-row:hover .recent-archive { opacity: 1; }`;
   document.head.appendChild(style);
 }
 
@@ -313,8 +313,27 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     }
   }, [navigate, onCloseMobile]);
 
+  const handleArchiveConvo = useCallback(async (convoId: string) => {
+    try {
+      await updateConvo(convoId, { archived_at: new Date().toISOString() });
+      setRecentConvos((prev) => prev.filter((c) => c.id !== convoId));
+      // If we just archived the active chat, navigate away
+      if (convId === convoId) {
+        const remaining = recentConvos.filter((c) => c.id !== convoId);
+        if (remaining.length > 0) {
+          navigate(`/${remaining[0].project_id}/${remaining[0].id}`);
+        } else if (projects.length > 0) {
+          navigate(`/${projects[0].id}`);
+        } else {
+          navigate("/");
+        }
+      }
+    } catch {}
+  }, [convId, navigate, onCloseMobile, projects, recentConvos]);
+
   const handleArchiveProject = useCallback(async (id: string) => {
     await updateProject(id, { archived_at: new Date().toISOString() });
+    setRecentConvos((prev) => prev.filter((c) => c.project_id !== id));
     await loadProjects();
   }, [loadProjects]);
 
@@ -371,20 +390,34 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
                 const project = projectMap.get(convo.project_id);
                 const Icon = project ? getProjectIcon(project.id) : null;
                 return (
-                  <Link
+                  <div
                     key={`recent-${convo.id}`}
-                    to={`/${convo.project_id}/${convo.id}`}
-                    onClick={onCloseMobile}
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 10, background: active ? colors.bgSurface : "transparent", color: colors.text, textDecoration: "none", border: `1px solid ${active ? colors.border : "transparent"}` }}
+                    className="recent-row"
+                    style={{ display: "flex", alignItems: "center", borderRadius: 10, background: active ? colors.bgSurface : "transparent", border: `1px solid ${active ? colors.border : "transparent"}` }}
                   >
-                    <span style={{ width: 7, height: 7, minWidth: 7, borderRadius: 999, background: statusColor(convo.status), opacity: active ? 1 : 0.7 }} />
-                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-                      <span style={{ fontSize: "0.84rem", fontWeight: active ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{convo.title || "Untitled"}</span>
-                      <span style={{ fontSize: "0.72rem", color: colors.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                        {Icon && <Icon size={10} />} {project?.name || "Project"} · {timeAgo(convo.last_event_at || convo.updated_at)}
+                    <Link
+                      to={`/${convo.project_id}/${convo.id}`}
+                      onClick={onCloseMobile}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", flex: 1, minWidth: 0, color: colors.text, textDecoration: "none" }}
+                    >
+                      <span style={{ width: 7, height: 7, minWidth: 7, borderRadius: 999, background: statusColor(convo.status), opacity: active ? 1 : 0.7 }} />
+                      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+                        <span style={{ fontSize: "0.84rem", fontWeight: active ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{convo.title || "Untitled"}</span>
+                        <span style={{ fontSize: "0.72rem", color: colors.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          {Icon && <Icon size={10} />} {project?.name || "Project"} · {timeAgo(convo.last_event_at || convo.updated_at)}
+                        </span>
                       </span>
-                    </span>
-                  </Link>
+                    </Link>
+                    <button
+                      className="recent-archive nav-icon-btn"
+                      onClick={() => { void handleArchiveConvo(convo.id); }}
+                      aria-label="Archive chat"
+                      title="Archive chat"
+                      style={{ ...iconBtnStyle, width: 26, height: 26, minWidth: 26, minHeight: 26, color: colors.textMuted, marginRight: 6, transition: "opacity 100ms ease" }}
+                    >
+                      <Archive size={13} />
+                    </button>
+                  </div>
                 );
               })}
             </section>
