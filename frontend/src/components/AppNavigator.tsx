@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 
 const MOBILE_BREAKPOINT = 768;
 const RAIL_WIDTH = 300;
-const RECENT_LIMIT = 5;
+const RECENT_LIMIT = 7;
 const POLL_INTERVAL_MS = 5000;
 
 const iconBtnStyle: React.CSSProperties = {
@@ -217,6 +217,7 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
   const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
   const [recentConvos, setRecentConvos] = useState<ConvoMeta[]>([]);
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [showProjects, setShowProjects] = useState(false);
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -401,7 +402,6 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
         {!collapsed || isMobile ? (
           <>
             <section style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", color: colors.textMuted, fontWeight: 600 }}>Recent</div>
               {initialLoading ? (
                 <div style={{ color: colors.textMuted, fontSize: "0.8rem" }}>Loading...</div>
               ) : recentConvos.length === 0 ? (
@@ -444,8 +444,14 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
             </section>
 
             <section style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", color: colors.textMuted, fontWeight: 600 }}>Projects</div>
-              {projects.map((project) => (
+              <button
+                onClick={() => setShowProjects((prev) => !prev)}
+                style={{ background: "none", border: "none", padding: 0, color: colors.textMuted, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
+              >
+                {showProjects ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                Projects ({projects.length})
+              </button>
+              {showProjects && projects.map((project) => (
                 <ProjectCard
                   key={project.id}
                   project={project}
