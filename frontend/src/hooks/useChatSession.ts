@@ -94,7 +94,7 @@ export function useChatSession(projectId?: string, convId?: string) {
     pendingScrollMessageIdRef.current = null;
   }, [messages, scrollUserMessageNearTop]);
 
-  // Persist scroll position to sessionStorage so browser refresh restores it
+  // Persist scroll position to sessionStorage so it restores on refresh or chat switch
   useEffect(() => {
     if (!convId) return;
     const key = `remote-lab:scroll:${convId}`;
@@ -104,7 +104,11 @@ export function useChatSession(projectId?: string, convId?: string) {
       if (container) sessionStorage.setItem(key, String(container.scrollTop));
     };
     window.addEventListener("beforeunload", saveScroll);
-    return () => window.removeEventListener("beforeunload", saveScroll);
+    return () => {
+      // Save scroll when switching away from this chat (convId change) or on unmount
+      saveScroll();
+      window.removeEventListener("beforeunload", saveScroll);
+    };
   }, [convId]);
 
   useLayoutEffect(() => {
