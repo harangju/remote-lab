@@ -14,6 +14,7 @@ import { btnIcon, btnPrimary, colors, input as inputStyle } from "../styles";
 const MOBILE_BREAKPOINT = 768;
 const RAIL_WIDTH = 300;
 const RECENT_LIMIT = 5;
+const POLL_INTERVAL_MS = 5000;
 
 const iconBtnStyle: React.CSSProperties = {
   ...btnIcon,
@@ -142,6 +143,16 @@ function ProjectCard({ project, expanded, active, activeConvId, dimmed, actions,
     listConvos(project.id).then((c) => setConvos(c.filter((x) => !x.archived_at))).catch(() => {});
   }, [active, activeConvId, project.id]);
 
+  // Live status updates from the active chat's WebSocket
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { convoId, status } = (e as CustomEvent).detail;
+      setConvos((prev) => prev && prev.map((c) => c.id === convoId ? { ...c, status } : c));
+    };
+    window.addEventListener("convo-status-changed", handler);
+    return () => window.removeEventListener("convo-status-changed", handler);
+  }, []);
+
   return (
     <div style={{ border: `1px solid ${colors.border}`, borderRadius: 12, overflow: "hidden", background: active ? colors.bgSurface : colors.bg, opacity: dimmed ? 0.7 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px" }}>
@@ -230,6 +241,22 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  // Live status updates from the active chat's WebSocket
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { convoId, status } = (e as CustomEvent).detail;
+      setRecentConvos((prev) => prev.map((c) => c.id === convoId ? { ...c, status } : c));
+    };
+    window.addEventListener("convo-status-changed", handler);
+    return () => window.removeEventListener("convo-status-changed", handler);
+  }, []);
+
+  // Light poll for recents to catch background status changes
+  useEffect(() => {
+    const id = setInterval(() => { listRecentConvos(RECENT_LIMIT).then(setRecentConvos).catch(() => {}); }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!projectId) return;

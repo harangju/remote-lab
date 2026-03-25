@@ -295,6 +295,7 @@ export function useChatSession(projectId?: string, convId?: string) {
         case "running": {
           const isReconnect = data.run_id === activeRunIdRef.current;
           setCurrentRunId(data.run_id); setBusy(true); setWaitingForModel(true);
+          if (convId) window.dispatchEvent(new CustomEvent("convo-status-changed", { detail: { convoId: convId, status: "running" } }));
           blocksRef.current = [];
           if (isReconnect) {
             // Reconnect replay: suppress renders until sync arrives
@@ -380,7 +381,9 @@ export function useChatSession(projectId?: string, convId?: string) {
           }
           blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); activeAgentRef.current = null; setActiveAgent(null);
           if (data.context_limit > 0) setMeta((prev) => ({ turns: data.turns, context_tokens: data.context_tokens, context_limit: data.context_limit, model: prev?.model }));
-          setBusy(false); setCurrentRunId(null); break;
+          setBusy(false); setCurrentRunId(null);
+          if (convId) { const s = status === "error" ? "error" : "done"; window.dispatchEvent(new CustomEvent("convo-status-changed", { detail: { convoId: convId, status: s } })); }
+          break;
         }
         case "compacted": setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev); setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }] }]); setWaitingForModel(false); setBusy(false); break;
         case "skill-result": setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: data.skill, input: data.output }] }]); setWaitingForModel(false); setBusy(false); break;
