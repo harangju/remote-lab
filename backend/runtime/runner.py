@@ -73,7 +73,7 @@ async def _finalize_run_session(convo_id: str, run: RunState) -> None:
     session = sessions.get(convo_id)
     if session and session.run is run:
         session.run = None
-        if not session.subscribers and session.controller is None:
+        if not session.sse_queues:
             sessions.pop(convo_id, None)
 
 

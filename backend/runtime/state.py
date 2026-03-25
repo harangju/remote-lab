@@ -4,14 +4,12 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import WebSocket
-
 from backend.voice.stt import DeepgramSTTSession
 
 
 @dataclass
 class RunState:
-    """Tracks an in-flight agent run independently of WebSocket connections."""
+    """Tracks an in-flight agent run independently of any transport."""
 
     convo_id: str
     run_id: str
@@ -21,7 +19,6 @@ class RunState:
     done_event: dict | None = None
     error_msg: str | None = None
     status: str = "running"  # running | done | error
-    subscribers: set[WebSocket] = field(default_factory=set)
     message_history: list = field(default_factory=list)
     last_context_tokens: int = 0
     pending_approvals: set[str] = field(default_factory=set)
@@ -30,25 +27,44 @@ class RunState:
     approval_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def broadcast(self, msg_str: str):
-        dead: set[WebSocket] = set()
-        for ws in self.subscribers:
-            try:
-                await ws.send_text(msg_str)
-            except Exception:
-                dead.add(ws)
-        self.subscribers -= dead
+        """Push an event to all SSE clients on this conversation."""
+        session = sessions.get(self.convo_id)
+        if session:
+            session.broadcast(msg_str)
 
 
 @dataclass
 class ConversationSession:
     convo_id: str
-    controller: WebSocket | None = None
-    subscribers: set[WebSocket] = field(default_factory=set)
     run: RunState | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # SSE client queues keyed by client_id
+    sse_queues: dict[str, asyncio.Queue] = field(default_factory=dict)
+    # Voice (separate WS, one at a time)
     stt_session: DeepgramSTTSession | None = None
     stt_partial: str = ""
     stt_final: str = ""
+
+    def broadcast(self, msg_str: str):
+        """Put an event into every connected SSE client's queue."""
+        dead: list[str] = []
+        for client_id, queue in self.sse_queues.items():
+            try:
+                queue.put_nowait(msg_str)
+            except asyncio.QueueFull:
+                dead.append(client_id)
+        for client_id in dead:
+            self.sse_queues.pop(client_id, None)
+
+    def register_sse(self, client_id: str) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=4096)
+        self.sse_queues[client_id] = queue
+        return queue
+
+    def unregister_sse(self, client_id: str):
+        self.sse_queues.pop(client_id, None)
+        if not self.sse_queues and self.run is None:
+            sessions.pop(self.convo_id, None)
 
 
 sessions: dict[str, ConversationSession] = {}

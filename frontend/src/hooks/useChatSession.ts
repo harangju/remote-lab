@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { connectWs, getConvo, listFiles, listProjectAgents, listSkills, updateConvo, uploadFiles, type AgentConfig, type Attachment, type Skill, type WsEvent } from "../api";
+import { connectSSE, connectVoiceWs, getConvo, listFiles, listProjectAgents, listSkills, postApprove, postMessage, postStop, updateConvo, uploadFiles, type AgentConfig, type Attachment, type Skill, type SseEvent } from "../api";
 import { buildDisplayMessages, messageIdentity, type ApprovalScope, type DisplayMessage, type MetaInfo, type StreamBlock } from "../chatState";
 import type { ComposerAttachment } from "../chatComposer";
 import { getBottomSlackPx, getUserMessageTopOffsetPx } from "../chatSessionState";
@@ -19,13 +19,12 @@ export function useChatSession(projectId?: string, convId?: string) {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [title, setTitle] = useState("Untitled");
-  const [wsAttempt, setWsAttempt] = useState(0);
+  const [sseAttempt, setSseAttempt] = useState(0);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [projectFiles, setProjectFiles] = useState<string[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const mentionRefreshInFlightRef = useRef(false);
   const [activeAgent, setActiveAgent] = useState<{ id: string; name: string; color?: string; model?: string } | null>(null);
-  const [pendingMessages, setPendingMessages] = useState<{ message_id: string; text: string; attachments?: Attachment[] }[]>([]);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -41,9 +40,8 @@ export function useChatSession(projectId?: string, convId?: string) {
 
   const activeAgentRef = useRef<{ id: string; name: string; color?: string; model?: string } | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const pendingMessagesRef = useRef<{ message_id: string; text: string; attachments?: Attachment[] }[]>([]);
-  const flushingQueueRef = useRef(false);
+  const sseRef = useRef<{ close: () => void } | null>(null);
+  const voiceWsRef = useRef<WebSocket | null>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const lastSentMessageRef = useRef<HTMLDivElement | null>(null);
   const latestUserMessageRef = useRef<HTMLDivElement | null>(null);
@@ -75,59 +73,9 @@ export function useChatSession(projectId?: string, convId?: string) {
     container.scrollTo({ top: Math.max(0, targetTop), behavior });
   }, [getUserMessageTopOffset]);
 
-  const syncPendingMessages = useCallback((updater: { message_id: string; text: string; attachments?: Attachment[] }[] | ((prev: { message_id: string; text: string; attachments?: Attachment[] }[]) => { message_id: string; text: string; attachments?: Attachment[] }[])) => {
-    setPendingMessages((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      pendingMessagesRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const markMessagePending = useCallback((messageId: string, pending: boolean) => {
-    setMessages((prev) => prev.map((msg) => msg.message_id === messageId ? { ...msg, pending } : msg));
-  }, []);
-
-  const flushPendingQueue = useCallback(() => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || flushingQueueRef.current) return;
-    if (pendingMessagesRef.current.length === 0) return;
-    flushingQueueRef.current = true;
-    try {
-      for (const pending of pendingMessagesRef.current) {
-        ws.send(JSON.stringify({ type: "user-message", message_id: pending.message_id, text: pending.text, attachments: pending.attachments || [] }));
-      }
-    } finally {
-      flushingQueueRef.current = false;
-    }
-  }, []);
-
   const setCurrentRunId = useCallback((runId: string | null) => {
     activeRunIdRef.current = runId;
     setActiveRunId(runId);
-  }, []);
-
-  const queueMessage = useCallback((text: string, attachments: Attachment[] = []) => {
-    const message_id = crypto.randomUUID();
-    const entry = { message_id, text, attachments };
-    syncPendingMessages((prev) => [...prev, entry]);
-    setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }], message_id, pending: true, attachments, bashMode: text.startsWith("!") }]);
-    setBusy(true);
-    setWaitingForModel(true);
-    setError(null);
-    return message_id;
-  }, [syncPendingMessages]);
-
-  const addComposerFiles = useCallback((files: FileList | File[]) => {
-    const next = Array.from(files).map((file) => ({ file, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined }));
-    setComposerAttachments((prev) => [...prev, ...next]);
-  }, []);
-
-  const removeComposerAttachment = useCallback((idx: number) => {
-    setComposerAttachments((prev) => {
-      const item = prev[idx];
-      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
-      return prev.filter((_, i) => i !== idx);
-    });
   }, []);
 
   useLayoutEffect(() => {
@@ -203,10 +151,7 @@ export function useChatSession(projectId?: string, convId?: string) {
     setAutonomousToolsEnabled(rebuilt.autonomousToolsEnabled);
     setHasMoreHistory(detail.has_more);
     setHistoryCursor(detail.next_before);
-    setMessages((prev) => {
-      const pending = prev.filter((msg) => msg.pending);
-      return [...rebuilt.messages, ...pending];
-    });
+    setMessages(rebuilt.messages);
     setMeta(rebuilt.meta);
     blocksRef.current = [];
     setStreamBlocks([]);
@@ -236,6 +181,19 @@ export function useChatSession(projectId?: string, convId?: string) {
     }
   }, [convId, loadingOlder, hasMoreHistory, historyCursor, agents]);
 
+  const addComposerFiles = useCallback((files: FileList | File[]) => {
+    const next = Array.from(files).map((file) => ({ file, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined }));
+    setComposerAttachments((prev) => [...prev, ...next]);
+  }, []);
+
+  const removeComposerAttachment = useCallback((idx: number) => {
+    setComposerAttachments((prev) => {
+      const item = prev[idx];
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
   useEffect(() => {
     if (!projectId) return;
     listFiles(projectId, { hidden: true }).then((res) => setProjectFiles(res.files)).catch(() => setProjectFiles([]));
@@ -247,10 +205,13 @@ export function useChatSession(projectId?: string, convId?: string) {
     reloadConversation().catch((e) => setError(e.message));
   }, [projectId, convId, reloadConversation]);
 
+  // ---------------------------------------------------------------------------
+  // SSE connection (replaces WebSocket)
+  // ---------------------------------------------------------------------------
+
   useEffect(() => {
     if (!convId || !projectId) return;
     // Reset run state so a previous chat's "running" doesn't bleed into the new one.
-    // If this conversation IS running, the server will send a `running` event to restore it.
     setBusy(false);
     setWaitingForModel(false);
     setCurrentRunId(null);
@@ -260,19 +221,11 @@ export function useChatSession(projectId?: string, convId?: string) {
     setActiveAgent(null);
     replayingRef.current = false;
     hasConnectedRef.current = false;
-    const ws = connectWs(convId);
-    wsRef.current = ws;
 
-    ws.addEventListener("message", (event) => {
-      let data: WsEvent;
-      try { data = JSON.parse(event.data); } catch { return; }
+    const handleEvent = (data: SseEvent) => {
       switch (data.type) {
-        case "auth-ok":
-          setConnected(true);
-          flushPendingQueue();
-          break;
         case "sync":
-          // Server sends sync after auth-ok + any active-run replay.
+          setConnected(true);
           // Flush suppressed renders from reconnect replay.
           if (replayingRef.current) {
             replayingRef.current = false;
@@ -285,20 +238,12 @@ export function useChatSession(projectId?: string, convId?: string) {
           }
           hasConnectedRef.current = true;
           break;
-        case "message-ack": syncPendingMessages((prev) => prev.filter((msg) => msg.message_id !== data.message_id)); markMessagePending(data.message_id, false); setError(null); break;
-        case "voice-state":
-          if (data.state === "starting") { setVoiceError(null); setVoiceStatusText("Starting microphone…"); setVoiceUiActive(true); }
-          else if (data.state === "listening") { setVoiceStatusText("Listening…"); setVoiceUiActive(true); }
-          else if (data.state === "stopped") { setVoiceStatusText("Listening…"); setVoiceUiActive(false); }
-          break;
-        case "voice-transcript": { const base = voiceBaseTextRef.current; setVoiceTranscriptText(data.text); setInput(`${base}${base && data.text ? " " : ""}${data.text}`); break; }
         case "running": {
           const isReconnect = data.run_id === activeRunIdRef.current;
           setCurrentRunId(data.run_id); setBusy(true); setWaitingForModel(true);
           if (convId) window.dispatchEvent(new CustomEvent("convo-status-changed", { detail: { convoId: convId, status: "running" } }));
           blocksRef.current = [];
           if (isReconnect) {
-            // Reconnect replay: suppress renders until sync arrives
             replayingRef.current = true;
           } else {
             replayingRef.current = false;
@@ -313,7 +258,7 @@ export function useChatSession(projectId?: string, convId?: string) {
           if (data.agent_model) setMeta((prev) => prev ? { ...prev, model: data.agent_model } : { turns: 0, context_tokens: 0, context_limit: 0, model: data.agent_model });
           break;
         }
-        case "thinking-delta": if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break; break;
+        case "thinking-delta": break;
         case "text-delta": {
           if (activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setWaitingForModel(false);
@@ -389,32 +334,27 @@ export function useChatSession(projectId?: string, convId?: string) {
         case "skill-result": setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: data.skill, input: data.output }] }]); setWaitingForModel(false); setBusy(false); break;
         case "title-updated": setTitle(data.title); break;
         case "error":
-          if (!data.run_id && data.message.startsWith("Voice input failed")) { setVoiceError(data.message); setVoiceUiActive(false); break; }
           if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);
-          // Non-run errors (e.g. "Agent is still running") — clean up UI state.
-          // Run errors are handled by the Done event with status="error"|"cancelled".
           if (!data.run_id) {
             blocksRef.current = []; setStreamBlocks([]); setWaitingForModel(false); setBusy(false); setCurrentRunId(null);
           }
           break;
       }
-    });
+    };
 
-    ws.addEventListener("close", (event) => {
-      setConnected(false);
-      if (event.code !== 1000 && event.code !== 4409) reconnectTimer.current = window.setTimeout(() => setWsAttempt((a) => a + 1), 2000);
-    });
-    ws.addEventListener("error", () => { setConnected(false); });
+    const sse = connectSSE(convId, handleEvent, () => setConnected(false));
+    sseRef.current = sse;
 
     return () => {
       clearTimeout(reconnectTimer.current);
-      mediaRecorderRef.current?.stop(); mediaRecorderRef.current = null;
-      mediaStreamRef.current?.getTracks().forEach((track) => track.stop()); mediaStreamRef.current = null;
-      ws.close();
+      sse.close();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- voiceBaseText read via ref to avoid WS reconnect
-  }, [convId, wsAttempt, flushPendingQueue, reloadConversation, setCurrentRunId]);
+  }, [convId, sseAttempt, reloadConversation, setCurrentRunId, projectId]);
+
+  // ---------------------------------------------------------------------------
+  // Voice timer
+  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     if (!voiceUiActive) {
@@ -427,11 +367,15 @@ export function useChatSession(projectId?: string, convId?: string) {
     };
   }, [voiceUiActive]);
 
+  // ---------------------------------------------------------------------------
+  // Actions (REST-based)
+  // ---------------------------------------------------------------------------
+
   const stop = useCallback(() => {
-    const ws = wsRef.current; const runId = activeRunIdRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN && runId) ws.send(JSON.stringify({ type: "stop", run_id: runId }));
+    const runId = activeRunIdRef.current;
+    if (runId && convId) postStop(convId, runId).catch(() => {});
     setBusy(false); setWaitingForModel(false);
-  }, []);
+  }, [convId]);
 
   const handleToolApproval = useCallback(async (toolCallId: string, approved: boolean, scope: ApprovalScope = "once") => {
     if (approved && scope === "auto" && convId) {
@@ -444,15 +388,16 @@ export function useChatSession(projectId?: string, convId?: string) {
       }
       setSavingAutonomy(false);
     }
-    const ws = wsRef.current; const runId = activeRunIdRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN && runId) ws.send(JSON.stringify({ type: "tool-confirm-response", run_id: runId, tool_call_id: toolCallId, approved, scope }));
+    const runId = activeRunIdRef.current;
+    if (runId && convId) {
+      postApprove(convId, runId, toolCallId, approved, scope).catch(() => {});
+    }
     const blocks = blocksRef.current.map((b) => b.type === "tool" && b.tool_call_id === toolCallId ? { ...b, approvalStatus: approved ? "approved" as const : "denied" as const, approvedScope: approved ? scope : undefined, awaitingApproval: approved ? false : true } : b);
     blocksRef.current = blocks; setStreamBlocks([...blocks]);
   }, [convId]);
 
   const sendText = useCallback(async (text: string) => {
-    const ws = wsRef.current;
-    if ((!text && composerAttachments.length === 0) || busy || uploadingAttachments || !connected || !ws || ws.readyState !== WebSocket.OPEN || !projectId) {
+    if ((!text && composerAttachments.length === 0) || busy || uploadingAttachments || !connected || !projectId || !convId) {
       setError("Disconnected — reconnecting"); return false;
     }
     let uploaded: Attachment[] = [];
@@ -462,28 +407,85 @@ export function useChatSession(projectId?: string, convId?: string) {
       catch (e: any) { setError(e.message || "Upload failed"); setUploadingAttachments(false); return false; }
       setUploadingAttachments(false);
     }
-    const message_id = queueMessage(text, uploaded);
+
+    const message_id = crypto.randomUUID();
+    // Optimistic UI update
+    setMessages((prev) => [...prev, { role: "user", blocks: [{ type: "text", content: text }], message_id, pending: false, attachments: uploaded, bashMode: text.startsWith("!") }]);
     pendingScrollMessageIdRef.current = message_id;
-    ws.send(JSON.stringify({ type: "user-message", message_id, text, attachments: uploaded }));
+    setBusy(true);
+    setWaitingForModel(true);
+    setError(null);
+
+    try {
+      await postMessage(convId, text, message_id, uploaded);
+    } catch (e: any) {
+      setError(e.message || "Failed to send message");
+      setBusy(false);
+      setWaitingForModel(false);
+      return false;
+    }
+
     setComposerAttachments((prev) => { for (const item of prev) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); return []; });
     return true;
-  }, [busy, composerAttachments, connected, projectId, queueMessage, uploadingAttachments]);
+  }, [busy, composerAttachments, connected, projectId, convId, uploadingAttachments]);
 
   const resend = useCallback((text: string) => { void sendText(text); }, [sendText]);
+
+  // ---------------------------------------------------------------------------
+  // Voice (separate WebSocket, on-demand)
+  // ---------------------------------------------------------------------------
 
   const stopVoiceCapture = useCallback(() => {
     setVoiceStatusText("Finishing…"); mediaRecorderRef.current?.stop(); mediaRecorderRef.current = null;
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop()); mediaStreamRef.current = null;
-    const ws = wsRef.current; if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice-stop" }));
+    const ws = voiceWsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice-stop" }));
+    // Close voice WS after stopping
+    setTimeout(() => { voiceWsRef.current?.close(); voiceWsRef.current = null; }, 500);
   }, []);
 
   const startVoiceCapture = useCallback(async () => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || busy || voiceUiActive) return;
+    if (!convId || busy || voiceUiActive) return;
     setVoiceError(null); setVoiceBaseText(input.trim()); voiceBaseTextRef.current = input.trim(); setVoiceTranscriptText("");
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
+
+      // Open voice WS on demand
+      const ws = connectVoiceWs(convId);
+      voiceWsRef.current = ws;
+
+      await new Promise<void>((resolve, reject) => {
+        ws.addEventListener("message", function onMsg(event) {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "auth-ok") { ws.removeEventListener("message", onMsg); resolve(); }
+            if (data.type === "error") { ws.removeEventListener("message", onMsg); reject(new Error(data.message)); }
+          } catch { /* ignore */ }
+        });
+        ws.addEventListener("error", () => reject(new Error("Voice connection failed")));
+        setTimeout(() => reject(new Error("Voice connection timeout")), 5000);
+      });
+
+      // Listen for voice events on the voice WS
+      ws.addEventListener("message", (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "voice-state") {
+            if (data.state === "starting") { setVoiceError(null); setVoiceStatusText("Starting microphone…"); setVoiceUiActive(true); }
+            else if (data.state === "listening") { setVoiceStatusText("Listening…"); setVoiceUiActive(true); }
+            else if (data.state === "stopped") { setVoiceStatusText("Listening…"); setVoiceUiActive(false); }
+          } else if (data.type === "voice-transcript") {
+            const base = voiceBaseTextRef.current;
+            setVoiceTranscriptText(data.text);
+            setInput(`${base}${base && data.text ? " " : ""}${data.text}`);
+          } else if (data.type === "error") {
+            setVoiceError(data.message); setVoiceUiActive(false);
+          }
+        } catch { /* ignore */ }
+      });
+
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : (MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "");
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
@@ -491,14 +493,15 @@ export function useChatSession(projectId?: string, convId?: string) {
         if (!event.data || event.data.size === 0) return;
         const buf = await event.data.arrayBuffer(); const bytes = new Uint8Array(buf); let binary = ""; const chunkSize = 0x8000;
         for (let i = 0; i < bytes.length; i += chunkSize) binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-        const b64 = btoa(binary); const socket = wsRef.current; if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "voice-audio", audio: b64 }));
+        const b64 = btoa(binary); const socket = voiceWsRef.current; if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "voice-audio", audio: b64 }));
       });
       ws.send(JSON.stringify({ type: "voice-start" })); recorder.start(250); setVoiceUiActive(true);
     } catch (e: any) {
       setVoiceError(e?.name === "NotAllowedError" ? "Microphone access was denied" : "Voice input failed. Your existing draft was preserved.");
       setVoiceStatusText("Listening…"); mediaRecorderRef.current = null; mediaStreamRef.current?.getTracks().forEach((track) => track.stop()); mediaStreamRef.current = null; setVoiceUiActive(false);
+      voiceWsRef.current?.close(); voiceWsRef.current = null;
     }
-  }, [busy, input, voiceUiActive]);
+  }, [busy, convId, input, voiceUiActive]);
 
   const toggleAutonomy = useCallback(async () => {
     if (!convId || savingAutonomy) return;

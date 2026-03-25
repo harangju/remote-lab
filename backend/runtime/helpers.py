@@ -131,17 +131,10 @@ async def broadcast_conversation_event(convo_id: str, msg_str: str) -> None:
     if not session:
         return
 
-    dead: set = set()
-    for ws in session.subscribers:
-        try:
-            await ws.send_text(msg_str)
-        except Exception:
-            dead.add(ws)
-    session.subscribers -= dead
+    session.broadcast(msg_str)
 
     run = session.run
     if run is not None:
-        run.subscribers -= dead
         run.events.append(msg_str)
 
 

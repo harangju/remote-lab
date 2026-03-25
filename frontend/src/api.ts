@@ -254,12 +254,12 @@ export function listSkills(projectId: string): Promise<Skill[]> {
   return request(`/projects/${projectId}/skills`);
 }
 
-export type WsEvent =
-  | { type: "auth-ok" }
+// ---------------------------------------------------------------------------
+// SSE event types (server → client)
+// ---------------------------------------------------------------------------
+
+export type SseEvent =
   | { type: "sync"; running: boolean }
-  | { type: "message-ack"; message_id: string }
-  | { type: "voice-state"; state: "starting" | "listening" | "stopped" }
-  | { type: "voice-transcript"; text: string; is_final: boolean }
   | { type: "running"; run_id: string }
   | { type: "agent-start"; run_id: string; agent_id: string; agent_name: string; agent_color?: string; agent_model?: string }
   | { type: "thinking-delta"; run_id: string; delta: string; agent_id?: string }
@@ -275,9 +275,115 @@ export type WsEvent =
   | { type: "title-updated"; title: string }
   | { type: "error"; message: string; run_id?: string; recoverable?: boolean };
 
-export function connectWs(convoId: string): WebSocket {
+
+// ---------------------------------------------------------------------------
+// SSE stream (replaces WebSocket for chat events)
+// ---------------------------------------------------------------------------
+
+export function connectSSE(convoId: string, onEvent: (event: SseEvent) => void, onError?: () => void): { close: () => void } {
+  const token = getToken();
+  const controller = new AbortController();
+
+  async function connect() {
+    try {
+      const res = await fetch(`${BASE}/convos/${convoId}/stream`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "text/event-stream",
+        },
+        signal: controller.signal,
+      });
+
+      if (res.status === 401) {
+        clearToken();
+        window.location.href = "/chat";
+        return;
+      }
+
+      if (!res.ok || !res.body) {
+        onError?.();
+        // Retry after delay
+        setTimeout(() => { if (!controller.signal.aborted) connect(); }, 2000);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE lines
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentData = "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            currentData = line.slice(6);
+          } else if (line === "" && currentData) {
+            // End of event
+            try {
+              const parsed = JSON.parse(currentData);
+              onEvent(parsed);
+            } catch { /* ignore malformed events */ }
+            currentData = "";
+          }
+          // Ignore id:, event:, and comment lines (: keepalive)
+        }
+      }
+
+      // Stream ended — reconnect
+      if (!controller.signal.aborted) {
+        onError?.();
+        setTimeout(() => { if (!controller.signal.aborted) connect(); }, 2000);
+      }
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      onError?.();
+      setTimeout(() => { if (!controller.signal.aborted) connect(); }, 2000);
+    }
+  }
+
+  connect();
+  return { close: () => controller.abort() };
+}
+
+// ---------------------------------------------------------------------------
+// REST chat actions (replaces WebSocket sends)
+// ---------------------------------------------------------------------------
+
+export function postMessage(convoId: string, text: string, messageId?: string, attachments?: Attachment[]): Promise<{ status: string; run_id?: string; message_id?: string }> {
+  return request(`/convos/${convoId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ text, message_id: messageId, attachments: attachments || [] }),
+  });
+}
+
+export function postStop(convoId: string, runId: string): Promise<void> {
+  return request(`/convos/${convoId}/stop`, {
+    method: "POST",
+    body: JSON.stringify({ run_id: runId }),
+  });
+}
+
+export function postApprove(convoId: string, runId: string, toolCallId: string, approved: boolean, scope: string = "once"): Promise<void> {
+  return request(`/convos/${convoId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ run_id: runId, tool_call_id: toolCallId, approved, scope }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Voice WebSocket (separate, on-demand)
+// ---------------------------------------------------------------------------
+
+export function connectVoiceWs(convoId: string): WebSocket {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${window.location.host}/api/ws/${convoId}`);
+  const ws = new WebSocket(`${proto}//${window.location.host}/api/ws/${convoId}/voice`);
 
   ws.addEventListener("open", () => {
     const token = getToken();
@@ -288,3 +394,4 @@ export function connectWs(convoId: string): WebSocket {
 
   return ws;
 }
+

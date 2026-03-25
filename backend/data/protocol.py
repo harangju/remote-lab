@@ -3,21 +3,12 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-class AuthOk(BaseModel):
-    type: Literal["auth-ok"] = "auth-ok"
-
-
 class Sync(BaseModel):
     """Sent after auth-ok + any active-run replay to signal the client
     that the connection handshake is complete.  ``running`` is True when
     a run was already in-flight and the server replayed buffered events."""
     type: Literal["sync"] = "sync"
     running: bool = False
-
-
-class MessageAck(BaseModel):
-    type: Literal["message-ack"] = "message-ack"
-    message_id: str
 
 
 class ThinkingDelta(BaseModel):
