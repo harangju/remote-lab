@@ -276,7 +276,7 @@ export function ChatComposer({
       return;
     }
 
-    if (e.key === "Enter" && !e.shiftKey && slashQuery === null && mentionQuery === null) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       const text = input.trim();
       if (text || composerAttachments.length > 0) {
@@ -298,7 +298,7 @@ export function ChatComposer({
         setSlashIdx((i) => Math.max(i - 1, 0));
         return;
       }
-      if (e.key === "Tab" || e.key === "Enter") {
+      if (e.key === "Tab") {
         e.preventDefault();
         insertSlashCommand(slashMatches[slashIdx]);
         return;
@@ -320,7 +320,7 @@ export function ChatComposer({
         setMentionIdx((i) => Math.max(i - 1, 0));
         return;
       }
-      if (e.key === "Tab" || e.key === "Enter") {
+      if (e.key === "Tab") {
         e.preventDefault();
         insertMention(mentionMatches[mentionIdx]);
         return;
