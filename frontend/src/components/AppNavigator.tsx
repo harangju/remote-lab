@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createConvo, createProject, listConvos, listProjects, listRecentConvos, updateConvo, updateProject, type ConvoMeta, type Project } from "../api";
-import { btnIcon, btnPrimary, colors, input as inputStyle } from "../styles";
+import { btnIcon, btnPrimary, colors, input as inputStyle, zIndex } from "../styles";
+import { createPortal } from "react-dom";
 
 const MOBILE_BREAKPOINT = 768;
 const RAIL_WIDTH = 300;
@@ -99,6 +100,26 @@ function IconButton({ onClick, label, title, disabled, children, style: extraSty
     >
       {children}
     </button>
+  );
+}
+
+function RailTooltip({ text, children }: { text: string; children: React.ReactElement }) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  return (
+    <div
+      ref={ref}
+      onMouseEnter={() => { if (ref.current) setRect(ref.current.getBoundingClientRect()); }}
+      onMouseLeave={() => setRect(null)}
+    >
+      {children}
+      {rect && createPortal(
+        <div style={{ position: "fixed", top: rect.top + rect.height / 2, left: rect.right + 8, transform: "translateY(-50%)", padding: "4px 10px", background: colors.text, color: colors.bg, fontSize: "0.72rem", whiteSpace: "nowrap", borderRadius: 5, pointerEvents: "none", zIndex: zIndex.tooltip }}>
+          {text}
+        </div>,
+        document.body,
+      )}
+    </div>
   );
 }
 
@@ -481,17 +502,17 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
               const project = projectMap.get(convo.project_id);
               const Icon = project ? getProjectIcon(project.id) : Sparkles;
               return (
-                <Link
-                  key={`c-${convo.id}`}
-                  to={`/${convo.project_id}/${convo.id}`}
-                  onClick={onCloseMobile}
-                  title={convo.title || "Untitled"}
-                  className="nav-icon-btn"
-                  style={{ width: 40, height: 44, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, background: active ? colors.bgSurface : "transparent", color: active ? colors.text : colors.textMuted, textDecoration: "none", position: "relative" }}
-                >
-                  <Icon size={16} />
-                  <span style={{ position: "absolute", top: 5, right: 3, width: 7, height: 7, borderRadius: 999, background: statusColor(convo.status), boxShadow: `0 0 0 2px ${active ? colors.bgSurface : colors.bg}` }} />
-                </Link>
+                <RailTooltip key={`c-${convo.id}`} text={convo.title || "Untitled"}>
+                  <Link
+                    to={`/${convo.project_id}/${convo.id}`}
+                    onClick={onCloseMobile}
+                    className="nav-icon-btn"
+                    style={{ width: 40, height: 44, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, background: active ? colors.bgSurface : "transparent", color: active ? colors.text : colors.textMuted, textDecoration: "none", position: "relative" }}
+                  >
+                    <Icon size={16} />
+                    <span style={{ position: "absolute", top: 5, right: 3, width: 7, height: 7, borderRadius: 999, background: statusColor(convo.status), boxShadow: `0 0 0 2px ${active ? colors.bgSurface : colors.bg}` }} />
+                  </Link>
+                </RailTooltip>
               );
             })}
           </div>
