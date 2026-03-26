@@ -336,7 +336,7 @@ export function useChatSession(projectId?: string, convId?: string) {
         }
         case "compacted": setMeta((prev) => prev ? { ...prev, context_tokens: data.new_tokens } : prev); setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: "compact", input: `${(data.old_tokens / 1000).toFixed(1)}k → ${(data.new_tokens / 1000).toFixed(1)}k tokens` }] }]); setWaitingForModel(false); setBusy(false); break;
         case "skill-result": setMessages((msgs) => [...msgs, { role: "assistant", blocks: [{ type: "tool", name: data.skill, input: data.output }] }]); setWaitingForModel(false); setBusy(false); break;
-        case "title-updated": setTitle(data.title); break;
+        case "title-updated": setTitle(data.title); if (convId) window.dispatchEvent(new CustomEvent("convo-title-changed", { detail: { convoId: convId, title: data.title } })); break;
         case "error":
           if (data.run_id && activeRunIdRef.current && data.run_id !== activeRunIdRef.current) break;
           setError(data.message);

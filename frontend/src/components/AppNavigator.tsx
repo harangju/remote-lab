@@ -174,6 +174,16 @@ function ProjectCard({ project, expanded, active, activeConvId, dimmed, actions,
     return () => window.removeEventListener("convo-status-changed", handler);
   }, []);
 
+  // Live title updates
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { convoId, title } = (e as CustomEvent).detail;
+      setConvos((prev) => prev && prev.map((c) => c.id === convoId ? { ...c, title } : c));
+    };
+    window.addEventListener("convo-title-changed", handler);
+    return () => window.removeEventListener("convo-title-changed", handler);
+  }, []);
+
   // Remove archived convos from the list
   useEffect(() => {
     const handler = (e: Event) => {
@@ -282,6 +292,16 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     };
     window.addEventListener("convo-status-changed", handler);
     return () => window.removeEventListener("convo-status-changed", handler);
+  }, []);
+
+  // Live title updates from the active chat
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { convoId, title } = (e as CustomEvent).detail;
+      setRecentConvos((prev) => prev.map((c) => c.id === convoId ? { ...c, title } : c));
+    };
+    window.addEventListener("convo-title-changed", handler);
+    return () => window.removeEventListener("convo-title-changed", handler);
   }, []);
 
   // Light poll for recents to catch background status changes
