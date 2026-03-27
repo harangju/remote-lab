@@ -21,6 +21,9 @@ const toolIcons: Record<string, React.FC<{ size?: number }>> = {
   web_search: Globe,
 };
 
+/** Tool names that start expanded (but can still be toggled closed). */
+const defaultExpandedToolNames = new Set(["shares", "model"]);
+
 const toolChipShell: React.CSSProperties = {
   background: colors.bgSurface,
   border: `1px solid ${colors.border}`,
@@ -146,7 +149,7 @@ export function ToolChip({ tool, live, defaultOpen = false, onOpenFile, onRespon
   onRespond?: (toolCallId: string, approved: boolean, scope?: ApprovalScope) => void;
   autonomousToolsEnabled?: boolean;
 }) {
-  const [manualOpen, setManualOpen] = useState(defaultOpen);
+  const [manualOpen, setManualOpen] = useState(defaultOpen || defaultExpandedToolNames.has(tool.name));
   const preRef = useRef<HTMLPreElement>(null);
   const Icon = toolIcons[tool.name] || Settings;
   const editDiff = tool.name === "edit_file" ? buildEditDiffPreview(tool.diff) : null;

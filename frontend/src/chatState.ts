@@ -152,7 +152,7 @@ export function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig
 
     if (type === "skill-result") {
       flushPending();
-      msgs.push({ role: "system", blocks: [{ type: "system", content: mAny.output || "", tone: "info" }] });
+      msgs.push({ role: "assistant", blocks: [{ type: "tool", name: mAny.name || mAny.skill || "skill", input: mAny.output || "" }] });
       continue;
     }
 
