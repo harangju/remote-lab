@@ -372,9 +372,10 @@ async def run_agent_task(
                                     await _emit(json.dumps(ev))
 
                 usage = agent_run.usage()
-                # Snapshot history after each iteration so cancelled runs
-                # preserve tool results for the next run.
+                # Snapshot history and token count after each iteration so
+                # cancelled runs preserve tool results and accurate counts.
                 run.message_history = agent_run.all_messages()
+                run.last_context_tokens = usage.request_tokens or run.last_context_tokens
                 total_turns += len([m for m in run.message_history if isinstance(m, ModelResponse)])
 
                 result = agent_run.result

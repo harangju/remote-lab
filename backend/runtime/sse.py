@@ -16,7 +16,8 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter, UserContent
 
 from backend.agent.agent_config import AgentConfig
 from backend.agent.agents import create_agent, _available
-from backend.agent.compact import compact, needs_compaction
+from backend.agent.compact import compact, needs_compaction, needs_context_management
+from backend.agent.context_manager import manage_context
 from backend.agent.context import build_project_instructions
 from backend.agent.mentions import extract_file_mentions, parse_mentions
 from backend.agent.permissions import add_project_rule
@@ -412,15 +413,16 @@ def create_sse_router(
                     aid = ac.id if ac else None
                     hist, ctx_tokens = _load_history(convo_id, aid)
 
-                    if hist and needs_compaction(ctx_tokens, convo_model):
+                    if hist and needs_context_management(ctx_tokens, convo_model):
                         old_tokens = ctx_tokens
-                        hist, summary = await compact(hist)
-                        if summary:
-                            est_tokens = sum(len(str(m)) for m in hist) // 4
-                            c["agent_histories"][aid] = (hist, est_tokens)
-                            await append_message(convo_id, tool_event("compact", event_type="compacted", output=f"{old_tokens / 1000:.1f}k -> {est_tokens / 1000:.1f}k tokens (auto)", run_id=run.run_id))
+                        ctx_result = await manage_context(hist, ctx_tokens, model_id=convo_model)
+                        if ctx_result.actions_taken:
+                            hist = ctx_result.messages
+                            c["agent_histories"][aid] = (hist, ctx_result.estimated_tokens)
+                            actions_summary = "; ".join(ctx_result.actions_taken)
+                            await append_message(convo_id, tool_event("compact", event_type="compacted", output=f"{old_tokens / 1000:.1f}k -> {ctx_result.estimated_tokens / 1000:.1f}k tokens ({actions_summary})", run_id=run.run_id))
                             await save_agent_history(convo_id, ModelMessagesTypeAdapter.dump_json(hist), agent_id=aid)
-                            compacted_event = Compacted(old_tokens=old_tokens, new_tokens=est_tokens).model_dump_json()
+                            compacted_event = Compacted(old_tokens=old_tokens, new_tokens=ctx_result.estimated_tokens).model_dump_json()
                             run.events.append(compacted_event)
                             session.broadcast(compacted_event)
 
@@ -592,10 +594,12 @@ def create_sse_router(
                 for aid in aids_to_compact:
                     hist, ctx_tokens = c["agent_histories"][aid]
                     old_tokens = ctx_tokens
+                    # Manual /compact forces full compaction (Layer 3)
                     hist, summary = await compact(hist)
                     if summary:
                         compacted_any = True
-                        est_tokens = sum(len(str(m)) for m in hist) // 4
+                        from backend.agent.token_estimate import estimate_history_tokens
+                        est_tokens = estimate_history_tokens(hist)
                         c["agent_histories"][aid] = (hist, est_tokens)
                         label = f"@{aid} " if aid else ""
                         await append_message(convo_id, tool_event("compact", event_type="compacted", output=f"{label}{old_tokens / 1000:.1f}k -> {est_tokens / 1000:.1f}k tokens"))

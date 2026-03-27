@@ -1,4 +1,8 @@
-"""Context window compaction via summarization."""
+"""Context window compaction via summarization.
+
+This module provides Layer 3 (full compaction) of the context management
+pipeline.  For progressive context management, use context_manager.manage_context().
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ from pydantic_ai.messages import (
 )
 
 from backend.agent.agents import PRICE_TIER_INPUT_LIMITS, agent, CONTEXT_BUDGET_FRACTION, get_context_limit, active_model
+from backend.agent.token_estimate import estimate_history_tokens
 
 # Number of recent request/response pairs to keep intact
 KEEP_RECENT_TURNS = 3
@@ -68,12 +73,23 @@ def _extract_text(messages: list[ModelMessage]) -> str:
     return "\n".join(lines)
 
 
-def needs_compaction(context_tokens: int, model_id: str | None = None) -> bool:
-    """Check if context usage exceeds the model-specific budget threshold."""
+def _get_budget(model_id: str | None = None) -> int:
+    """Return the effective context budget for the given model."""
     mid = model_id or active_model
     limit = PRICE_TIER_INPUT_LIMITS.get(mid, get_context_limit(mid))
-    budget = min(limit, int(get_context_limit(mid) * CONTEXT_BUDGET_FRACTION))
-    return context_tokens > budget
+    return min(limit, int(get_context_limit(mid) * CONTEXT_BUDGET_FRACTION))
+
+
+def needs_compaction(context_tokens: int, model_id: str | None = None) -> bool:
+    """Check if context usage exceeds the model-specific budget threshold."""
+    return context_tokens > _get_budget(model_id)
+
+
+def needs_context_management(context_tokens: int, model_id: str | None = None) -> bool:
+    """Check if ANY layer of context management should run (>=50% of budget)."""
+    from backend.agent.context_manager import TRIM_THRESHOLD
+    budget = _get_budget(model_id)
+    return budget > 0 and (context_tokens / budget) >= TRIM_THRESHOLD
 
 
 async def compact(messages: list[ModelMessage]) -> tuple[list[ModelMessage], str]:
