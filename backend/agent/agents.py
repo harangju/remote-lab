@@ -56,8 +56,8 @@ SYSTEM_PROMPT = _load_system_prompt()
 _PROVIDERS = [
     ("ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-6"),
     ("ANTHROPIC_API_KEY", "anthropic:claude-opus-4-6"),
-    ("OPENAI_API_KEY", "openai:gpt-5.4-mini"),
     ("OPENAI_API_KEY", "openai:gpt-5.4"),
+    ("OPENAI_API_KEY", "openai:gpt-5.4-mini"),
     ("OPENAI_API_KEY", "openai:gpt-5.4-pro"),
     ("OPENAI_API_KEY", "openai:gpt-5.4-nano"),
     ("GOOGLE_API_KEY", "google-gla:gemini-2.5-flash"),
