@@ -203,7 +203,11 @@ export function ChatComposer({
     const newVal = before.slice(0, atIdx) + `@${label} ` + after;
     setInput(newVal);
     setMentionQuery(null);
-    inputRef.current?.focus();
+    requestAnimationFrame(() => {
+      const cursor = atIdx + label.length + 2; // @label + space
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(cursor, cursor);
+    });
   };
 
   const insertSlashCommand = (skill: Skill) => {
@@ -287,45 +291,51 @@ export function ChatComposer({
       }
       return;
     }
-    if (slashQuery !== null && slashMatches.length > 0) {
-      if (isNextPickerItem) {
-        e.preventDefault();
-        setSlashIdx((i) => Math.min(i + 1, slashMatches.length - 1));
-        return;
+    if (slashQuery !== null) {
+      if (slashMatches.length > 0) {
+        if (isNextPickerItem) {
+          e.preventDefault();
+          setSlashIdx((i) => Math.min(i + 1, slashMatches.length - 1));
+          return;
+        }
+        if (isPrevPickerItem) {
+          e.preventDefault();
+          setSlashIdx((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          const idx = Math.min(slashIdx, slashMatches.length - 1);
+          insertSlashCommand(slashMatches[idx]);
+          return;
+        }
       }
-      if (isPrevPickerItem) {
-        e.preventDefault();
-        setSlashIdx((i) => Math.max(i - 1, 0));
-        return;
-      }
-      if (e.key === "Tab") {
-        e.preventDefault();
-        insertSlashCommand(slashMatches[slashIdx]);
-        return;
-      }
-      if (e.key === "Escape") {
+      if (e.key === "Tab" || e.key === "Escape") {
         e.preventDefault();
         setSlashQuery(null);
         return;
       }
     }
-    if (mentionQuery !== null && mentionMatches.length > 0) {
-      if (isNextPickerItem) {
-        e.preventDefault();
-        setMentionIdx((i) => Math.min(i + 1, mentionMatches.length - 1));
-        return;
+    if (mentionQuery !== null) {
+      if (mentionMatches.length > 0) {
+        if (isNextPickerItem) {
+          e.preventDefault();
+          setMentionIdx((i) => Math.min(i + 1, mentionMatches.length - 1));
+          return;
+        }
+        if (isPrevPickerItem) {
+          e.preventDefault();
+          setMentionIdx((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          const idx = Math.min(mentionIdx, mentionMatches.length - 1);
+          insertMention(mentionMatches[idx]);
+          return;
+        }
       }
-      if (isPrevPickerItem) {
-        e.preventDefault();
-        setMentionIdx((i) => Math.max(i - 1, 0));
-        return;
-      }
-      if (e.key === "Tab") {
-        e.preventDefault();
-        insertMention(mentionMatches[mentionIdx]);
-        return;
-      }
-      if (e.key === "Escape") {
+      if (e.key === "Tab" || e.key === "Escape") {
         e.preventDefault();
         setMentionQuery(null);
         return;
