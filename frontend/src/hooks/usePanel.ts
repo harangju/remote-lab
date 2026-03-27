@@ -69,6 +69,20 @@ function isPreviewOnlyPath(path: string): boolean {
   return lower.endsWith(".pdf") || lower.endsWith(".docx") || lower.endsWith(".html") || lower.endsWith(".htm");
 }
 
+/** Deduplicate a history array, most-recent-first, max 20 entries. */
+function dedup(history: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const p = history[i];
+    if (seen.has(p)) continue;
+    seen.add(p);
+    result.push(p);
+    if (result.length >= 20) break;
+  }
+  return result;
+}
+
 export function usePanel(projectId: string | undefined): PanelState & PanelActions {
   const [file, setFile] = useState<PanelFile | null>(null);
   const [editMode, setEditModeRaw] = useState(false);
@@ -100,32 +114,30 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const navigatingRef = useRef(false);
   const [historyVersion, setHistoryVersion] = useState(0);
 
-  // Reload history from localStorage when project changes
+  // Swap history synchronously during render when project changes so that
+  // recentlyViewed never returns stale data from the previous project.
   const prevStorageKeyRef = useRef(storageKey);
-  useEffect(() => {
-    if (storageKey === prevStorageKeyRef.current) return;
+  const pendingPersistRef = useRef<{ key: string; history: string[] } | null>(null);
+  if (storageKey !== prevStorageKeyRef.current) {
+    // Snapshot outgoing history so the next effect can persist it
+    if (prevStorageKeyRef.current && historyRef.current.length > 0) {
+      pendingPersistRef.current = { key: prevStorageKeyRef.current, history: [...historyRef.current] };
+    }
     prevStorageKeyRef.current = storageKey;
     historyRef.current = loadHistory(storageKey);
     historyIndexRef.current = historyRef.current.length - 1;
-    setHistoryVersion((v) => v + 1);
-  }, [storageKey]);
+  }
 
   // Persist file history to localStorage
   useEffect(() => {
-    if (!storageKey || !historyRef.current) return;
-    try {
-      // Store deduplicated recent list (max 20 entries) rather than full history
-      const seen = new Set<string>();
-      const recent: string[] = [];
-      for (let i = historyRef.current.length - 1; i >= 0; i--) {
-        const p = historyRef.current[i];
-        if (seen.has(p)) continue;
-        seen.add(p);
-        recent.push(p);
-        if (recent.length >= 20) break;
-      }
-      localStorage.setItem(storageKey, JSON.stringify(recent));
-    } catch { /* localStorage full or unavailable */ }
+    // Flush any outgoing project history first
+    const pending = pendingPersistRef.current;
+    if (pending) {
+      pendingPersistRef.current = null;
+      try { localStorage.setItem(pending.key, JSON.stringify(dedup(pending.history))); } catch { /* */ }
+    }
+    if (!storageKey || !historyRef.current.length) return;
+    try { localStorage.setItem(storageKey, JSON.stringify(dedup(historyRef.current))); } catch { /* */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyVersion, storageKey]);
 
@@ -282,6 +294,14 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     return originalContentRef.current;
   }, []);
 
+  // Reset file list when project changes so stale files from the previous project
+  // never appear in the file finder.
+  const prevProjectIdRef = useRef(projectId);
+  if (projectId !== prevProjectIdRef.current) {
+    prevProjectIdRef.current = projectId;
+    setFileList(null);
+  }
+
   const refreshFileList = useCallback(() => {
     if (!projectId) return;
     setFileListLoading(true);
@@ -382,7 +402,7 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
   const canGoBack = historyIndexRef.current > 0;
   const canGoForward = historyIndexRef.current < historyRef.current.length - 1;
 
-  // Deduplicated, most-recent-first (stable — only changes when history grows)
+  // Deduplicated, most-recent-first (stable — only changes when history grows or project changes)
   const recentlyViewed = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
@@ -395,7 +415,7 @@ export function usePanel(projectId: string | undefined): PanelState & PanelActio
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyVersion]);
+  }, [historyVersion, storageKey]);
 
   const goBack = useCallback((): string | null => {
     if (historyIndexRef.current <= 0) return null;
