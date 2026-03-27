@@ -216,7 +216,6 @@ export function injectTheme() {
         opacity: 1 !important;
         pointer-events: auto !important;
       }
-      .app-shell-mobile-menu,
       .app-shell-mobile-menu-inline {
         display: none !important;
       }
