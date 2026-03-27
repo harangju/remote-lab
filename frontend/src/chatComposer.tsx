@@ -287,7 +287,8 @@ export function ChatComposer({
         setMentionQuery(null);
         setSlashQuery(null);
         setBashCompletions([]);
-        sendText(text).then((ok) => { if (ok) setInput(""); });
+        setInput("");
+        sendText(text).then((ok) => { if (!ok) setInput(text); });
       }
       return;
     }
@@ -349,7 +350,8 @@ export function ChatComposer({
     setSlashQuery(null);
     setBashCompletions([]);
     const text = input.trim();
-    sendText(text).then((ok) => { if (ok) setInput(""); });
+    setInput("");
+    sendText(text).then((ok) => { if (!ok) setInput(text); });
   };
 
   useEffect(() => {

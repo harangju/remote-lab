@@ -588,7 +588,9 @@ def create_sse_router(
                 if not aids_to_compact:
                     if message_id:
                         processed_message_ids.setdefault(convo_id, set()).add(message_id)
-                    return {"status": "error", "message": "No message history to compact"}
+                    msg = "No message history to compact"
+                    session.broadcast(SkillResult(skill="compact", output=msg).model_dump_json())
+                    return {"status": "error", "message": msg}
 
                 compacted_any = False
                 for aid in aids_to_compact:
@@ -613,7 +615,9 @@ def create_sse_router(
                 if not compacted_any:
                     if message_id:
                         processed_message_ids.setdefault(convo_id, set()).add(message_id)
-                    return {"status": "error", "message": "Not enough history to compact"}
+                    msg = "Not enough history to compact"
+                    session.broadcast(SkillResult(skill="compact", output=msg).model_dump_json())
+                    return {"status": "error", "message": msg}
                 return {"status": "ok"}
 
             elif skill.name == "model":
