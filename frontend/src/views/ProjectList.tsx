@@ -1,13 +1,17 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import { FolderPlus } from "lucide-react";
-import { btnPrimary, colors } from "../styles";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import { FolderPlus, Menu } from "lucide-react";
+import { btnIcon, btnPrimary, colors } from "../styles";
 
 export function ProjectList() {
   const navigate = useNavigate();
+  const { closeMobileNavigator } = useOutletContext<{ closeMobileNavigator: () => void }>();
 
   return (
-    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
+    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem", position: "relative" }}>
+      <button onClick={() => closeMobileNavigator()} style={{ ...btnIcon, color: colors.textMuted, position: "absolute", top: 16, left: 16 }} aria-label="Open navigator" className="app-shell-mobile-menu-inline">
+        <Menu size={15} />
+      </button>
       <div style={{ maxWidth: 520, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
         <div style={{ width: 52, height: 52, borderRadius: 14, border: `1px solid ${colors.border}`, background: colors.bgSurface, display: "flex", alignItems: "center", justifyContent: "center", color: colors.textMuted }}>
           <FolderPlus size={22} />

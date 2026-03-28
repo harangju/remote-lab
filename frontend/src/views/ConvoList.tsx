@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { Archive, ArchiveRestore, MessageSquare, FolderOpen, Pencil } from "lucide-react";
+import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Archive, ArchiveRestore, Menu, MessageSquare, FolderOpen, Pencil } from "lucide-react";
 import { FileFinder } from "../components/FileFinder";
 import { createConvo, getProject, listConvos, listFiles, updateConvo, updateProject, type ConvoMeta, type Project } from "../api";
 import { btnIcon, colors, input as inputStyle } from "../styles";
@@ -52,6 +52,7 @@ function ConvoRow({ convo, projectId, dimmed, onAction, actionIcon, actionLabel 
 export function ConvoList() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { closeMobileNavigator } = useOutletContext<{ closeMobileNavigator: () => void }>();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +152,9 @@ export function ConvoList() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "1.5rem", gap: "1rem", maxWidth: 760, width: "100%", margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <button onClick={() => closeMobileNavigator()} style={{ ...iconBtnStyle, color: colors.textMuted }} aria-label="Open navigator" className="app-shell-mobile-menu-inline">
+          <Menu size={15} />
+        </button>
         <div style={{ minWidth: 0, flex: 1 }}>
           {editingProject ? (
             <input
