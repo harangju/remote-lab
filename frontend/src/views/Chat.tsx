@@ -595,6 +595,7 @@ export function Chat() {
 
       {panel.showFileFinder && (
         <FileFinder
+          projectId={projectId!}
           files={panel.fileList || []}
           loading={panel.fileListLoading}
           touchedFiles={touchedFiles}

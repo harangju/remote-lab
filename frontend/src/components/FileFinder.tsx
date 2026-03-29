@@ -3,6 +3,7 @@ import { Search, X, FileText, Folder, ChevronRight, ChevronDown, CornerDownLeft,
 import { colors, overlayBackdrop, overlayHeader, overlayPanel, interactiveRow } from "../styles";
 
 interface FileFinderProps {
+  projectId: string;
   files: string[];
   loading: boolean;
   touchedFiles: string[];
@@ -92,24 +93,29 @@ function flattenTree(node: TreeNode, expanded: Set<string>, depth = 0): Explorer
   return rows;
 }
 
-function defaultExpandedDirs(): Set<string> {
-  return new Set<string>();
+const EXPANDED_DIRS_KEY = "remote-lab:file-finder-expanded:";
+
+function loadExpandedDirs(projectId: string): Set<string> {
+  try {
+    const stored = localStorage.getItem(EXPANDED_DIRS_KEY + projectId);
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  } catch { return new Set(); }
 }
 
-export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], onSelect, onClose, onRemoveRecent }: FileFinderProps) {
+function saveExpandedDirs(projectId: string, dirs: Set<string>) {
+  try { localStorage.setItem(EXPANDED_DIRS_KEY + projectId, JSON.stringify([...dirs])); } catch {}
+}
+
+export function FileFinder({ projectId, files, loading, touchedFiles, recentlyViewed = [], onSelect, onClose, onRemoveRecent }: FileFinderProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => defaultExpandedDirs());
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => loadExpandedDirs(projectId));
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    setExpandedDirs(defaultExpandedDirs());
-  }, [files]);
 
   const effectiveShowHidden = query.includes(".");
   const effectiveFiles = useMemo(() => {
@@ -149,7 +155,7 @@ export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], 
   }, [query, visibleRows.length]);
 
   useEffect(() => {
-    const el = listRef.current?.children[selectedIndex] as HTMLElement;
+    const el = listRef.current?.querySelector(`[data-row-index="${selectedIndex}"]`) as HTMLElement;
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
@@ -158,6 +164,7 @@ export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], 
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
+      saveExpandedDirs(projectId, next);
       return next;
     });
   };
@@ -179,12 +186,13 @@ export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], 
       setSelectedIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "ArrowRight" && row?.type === "dir") {
       e.preventDefault();
-      setExpandedDirs((prev) => new Set(prev).add(row.path));
+      setExpandedDirs((prev) => { const next = new Set(prev).add(row.path); saveExpandedDirs(projectId, next); return next; });
     } else if (e.key === "ArrowLeft" && row?.type === "dir") {
       e.preventDefault();
       setExpandedDirs((prev) => {
         const next = new Set(prev);
         next.delete(row.path);
+        saveExpandedDirs(projectId, next);
         return next;
       });
     } else if (e.key === "Enter") {
@@ -287,6 +295,7 @@ export function FileFinder({ files, loading, touchedFiles, recentlyViewed = [], 
             return (
               <button
                 key={`${row.type}:${row.path}`}
+                data-row-index={i}
                 onClick={() => handleActivate(row)}
                 onMouseEnter={() => setSelectedIndex(i)}
                 style={{

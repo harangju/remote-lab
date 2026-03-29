@@ -233,6 +233,7 @@ export function ConvoList() {
 
       {showFileFinder && (
         <FileFinder
+          projectId={projectId!}
           files={fileList || []}
           loading={fileListLoading}
           touchedFiles={[]}
