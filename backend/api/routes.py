@@ -337,6 +337,8 @@ def create_api_router(*, check_token, resolve_project_file):
         except (asyncio.TimeoutError, OSError):
             pass
 
+        # Sort directories before files so path drilling is prioritized
+        completions.sort(key=lambda c: (0 if c.endswith("/") else 1, c))
         return {"completions": completions, "prefix": prefix, "from": word_start}
 
     @api.get("/projects/{project_id}/files")
