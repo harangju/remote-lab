@@ -298,7 +298,7 @@ def list_conversations(project_id: str) -> list[ConvoMeta]:
         meta = _hydrate_convo_meta(ConvoMeta(**json.loads(f.read_text())))
         if meta.project_id == project_id:
             results.append(meta)
-    results.sort(key=lambda m: m.last_event_at or m.updated_at, reverse=True)
+    results.sort(key=lambda m: m.created_at, reverse=True)
     return results
 
 
@@ -313,7 +313,7 @@ def list_recent_conversations(limit: int = 10) -> list[ConvoMeta]:
         meta = _hydrate_convo_meta(ConvoMeta(**json.loads(f.read_text())))
         if not meta.archived_at and meta.project_id in valid_project_ids and meta.project_id not in archived_projects:
             results.append(meta)
-    results.sort(key=lambda m: m.last_event_at or m.updated_at, reverse=True)
+    results.sort(key=lambda m: m.created_at, reverse=True)
     return results[:limit]
 
 

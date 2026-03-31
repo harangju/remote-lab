@@ -34,7 +34,7 @@ function ConvoRow({ convo, projectId, dimmed, onAction, actionIcon, actionLabel 
         style={{ flex: 1, minWidth: 0, color: colors.text, textDecoration: "none", display: "flex", flexDirection: "column", gap: 2 }}
       >
         <span style={{ fontSize: "0.88rem", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{convo.title || "Untitled"}</span>
-        <span style={{ fontSize: "0.75rem", color: colors.textMuted }}>{new Date(convo.updated_at).toLocaleDateString()}</span>
+        <span style={{ fontSize: "0.75rem", color: colors.textMuted }}>{new Date(convo.created_at).toLocaleDateString()}</span>
       </Link>
       <button
         onClick={onAction}
