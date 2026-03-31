@@ -8,14 +8,13 @@ import {
   TreePine, Waves, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { createConvo, createProject, listConvos, listProjects, listRecentConvos, updateConvo, updateProject, type ConvoMeta, type Project } from "../api";
+import { createConvo, createProject, listConvos, listProjects, updateConvo, updateProject, type ConvoMeta, type Project } from "../api";
 import { btnIcon, btnPrimary, colors, input as inputStyle, zIndex } from "../styles";
 import { createPortal } from "react-dom";
 
 const MOBILE_BREAKPOINT = 768;
 const RAIL_WIDTH = 300;
-const RECENT_LIMIT = 7;
-const POLL_INTERVAL_MS = 5000;
+const EXPANDED_STORAGE_KEY = "remote-lab:nav-expanded-projects";
 
 const iconBtnStyle: React.CSSProperties = {
   ...btnIcon,
@@ -123,24 +122,38 @@ function RailTooltip({ text, children }: { text: string; children: React.ReactEl
   );
 }
 
-function ConvoRow({ convo, projectId, active, onClickLink }: { convo: ConvoMeta; projectId: string; active: boolean; onClickLink: () => void }) {
+function ConvoRow({ convo, projectId, active, onClickLink, onArchive }: { convo: ConvoMeta; projectId: string; active: boolean; onClickLink: () => void; onArchive?: () => void }) {
   return (
-    <Link
-      to={`/${projectId}/${convo.id}`}
-      onClick={onClickLink}
-      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px 7px 12px", borderRadius: 8, background: active ? colors.bgSurfaceHover : "transparent", color: colors.text, textDecoration: "none" }}
-    >
-      <span style={{ width: 7, height: 7, minWidth: 7, borderRadius: 999, background: statusColor(convo.status), opacity: active ? 1 : 0.7 }} />
-      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-        <span style={{ fontSize: "0.82rem", fontWeight: active ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{convo.title || "Untitled"}</span>
-        <span style={{ fontSize: "0.7rem", color: colors.textMuted }}>{timeAgo(convo.last_event_at || convo.updated_at)}</span>
-      </span>
-    </Link>
+    <div className="convo-row" style={{ display: "flex", alignItems: "center", borderRadius: 8, background: active ? colors.bgSurfaceHover : "transparent" }}>
+      <Link
+        to={`/${projectId}/${convo.id}`}
+        onClick={onClickLink}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px 7px 12px", flex: 1, minWidth: 0, color: colors.text, textDecoration: "none" }}
+      >
+        <span style={{ width: 7, height: 7, minWidth: 7, borderRadius: 999, background: statusColor(convo.status), opacity: active ? 1 : 0.7 }} />
+        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+          <span style={{ fontSize: "0.82rem", fontWeight: active ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{convo.title || "Untitled"}</span>
+          <span style={{ fontSize: "0.7rem", color: colors.textMuted }}>{timeAgo(convo.last_event_at || convo.updated_at)}</span>
+        </span>
+      </Link>
+      {onArchive && (
+        <button
+          className="convo-archive nav-icon-btn"
+          onClick={onArchive}
+          aria-label="Archive chat"
+          title="Archive chat"
+          style={{ ...iconBtnStyle, width: 26, height: 26, minWidth: 26, minHeight: 26, color: colors.textMuted, marginRight: 6, transition: "opacity 100ms ease" }}
+        >
+          <Archive size={13} />
+        </button>
+      )}
+    </div>
   );
 }
 
-function ProjectCard({ project, expanded, active, activeConvId, dimmed, actions, onToggleExpand, onClickLink }: {
+function ProjectCard({ project, convos, expanded, active, activeConvId, dimmed, actions, onToggleExpand, onClickLink, onArchiveConvo }: {
   project: Project;
+  convos: ConvoMeta[] | null;
   expanded: boolean;
   active: boolean;
   activeConvId?: string;
@@ -148,52 +161,8 @@ function ProjectCard({ project, expanded, active, activeConvId, dimmed, actions,
   actions: React.ReactNode;
   onToggleExpand: () => void;
   onClickLink: () => void;
+  onArchiveConvo?: (convoId: string) => void;
 }) {
-  const [convos, setConvos] = useState<ConvoMeta[] | null>(null);
-  const loadedRef = useRef(false);
-
-  useEffect(() => {
-    if (!expanded || loadedRef.current) return;
-    loadedRef.current = true;
-    listConvos(project.id).then((c) => setConvos(c.filter((x) => !x.archived_at))).catch(() => setConvos([]));
-  }, [expanded, project.id]);
-
-  // Reload convos when this project is active (new chat may have been created)
-  useEffect(() => {
-    if (!active || !loadedRef.current) return;
-    listConvos(project.id).then((c) => setConvos(c.filter((x) => !x.archived_at))).catch(() => {});
-  }, [active, activeConvId, project.id]);
-
-  // Live status updates from the active chat's WebSocket
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { convoId, status } = (e as CustomEvent).detail;
-      setConvos((prev) => prev && prev.map((c) => c.id === convoId ? { ...c, status } : c));
-    };
-    window.addEventListener("convo-status-changed", handler);
-    return () => window.removeEventListener("convo-status-changed", handler);
-  }, []);
-
-  // Live title updates
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { convoId, title } = (e as CustomEvent).detail;
-      setConvos((prev) => prev && prev.map((c) => c.id === convoId ? { ...c, title } : c));
-    };
-    window.addEventListener("convo-title-changed", handler);
-    return () => window.removeEventListener("convo-title-changed", handler);
-  }, []);
-
-  // Remove archived convos from the list
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { convoId } = (e as CustomEvent).detail;
-      setConvos((prev) => prev && prev.filter((c) => c.id !== convoId));
-    };
-    window.addEventListener("convo-archived", handler);
-    return () => window.removeEventListener("convo-archived", handler);
-  }, []);
-
   return (
     <div style={{ border: `1px solid ${colors.border}`, borderRadius: 12, overflow: "hidden", background: active ? colors.bgSurface : colors.bg, opacity: dimmed ? 0.7 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px" }}>
@@ -210,8 +179,8 @@ function ProjectCard({ project, expanded, active, activeConvId, dimmed, actions,
             <div style={{ padding: "6px 8px", color: colors.textMuted, fontSize: "0.78rem" }}>Loading...</div>
           ) : convos.length === 0 ? (
             <div style={{ padding: "6px 8px", color: colors.textMuted, fontSize: "0.78rem" }}>No chats yet.</div>
-          ) : convos.slice(0, 8).map((convo) => (
-            <ConvoRow key={convo.id} convo={convo} projectId={project.id} active={activeConvId === convo.id} onClickLink={onClickLink} />
+          ) : convos.map((convo) => (
+            <ConvoRow key={convo.id} convo={convo} projectId={project.id} active={activeConvId === convo.id} onClickLink={onClickLink} onArchive={onArchiveConvo ? () => onArchiveConvo(convo.id) : undefined} />
           ))}
         </div>
       )}
@@ -225,8 +194,22 @@ function injectNavStyles() {
   if (stylesInjected) return;
   stylesInjected = true;
   const style = document.createElement("style");
-  style.textContent = `.nav-icon-btn:hover { background: ${colors.bgSurfaceHover} !important; } .recent-row .recent-archive { opacity: 0; } .recent-row:hover .recent-archive { opacity: 1; }`;
+  style.textContent = `.nav-icon-btn:hover { background: ${colors.bgSurfaceHover} !important; } .convo-row .convo-archive { opacity: 0; } .convo-row:hover .convo-archive { opacity: 1; }`;
   document.head.appendChild(style);
+}
+
+function loadExpandedProjects(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(EXPANDED_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveExpandedProjects(expanded: Record<string, boolean>) {
+  // Only persist the true entries
+  const toSave: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(expanded)) if (v) toSave[k] = true;
+  localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(toSave));
 }
 
 export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolean; onCloseMobile: () => void }) {
@@ -235,9 +218,9 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
   const { projectId, convId } = useParams<{ projectId?: string; convId?: string }>();
   const [projects, setProjects] = useState<Project[]>([]);
   const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
-  const [recentConvos, setRecentConvos] = useState<ConvoMeta[]>([]);
-  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
-  const [showProjects, setShowProjects] = useState(false);
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>(loadExpandedProjects);
+  const [projectConvos, setProjectConvos] = useState<Record<string, ConvoMeta[]>>({});
+  const [loadingConvos, setLoadingConvos] = useState<Record<string, boolean>>({});
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -247,7 +230,9 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
   const [projectInput, setProjectInput] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
   const [creatingConvoProjectId, setCreatingConvoProjectId] = useState<string | null>(null);
-  const initialProjectIdRef = useRef(projectId);
+
+  // Persist expanded state whenever it changes
+  useEffect(() => { saveExpandedProjects(expandedProjects); }, [expandedProjects]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -256,22 +241,35 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // Load convos for a project
+  const loadConvosFor = useCallback(async (pid: string) => {
+    setLoadingConvos((prev) => ({ ...prev, [pid]: true }));
+    try {
+      const c = await listConvos(pid);
+      setProjectConvos((prev) => ({ ...prev, [pid]: c.filter((x) => !x.archived_at) }));
+    } catch {
+      setProjectConvos((prev) => ({ ...prev, [pid]: [] }));
+    } finally {
+      setLoadingConvos((prev) => ({ ...prev, [pid]: false }));
+    }
+  }, []);
+
+  // Load convos when a project becomes expanded
+  useEffect(() => {
+    for (const [pid, isExpanded] of Object.entries(expandedProjects)) {
+      if (isExpanded && !(pid in projectConvos) && !loadingConvos[pid]) {
+        void loadConvosFor(pid);
+      }
+    }
+  }, [expandedProjects, projectConvos, loadingConvos, loadConvosFor]);
+
   const loadProjects = useCallback(async () => {
     try {
-      const [projectList, recent] = await Promise.all([listProjects(), listRecentConvos(RECENT_LIMIT)]);
+      const projectList = await listProjects();
       const active = projectList.filter((p) => !p.archived_at);
       const archived = projectList.filter((p) => !!p.archived_at);
       setProjects(active);
       setArchivedProjects(archived);
-      setRecentConvos(recent);
-      setExpandedProjects((prev) => {
-        const next = { ...prev };
-        const initId = initialProjectIdRef.current;
-        for (const p of active) {
-          if (next[p.id] === undefined) next[p.id] = p.id === initId;
-        }
-        return next;
-      });
       setError(null);
     } catch (e: any) {
       setError(e.message || "Failed to load navigator");
@@ -284,36 +282,65 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     void loadProjects();
   }, [loadProjects]);
 
-  // Live status updates from the active chat's WebSocket
+  // Live status updates
   useEffect(() => {
     const handler = (e: Event) => {
       const { convoId, status } = (e as CustomEvent).detail;
-      setRecentConvos((prev) => prev.map((c) => c.id === convoId ? { ...c, status } : c));
+      setProjectConvos((prev) => {
+        const next = { ...prev };
+        for (const [pid, convos] of Object.entries(next)) {
+          next[pid] = convos.map((c) => c.id === convoId ? { ...c, status } : c);
+        }
+        return next;
+      });
     };
     window.addEventListener("convo-status-changed", handler);
     return () => window.removeEventListener("convo-status-changed", handler);
   }, []);
 
-  // Live title updates from the active chat
+  // Live title updates
   useEffect(() => {
     const handler = (e: Event) => {
       const { convoId, title } = (e as CustomEvent).detail;
-      setRecentConvos((prev) => prev.map((c) => c.id === convoId ? { ...c, title } : c));
+      setProjectConvos((prev) => {
+        const next = { ...prev };
+        for (const [pid, convos] of Object.entries(next)) {
+          next[pid] = convos.map((c) => c.id === convoId ? { ...c, title } : c);
+        }
+        return next;
+      });
     };
     window.addEventListener("convo-title-changed", handler);
     return () => window.removeEventListener("convo-title-changed", handler);
   }, []);
 
-  // Light poll for recents to catch background status changes
+  // Remove archived convos
   useEffect(() => {
-    const id = setInterval(() => { listRecentConvos(RECENT_LIMIT).then(setRecentConvos).catch(() => {}); }, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    const handler = (e: Event) => {
+      const { convoId } = (e as CustomEvent).detail;
+      setProjectConvos((prev) => {
+        const next = { ...prev };
+        for (const [pid, convos] of Object.entries(next)) {
+          next[pid] = convos.filter((c) => c.id !== convoId);
+        }
+        return next;
+      });
+    };
+    window.addEventListener("convo-archived", handler);
+    return () => window.removeEventListener("convo-archived", handler);
   }, []);
 
+  // Auto-expand active project
   useEffect(() => {
     if (!projectId) return;
-    setExpandedProjects((prev) => ({ ...prev, [projectId]: true }));
+    setExpandedProjects((prev) => prev[projectId] ? prev : { ...prev, [projectId]: true });
   }, [projectId]);
+
+  // Reload convos for active project when conversation changes (new chat created, etc.)
+  useEffect(() => {
+    if (!projectId) return;
+    void loadConvosFor(projectId);
+  }, [projectId, convId, loadConvosFor]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -324,7 +351,9 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileOpen, onCloseMobile]);
 
-  const projectMap = useMemo(() => new Map([...projects, ...archivedProjects].map((p) => [p.id, p])), [projects, archivedProjects]);
+  const handleToggleExpand = useCallback((pid: string) => {
+    setExpandedProjects((prev) => ({ ...prev, [pid]: !prev[pid] }));
+  }, []);
 
   const handleCreateProject = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -355,7 +384,7 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     try {
       setCreatingConvoProjectId(targetProjectId);
       const convo = await createConvo(targetProjectId);
-      listRecentConvos(RECENT_LIMIT).then(setRecentConvos).catch(() => {});
+      void loadConvosFor(targetProjectId);
       navigate(`/${targetProjectId}/${convo.id}`);
       onCloseMobile();
     } catch (err: any) {
@@ -363,18 +392,23 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     } finally {
       setCreatingConvoProjectId(null);
     }
-  }, [navigate, onCloseMobile]);
+  }, [loadConvosFor, navigate, onCloseMobile]);
 
-  const handleArchiveConvo = useCallback(async (convoId: string) => {
+  const handleArchiveConvo = useCallback(async (convoProjectId: string, convoId: string) => {
     try {
       await updateConvo(convoId, { archived_at: new Date().toISOString() });
-      setRecentConvos((prev) => prev.filter((c) => c.id !== convoId));
+      setProjectConvos((prev) => {
+        const next = { ...prev };
+        for (const [pid, convos] of Object.entries(next)) {
+          next[pid] = convos.filter((c) => c.id !== convoId);
+        }
+        return next;
+      });
       window.dispatchEvent(new CustomEvent("convo-archived", { detail: { convoId } }));
-      // If we just archived the active chat, navigate away
       if (convId === convoId) {
-        const remaining = recentConvos.filter((c) => c.id !== convoId);
+        const remaining = projectConvos[convoProjectId]?.filter((c) => c.id !== convoId) || [];
         if (remaining.length > 0) {
-          navigate(`/${remaining[0].project_id}/${remaining[0].id}`);
+          navigate(`/${convoProjectId}/${remaining[0].id}`);
         } else if (projects.length > 0) {
           navigate(`/${projects[0].id}`);
         } else {
@@ -382,11 +416,11 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
         }
       }
     } catch {}
-  }, [convId, navigate, onCloseMobile, projects, recentConvos]);
+  }, [convId, navigate, projects, projectConvos]);
 
   const handleArchiveProject = useCallback(async (id: string) => {
     await updateProject(id, { archived_at: new Date().toISOString() });
-    setRecentConvos((prev) => prev.filter((c) => c.project_id !== id));
+    setProjectConvos((prev) => { const next = { ...prev }; delete next[id]; return next; });
     await loadProjects();
   }, [loadProjects]);
 
@@ -394,6 +428,20 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
     await updateProject(id, { archived_at: null });
     await loadProjects();
   }, [loadProjects]);
+
+  // Build collapsed rail items: walk expanded projects in order, emit their convos
+  const collapsedItems = useMemo(() => {
+    const items: { convo: ConvoMeta; project: Project }[] = [];
+    for (const project of projects) {
+      if (!expandedProjects[project.id]) continue;
+      const convos = projectConvos[project.id];
+      if (!convos) continue;
+      for (const convo of convos) {
+        items.push({ convo, project });
+      }
+    }
+    return items;
+  }, [projects, expandedProjects, projectConvos]);
 
   const rail = (
     <div style={{ width: isMobile ? "100%" : `${collapsed ? 52 : RAIL_WIDTH}px`, background: colors.bg, borderRight: isMobile ? "none" : `1px solid ${colors.border}`, display: "flex", flexDirection: "column", minWidth: 0, height: "100%", transition: "width 140ms ease" }}>
@@ -428,121 +476,79 @@ export function AppNavigator({ mobileOpen, onCloseMobile }: { mobileOpen: boolea
         )}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: collapsed && !isMobile ? "12px 6px" : "12px", display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: collapsed && !isMobile ? "12px 6px" : "12px", display: "flex", flexDirection: "column", gap: collapsed && !isMobile ? 4 : 18 }}>
         {error && (!collapsed || isMobile) && <div style={{ color: colors.textMuted, fontSize: "0.8rem" }}>{error}</div>}
         {!collapsed || isMobile ? (
           <>
-            <section style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, color: colors.textMuted }}>Recents</div>
-              {initialLoading ? (
-                <div style={{ color: colors.textMuted, fontSize: "0.8rem" }}>Loading...</div>
-              ) : recentConvos.length === 0 ? (
-                <div style={{ color: colors.textMuted, fontSize: "0.8rem" }}>No chats yet.</div>
-              ) : recentConvos.map((convo) => {
-                const active = convId === convo.id;
-                const project = projectMap.get(convo.project_id);
-                const Icon = project ? getProjectIcon(project.id) : null;
-                return (
-                  <div
-                    key={`recent-${convo.id}`}
-                    className="recent-row"
-                    style={{ display: "flex", alignItems: "center", borderRadius: 10, background: active ? colors.bgSurface : "transparent", border: `1px solid ${active ? colors.border : "transparent"}` }}
-                  >
-                    <Link
-                      to={`/${convo.project_id}/${convo.id}`}
-                      onClick={onCloseMobile}
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", flex: 1, minWidth: 0, color: colors.text, textDecoration: "none" }}
-                    >
-                      <span style={{ width: 7, height: 7, minWidth: 7, borderRadius: 999, background: statusColor(convo.status), opacity: active ? 1 : 0.7 }} />
-                      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-                        <span style={{ fontSize: "0.84rem", fontWeight: active ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{convo.title || "Untitled"}</span>
-                        <span style={{ fontSize: "0.72rem", color: colors.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                          {Icon && <Icon size={10} />} {project?.name || "Project"} · {timeAgo(convo.last_event_at || convo.updated_at)}
-                        </span>
-                      </span>
-                    </Link>
+            {initialLoading ? (
+              <div style={{ color: colors.textMuted, fontSize: "0.8rem" }}>Loading...</div>
+            ) : (
+              <>
+                <section style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {projects.map((project) => (
+                    <ProjectCard
+                      key={project.id}
+                      project={project}
+                      convos={projectConvos[project.id] ?? (loadingConvos[project.id] ? null : [])}
+                      expanded={!!expandedProjects[project.id]}
+                      active={project.id === projectId}
+                      activeConvId={convId}
+                      onToggleExpand={() => handleToggleExpand(project.id)}
+                      onClickLink={onCloseMobile}
+                      onArchiveConvo={(cid) => { void handleArchiveConvo(project.id, cid); }}
+                      actions={<>
+                        <IconButton onClick={() => { void handleCreateConvo(project.id); }} disabled={creatingConvoProjectId === project.id} label="New chat" style={{ opacity: creatingConvoProjectId === project.id ? 0.6 : 1 }}>
+                          <MessageSquarePlus size={14} />
+                        </IconButton>
+                        <IconButton onClick={() => { void handleArchiveProject(project.id); }} label="Archive project" title="Archive project">
+                          <Archive size={14} />
+                        </IconButton>
+                      </>}
+                    />
+                  ))}
+                </section>
+
+                {archivedProjects.length > 0 && (
+                  <section style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <button
-                      className="recent-archive nav-icon-btn"
-                      onClick={() => { void handleArchiveConvo(convo.id); }}
-                      aria-label="Archive chat"
-                      title="Archive chat"
-                      style={{ ...iconBtnStyle, width: 26, height: 26, minWidth: 26, minHeight: 26, color: colors.textMuted, marginRight: 6, transition: "opacity 100ms ease" }}
+                      onClick={() => setShowArchivedProjects((prev) => !prev)}
+                      style={{ background: "none", border: "none", padding: 0, color: colors.textMuted, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
                     >
-                      <Archive size={13} />
+                      {showArchivedProjects ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      Archived ({archivedProjects.length})
                     </button>
-                  </div>
-                );
-              })}
-            </section>
-
-            <section style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <button
-                onClick={() => setShowProjects((prev) => !prev)}
-                style={{ background: "none", border: "none", padding: 0, color: colors.textMuted, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
-              >
-                {showProjects ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                Projects ({projects.length})
-              </button>
-              {showProjects && projects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  expanded={!!expandedProjects[project.id]}
-                  active={project.id === projectId}
-                  activeConvId={convId}
-                  onToggleExpand={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
-                  onClickLink={onCloseMobile}
-                  actions={<>
-                    <IconButton onClick={() => { void handleCreateConvo(project.id); }} disabled={creatingConvoProjectId === project.id} label="New chat" style={{ opacity: creatingConvoProjectId === project.id ? 0.6 : 1 }}>
-                      <MessageSquarePlus size={14} />
-                    </IconButton>
-                    <IconButton onClick={() => { void handleArchiveProject(project.id); }} label="Archive project" title="Archive project">
-                      <Archive size={14} />
-                    </IconButton>
-                  </>}
-                />
-              ))}
-            </section>
-
-            {archivedProjects.length > 0 && (
-              <section style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <button
-                  onClick={() => setShowArchivedProjects((prev) => !prev)}
-                  style={{ background: "none", border: "none", padding: 0, color: colors.textMuted, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
-                >
-                  {showArchivedProjects ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  Archived ({archivedProjects.length})
-                </button>
-                {showArchivedProjects && archivedProjects.map((project) => (
-                  <ProjectCard
-                    key={project.id}
-                    project={project}
-                    expanded={!!expandedProjects[project.id]}
-                    active={false}
-                    activeConvId={convId}
-                    dimmed
-                    onToggleExpand={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
-                    onClickLink={onCloseMobile}
-                    actions={
-                      <IconButton onClick={() => { void handleRestoreProject(project.id); }} label="Restore project" title="Restore project">
-                        <ArchiveRestore size={14} />
-                      </IconButton>
-                    }
-                  />
-                ))}
-              </section>
+                    {showArchivedProjects && archivedProjects.map((project) => (
+                      <ProjectCard
+                        key={project.id}
+                        project={project}
+                        convos={projectConvos[project.id] ?? (loadingConvos[project.id] ? null : [])}
+                        expanded={!!expandedProjects[project.id]}
+                        active={false}
+                        activeConvId={convId}
+                        dimmed
+                        onToggleExpand={() => handleToggleExpand(project.id)}
+                        onClickLink={onCloseMobile}
+                        actions={
+                          <IconButton onClick={() => { void handleRestoreProject(project.id); }} label="Restore project" title="Restore project">
+                            <ArchiveRestore size={14} />
+                          </IconButton>
+                        }
+                      />
+                    ))}
+                  </section>
+                )}
+              </>
             )}
           </>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
-            {recentConvos.map((convo) => {
+            {collapsedItems.map(({ convo, project }) => {
               const active = convId === convo.id;
-              const project = projectMap.get(convo.project_id);
-              const Icon = project ? getProjectIcon(project.id) : Sparkles;
+              const Icon = getProjectIcon(project.id);
               return (
                 <RailTooltip key={`c-${convo.id}`} text={convo.title || "Untitled"}>
                   <Link
-                    to={`/${convo.project_id}/${convo.id}`}
+                    to={`/${project.id}/${convo.id}`}
                     onClick={onCloseMobile}
                     className="nav-icon-btn"
                     style={{ width: 40, height: 44, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, background: active ? colors.bgSurface : "transparent", color: active ? colors.text : colors.textMuted, textDecoration: "none", position: "relative" }}
