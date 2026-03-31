@@ -155,11 +155,14 @@ export function ChatComposer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
+  const prevFocusKeyRef = useRef(focusKey);
   useEffect(() => {
     if (focusKey === undefined || focusKey === null || busy || voiceUiActive) return;
+    const focusKeyChanged = prevFocusKeyRef.current !== focusKey;
+    prevFocusKeyRef.current = focusKey;
     requestAnimationFrame(() => {
       inputRef.current?.focus();
-      inputRef.current?.select();
+      if (focusKeyChanged) inputRef.current?.select();
     });
   }, [busy, focusKey, voiceUiActive]);
 
