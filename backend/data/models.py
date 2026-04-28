@@ -68,6 +68,7 @@ class ConvoUpdate(BaseModel):
     archived_at: Optional[str] = None
     autonomous_tools_enabled: Optional[bool] = None
     model: Optional[str] = None
+    effort: Optional[str] = None
 
 
 class ConvoMeta(BaseModel):
@@ -81,6 +82,7 @@ class ConvoMeta(BaseModel):
     archived_at: Optional[str] = None
     autonomous_tools_enabled: bool = False
     model: Optional[str] = None
+    effort: Optional[str] = None
 
 
 class ConvoDetail(ConvoMeta):

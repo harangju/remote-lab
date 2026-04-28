@@ -20,8 +20,14 @@ MODEL_CONTEXT_LIMITS: dict[str, int] = {
     "openai:gpt-5.4-pro": 1_050_000,
     "openai:gpt-5.4-mini": 400_000,
     "openai:gpt-5.4-nano": 400_000,
+    "openai:gpt-5.5": 1_050_000,
     "openai:gpt-5-nano": 128_000,
     "google-gla:gemini-2.5-flash": 1_000_000,
+}
+
+MODEL_EFFORT_OPTIONS: dict[str, list[str]] = {
+    "openai:gpt-5.4": ["none", "low", "medium", "high", "xhigh"],
+    "openai:gpt-5.5": ["none", "low", "medium", "high", "xhigh"],
 }
 # Budget threshold — compact when usage exceeds this fraction.
 CONTEXT_BUDGET_FRACTION = 0.8
@@ -56,6 +62,7 @@ SYSTEM_PROMPT = _load_system_prompt()
 _PROVIDERS = [
     ("ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-6"),
     ("ANTHROPIC_API_KEY", "anthropic:claude-opus-4-6"),
+    ("OPENAI_API_KEY", "openai:gpt-5.5"),
     ("OPENAI_API_KEY", "openai:gpt-5.4"),
     ("OPENAI_API_KEY", "openai:gpt-5.4-mini"),
     ("OPENAI_API_KEY", "openai:gpt-5.4-pro"),

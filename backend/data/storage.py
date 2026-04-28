@@ -456,6 +456,17 @@ def update_conversation_model(convo_id: str, model_id: str | None) -> ConvoMeta 
     return meta
 
 
+def update_conversation_effort(convo_id: str, effort: str | None) -> ConvoMeta | None:
+    meta = _read_meta(convo_id)
+    if meta is None:
+        return None
+    meta.effort = effort
+    meta.updated_at = _now()
+    _write_meta(meta)
+    touch_project(meta.project_id)
+    return meta
+
+
 # ---------------------------------------------------------------------------
 # Message I/O
 # ---------------------------------------------------------------------------

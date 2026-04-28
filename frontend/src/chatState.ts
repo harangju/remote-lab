@@ -39,6 +39,7 @@ export interface MetaInfo {
   context_tokens: number;
   context_limit: number;
   model?: string | null;
+  effort?: string | null;
 }
 
 export function blockIdentity(block: StreamBlock): string {
@@ -203,7 +204,8 @@ export function buildDisplayMessages(detail: ConvoDetail, agentList: AgentConfig
       context_tokens: detail.context_tokens,
       context_limit: detail.context_limit,
       model: detail.model,
-    } : (detail.model ? { turns: 0, context_tokens: 0, context_limit: 0, model: detail.model } : null),
+      effort: detail.effort,
+    } : ((detail.model || detail.effort) ? { turns: 0, context_tokens: 0, context_limit: 0, model: detail.model, effort: detail.effort } : null),
     title: detail.title || "Untitled",
     autonomousToolsEnabled: !!detail.autonomous_tools_enabled,
   };

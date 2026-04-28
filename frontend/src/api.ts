@@ -22,6 +22,7 @@ export interface ConvoMeta {
   autonomous_tools_enabled?: boolean;
   last_event_at?: string;
   model?: string | null;
+  effort?: string | null;
 }
 
 export interface ConvoDetail extends ConvoMeta {
@@ -157,7 +158,7 @@ export function getConvo(convoId: string, opts?: { before?: number; limit?: numb
   return request(`/convos/${convoId}${query ? `?${query}` : ""}`);
 }
 
-export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null; autonomous_tools_enabled?: boolean; model?: string | null }): Promise<ConvoMeta> {
+export function updateConvo(convoId: string, body: { title?: string; archived_at?: string | null; autonomous_tools_enabled?: boolean; model?: string | null; effort?: string | null }): Promise<ConvoMeta> {
   return request(`/convos/${convoId}`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -213,7 +214,7 @@ export async function uploadFiles(projectId: string, files: File[]): Promise<Att
   return res.json();
 }
 
-export function listModels(): Promise<{ models: string[]; active: string; context_limits: Record<string, number> }> {
+export function listModels(): Promise<{ models: string[]; active: string; context_limits: Record<string, number>; effort_options?: Record<string, string[]> }> {
   return request("/models");
 }
 

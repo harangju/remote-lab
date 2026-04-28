@@ -127,6 +127,8 @@ def create_api_router(*, check_token, resolve_project_file):
             meta = storage.update_conversation_autonomy(convo_id, bool(body.autonomous_tools_enabled))
         if "model" in payload:
             meta = storage.update_conversation_model(convo_id, body.model)
+        if "effort" in payload:
+            meta = storage.update_conversation_effort(convo_id, body.effort)
         if not meta:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return meta
@@ -138,8 +140,8 @@ def create_api_router(*, check_token, resolve_project_file):
 
     @api.get("/models")
     async def api_list_models():
-        from backend.agent.agents import MODEL_CONTEXT_LIMITS
-        return {"models": _available, "active": active_model, "context_limits": MODEL_CONTEXT_LIMITS}
+        from backend.agent.agents import MODEL_CONTEXT_LIMITS, MODEL_EFFORT_OPTIONS
+        return {"models": _available, "active": active_model, "context_limits": MODEL_CONTEXT_LIMITS, "effort_options": MODEL_EFFORT_OPTIONS}
 
     @api.get("/agents")
     async def api_list_global_agents():

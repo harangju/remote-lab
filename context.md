@@ -30,6 +30,8 @@
 - Chat/file panel width persists across reloads.
 - OpenAI `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, and `gpt-5.4-nano` are tracked in the model limit table; GPT-5.4/pro use a 272K soft compaction threshold for cost control, while keeping the 1.05M real context window.
 - Chat header model pill now reads from `agent-start.agent_model`; previously the frontend expected `activeAgent.model` but the websocket event never sent it, so the label fell back to `"model"`.
+- Chat header selector is being expanded into a single structured control for both model and effort, with the closed pill showing both values together.
+- Effort options are now model-specific in the UI, and `/api/models` exposes per-model effort choices; `gpt-5.4` and `gpt-5.5` are intended to expose `none/low/medium/high/xhigh`.
 
 ## Current implementation state
 - Added `AppShell` and `AppNavigator` as the first pass at the unified shell.

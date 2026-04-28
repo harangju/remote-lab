@@ -47,7 +47,20 @@ function ContextDonut({ tokens, limit }: { tokens: number; limit: number }) {
   );
 }
 
+function formatModelLabel(model: string | null | undefined) {
+  if (!model) return "";
+  return model.includes(":") ? model.split(":").slice(1).join(":") : model;
+}
+
+function formatEffortLabel(effort: string | null | undefined) {
+  if (!effort) return "Medium";
+  if (effort === "xhigh") return "X-High";
+  if (effort === "none") return "None";
+  return effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
 const CHAT_HEADER_MAX_WIDTH = "72rem";
+const DEFAULT_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 const PANEL_MIN_WIDTH = 320;
 const PANEL_MAX_WIDTH_RATIO = 0.75;
 const PANEL_DEFAULT_WIDTH_RATIO = 0.36;
@@ -65,6 +78,7 @@ export function Chat() {
   const [projectConvos, setProjectConvos] = useState<ConvoMeta[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelContextLimits, setModelContextLimits] = useState<Record<string, number>>({});
+  const [modelEffortOptions, setModelEffortOptions] = useState<Record<string, string[]>>({});
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const panel = usePanel(projectId);
@@ -245,6 +259,7 @@ export function Chat() {
     listModels().then((res) => {
       setAvailableModels(res.models);
       setModelContextLimits(res.context_limits || {});
+      setModelEffortOptions(res.effort_options || {});
     }).catch(() => {});
   }, []);
 
@@ -269,15 +284,27 @@ export function Chat() {
 
   const handleModelChange = useCallback(async (modelId: string) => {
     if (!convId) return;
-    setModelDropdownOpen(false);
     const newLimit = modelContextLimits[modelId] || 128_000;
-    setMeta((prev) => prev ? { ...prev, model: modelId, context_limit: newLimit } : prev);
+    const nextEfforts = modelEffortOptions[modelId] || [...DEFAULT_EFFORT_OPTIONS];
+    const nextEffort = nextEfforts.includes("medium") ? "medium" : (nextEfforts[0] || "medium");
+    setMeta((prev) => prev ? { ...prev, model: modelId, context_limit: newLimit, effort: nextEffort } : prev);
     try {
-      await updateConvo(convId, { model: modelId });
+      await updateConvo(convId, { model: modelId, effort: nextEffort });
     } catch (e: any) {
       setError(e.message || "Failed to update model");
     }
-  }, [convId, setMeta, setError, modelContextLimits]);
+  }, [convId, setMeta, setError, modelContextLimits, modelEffortOptions]);
+
+  const handleEffortChange = useCallback(async (effort: string) => {
+    if (!convId) return;
+    setModelDropdownOpen(false);
+    setMeta((prev) => prev ? { ...prev, effort } : { turns: 0, context_tokens: 0, context_limit: 0, effort });
+    try {
+      await updateConvo(convId, { effort });
+    } catch (e: any) {
+      setError(e.message || "Failed to update effort");
+    }
+  }, [convId, setMeta, setError]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -389,8 +416,18 @@ export function Chat() {
   }, [panel.file]);
 
   const isDesktop = typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches;
-  const rawModel = meta?.model || activeAgent?.model || null;
-  const activeModelLabel = rawModel?.includes(":") ? rawModel.split(":").slice(1).join(":") : rawModel;
+  const rawModel = meta?.model || activeAgent?.model || availableModels[0] || null;
+  const activeModelLabel = formatModelLabel(rawModel) || "Model";
+  const availableEfforts = useMemo(() => {
+    if (!rawModel) return [...DEFAULT_EFFORT_OPTIONS];
+    if (modelEffortOptions[rawModel]?.length) return modelEffortOptions[rawModel];
+    if (rawModel === "openai:gpt-5.4" || rawModel === "openai:gpt-5.5") {
+      return ["none", "low", "medium", "high", "xhigh"];
+    }
+    return [...DEFAULT_EFFORT_OPTIONS];
+  }, [rawModel, modelEffortOptions]);
+  const selectedEffort = meta?.effort || (availableEfforts.includes("medium") ? "medium" : availableEfforts[0] || "medium");
+  const activeEffortLabel = formatEffortLabel(selectedEffort);
   const filePath = panel.file?.path;
 
   return (
@@ -429,7 +466,7 @@ export function Chat() {
               </div>
               <span data-tooltip={connected ? "Connected" : "Disconnected"} style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? colors.success : colors.textMuted, display: "inline-block" }} />
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-                {isDesktop && activeModelLabel && (
+                {isDesktop && (
                   <div ref={modelDropdownRef} style={{ position: "relative", display: "inline-flex" }}>
                     <button
                       onClick={() => setModelDropdownOpen((v) => !v)}
@@ -437,18 +474,19 @@ export function Chat() {
                       onMouseLeave={headerHoverOut}
                       style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "2px 8px", borderRadius: 999, border: `1px solid ${colors.border}`, background: colors.bgSurface, color: colors.textMuted, fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", transition: `background ${transition.fast}` }}
                     >
-                      <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeModelLabel}</span>
+                      <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeModelLabel} · {activeEffortLabel}</span>
                     </button>
                     {modelDropdownOpen && availableModels.length > 0 && (
-                      <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "4px 0", zIndex: 100, minWidth: 200, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+                      <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: "4px 0", zIndex: 100, minWidth: 220, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+                        <div style={{ padding: "3px 10px 4px", fontSize: "0.64rem", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: colors.textMuted }}>Model</div>
                         {availableModels.map((m) => {
-                          const label = m.includes(":") ? m.split(":").slice(1).join(":") : m;
+                          const label = formatModelLabel(m);
                           const isActive = m === rawModel;
                           return (
                             <button
                               key={m}
                               onClick={() => handleModelChange(m)}
-                              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 12px", background: isActive ? colors.bgSurfaceHover : "transparent", border: "none", color: isActive ? colors.text : colors.textMuted, fontSize: "0.8rem", cursor: "pointer", fontWeight: isActive ? 600 : 400 }}
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "5px 10px", background: isActive ? colors.bgSurfaceHover : "transparent", border: "none", color: isActive ? colors.text : colors.textMuted, fontSize: "0.76rem", cursor: "pointer", fontWeight: isActive ? 600 : 400, lineHeight: 1.2 }}
                               onMouseEnter={(e) => {
                                 e.currentTarget.style.background = colors.bgSurfaceHover;
                               }}
@@ -460,6 +498,33 @@ export function Chat() {
                             </button>
                           );
                         })}
+                        <div style={{ height: 1, background: colors.border, margin: "4px 0" }} />
+                        <div style={{ padding: "3px 10px 4px", fontSize: "0.64rem", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: colors.textMuted }}>Effort</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "4px", padding: "0 10px 2px" }}>
+                          {availableEfforts.map((effort) => {
+                            const isActive = selectedEffort === effort;
+                            return (
+                              <button
+                                key={effort}
+                                onClick={() => handleEffortChange(effort)}
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 6px",
+                                  borderRadius: 999,
+                                  border: `1px solid ${isActive ? colors.accent : colors.border}`,
+                                  background: isActive ? colors.bgSurfaceHover : colors.bgSurface,
+                                  color: isActive ? colors.text : colors.textMuted,
+                                  fontSize: "0.7rem",
+                                  fontWeight: isActive ? 600 : 500,
+                                  lineHeight: 1.1,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {formatEffortLabel(effort)}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
